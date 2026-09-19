@@ -9,11 +9,12 @@ import type {
   Turn,
 } from "../src/index";
 
+const loginPatch = "diff --git a/src/auth/login.ts b/src/auth/login.ts\n+const limit = 5;";
+
 const turn: Turn = {
   id: "msg_assistant_1",
   task: "Add rate limiting to the login endpoint.",
-  files: ["src/auth/login.ts"],
-  diff: "diff --git a/src/auth/login.ts b/src/auth/login.ts\n+const limit = 5;",
+  files: [{ path: "src/auth/login.ts", patch: loginPatch }],
 };
 
 const rule: ParsedRule = {
@@ -26,8 +27,8 @@ const rule: ParsedRule = {
 };
 
 const evidence: RuleEvidence = {
-  files: turn.files,
-  diff: turn.diff,
+  files: turn.files.map((file) => file.path),
+  diff: loginPatch,
 };
 
 const gateConfig: GateConfig = {
@@ -66,9 +67,9 @@ function describeOutcome(result: ReviewResult): string {
 
 describe("core domain contracts", () => {
   test("constructs a representative evaluated turn", () => {
-    expect(turn.files).toEqual(["src/auth/login.ts"]);
+    expect(turn.files).toEqual([{ path: "src/auth/login.ts", patch: loginPatch }]);
     expect(turn.task).toBe("Add rate limiting to the login endpoint.");
-    expect(turn.diff).toContain("diff --git");
+    expect(turn.files[0]?.patch).toContain("diff --git");
   });
 
   test("constructs a rule whose allowed section stays in the same judgment", () => {
@@ -129,6 +130,6 @@ describe("core domain contracts", () => {
 
     expect(request.rule.allowed).toBe(rule.allowed);
     expect("allowed" in request.rule).toBe(true);
-    expect(request.change.diff).toBe(turn.diff);
+    expect(request.change.diff).toBe(evidence.diff);
   });
 });

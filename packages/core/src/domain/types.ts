@@ -1,12 +1,21 @@
 /**
- * A completed assistant turn: its parent task and the host-attributed patch. Empty
- * `diff`/`files` mean no attributed patch; never substitute the repository diff.
+ * One changed file attributed to a turn: its path and its complete textual patch.
+ * Patches travel per file so scope selection never needs to split a global diff.
+ */
+export interface TurnFile {
+  readonly path: string;
+  readonly patch: string;
+}
+
+/**
+ * A completed assistant turn: its parent task and the host-attributed per-file
+ * patches. No attributed files, or only empty patches, mean no attributed patch;
+ * never substitute the repository diff.
  */
 export interface Turn {
   readonly id: string;
   readonly task: string;
-  readonly files: readonly string[];
-  readonly diff: string;
+  readonly files: readonly TurnFile[];
 }
 
 export type RuleSeverity = "error" | "warning";
@@ -25,8 +34,8 @@ export interface ParsedRule {
 }
 
 /**
- * Evidence for one rule: changed files within scope plus the complete, untruncated
- * attributed diff.
+ * Evidence for one rule: the paths applicable to its scope plus the complete,
+ * untruncated diff assembled only from those files' patches.
  */
 export interface RuleEvidence {
   readonly files: readonly string[];
