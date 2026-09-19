@@ -61,7 +61,10 @@ technology commitment, or non-obvious trade-off, propose an ADR with it.
 
 Write small, readable TypeScript modules. Prefer strong types, explicit names, and
 whitespace between logical steps over comments. TSDoc is for public contracts and
-non-obvious invariants, not for narrating implementation.
+non-obvious invariants, not for narrating implementation. Centralize a feature's
+interfaces, unions, and shared type aliases in a focused `types.ts` module; keep a
+type beside implementation only when it is truly private and extraction would make
+the module less readable.
 
 ## License
 

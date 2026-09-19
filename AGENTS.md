@@ -69,6 +69,10 @@ the current repository diff when host attribution fails.
   dense expressions.
 - Avoid implementation comments. Write TSDoc only for exported contracts and
   non-obvious invariants that types and names cannot express.
+- Keep type declarations in focused `types.ts` modules for each feature/domain area
+  instead of scattering interfaces and unions through implementation files. Co-locate
+  a type only when it is private to one very small module and extracting it would
+  make the code harder to follow.
 - Keep I/O at the adapter boundary. Pass dependencies explicitly into use cases.
 - Prefer exhaustive handling for outcome/state unions.
 
