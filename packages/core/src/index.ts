@@ -28,3 +28,11 @@ export type {
   PolicySource,
   PolicySourcePort,
 } from "./ports/types";
+export type {
+  InvalidRuleReason,
+  RuleParseErrorCode,
+  RuleParseFailure,
+  RuleParseResult,
+  RuleParseSuccess,
+} from "./rules/types";
+export { parseRule } from "./rules/parse-rule";

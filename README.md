@@ -2,6 +2,8 @@
 
 > **Semantic policy engine for coding agents.**
 
+![JevGuard: semantic policy engine for coding agents](./27b864b2-3f64-4211-99dd-26764c549d03.png)
+
 JevGuard checks the code an agent just changed against the policies that matter in
 your repository. It uses Jev for a narrow semantic judgment, then applies your
 local deterministic gate to return `PASS`, `WARN`, or `FAIL`.
