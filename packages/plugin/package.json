@@ -3,6 +3,9 @@
   "version": "0.0.0",
   "type": "module",
   "types": "./src/index.ts",
+  "bin": {
+    "jevguard": "./src/cli/main.ts"
+  },
   "exports": {
     ".": "./src/index.ts"
   },

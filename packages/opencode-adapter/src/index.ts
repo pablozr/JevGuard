@@ -19,3 +19,83 @@ export type {
   TurnAttribution,
   TurnDeduplicator,
 } from "./attribution";
+export {
+  API_KEY_ENVIRONMENT_VARIABLE,
+  CREDENTIAL_ACCOUNT,
+  CREDENTIAL_SERVICE,
+  createCredentialProvider,
+  createKeyringCredentialStore,
+  createProcessEnvironment,
+  createSecretPrompt,
+  login,
+} from "./credentials";
+export type {
+  CredentialEnvironment,
+  CredentialProviderDependencies,
+  CredentialStore,
+  CredentialStoreDeleteResult,
+  CredentialStoreReadResult,
+  CredentialStoreWriteResult,
+  LoginFailureReason,
+  LoginInput,
+  LoginOutcome,
+  SecretPrompt,
+  SecretPromptFailureReason,
+  SecretPromptResult,
+} from "./credentials";
+export {
+  buildTypeSafeClientConfig,
+  createJevTransport,
+  createTypeSafeJevTransport,
+  createTypeSafeSystemOneClient,
+  JEV_MODEL,
+} from "./jev";
+export type {
+  JevTransport,
+  JevTransportChange,
+  JevTransportDependencies,
+  JevTransportRule,
+  JevTransportState,
+  TypeSafeClientConfiguration,
+  TypeSafeNoulQuestion,
+  TypeSafeQuestions,
+  TypeSafeSystemOneClient,
+  TypeSafeSystemOneRequest,
+} from "./jev";
+export { createNodePolicyFileSystem, createPolicyFileLoader, parsePolicyConfig } from "./policy";
+export type {
+  ConfigParseFailureReason,
+  ConfigParseResult,
+  PolicyFileSystem,
+  PolicyLoader,
+  PolicyLoaderDependencies,
+  PolicyLoadFailureReason,
+  PolicyLoadResult,
+} from "./policy";
+export {
+  createOpenCodeLogSink,
+  createOpenCodePresentationClient,
+  createOpenCodeToastSink,
+  createReviewPresenter,
+  formatRuleLabel,
+  logLevelFor,
+  reviewLogMessage,
+  toReviewLogEntry,
+  toReviewToast,
+} from "./presentation";
+export type {
+  DeliveryStatus,
+  OpenCodeLogInput,
+  OpenCodeLogResult,
+  OpenCodePresentationClient,
+  OpenCodeToastInput,
+  OpenCodeToastResult,
+  PresentationDelivery,
+  PresentationPorts,
+  ReviewLogEntry,
+  ReviewPresenter,
+  ReviewToast,
+  StructuredLogSink,
+  ToastSink,
+  ToastVariant,
+} from "./presentation";

@@ -30,6 +30,12 @@ export type {
   PolicySource,
   PolicySourcePort,
 } from "./ports/types";
+export type {
+  CredentialProvider,
+  CredentialResolution,
+  CredentialSource,
+  CredentialUnavailableReason,
+} from "./credentials/types";
 export type { EvaluateRuleDependencies, EvaluateRuleInput } from "./evaluation/types";
 export { buildJevRequest } from "./evaluation/build-request";
 export { buildReviewContext } from "./evaluation/build-context";

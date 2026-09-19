@@ -11,9 +11,14 @@
     "format": "biome format --write .",
     "lint": "biome lint .",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --root ../.. packages/opencode-adapter"
   },
   "dependencies": {
-    "@jevguard/core": "workspace:*"
+    "@inquirer/password": "^5.2.2",
+    "@jevguard/core": "workspace:*",
+    "@napi-rs/keyring": "2.1.0",
+    "@opencode-ai/sdk": "1.18.31",
+    "@typesafe-ai/sdk": "0.6.0",
+    "yaml": "2.9.1"
   }
 }
