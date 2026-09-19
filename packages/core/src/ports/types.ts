@@ -5,6 +5,16 @@ export interface JevRuleCriteria {
   readonly allowed?: string;
 }
 
+/**
+ * The single Noul question for one rule. `instructions` states the judgment in
+ * English; `criteria` carries the rule and its normative exception.
+ */
+export interface JevNoulQuestion {
+  readonly type: "noul";
+  readonly instructions: string;
+  readonly criteria: JevRuleCriteria;
+}
+
 export interface JevChange {
   readonly files: readonly string[];
   readonly diff: string;
@@ -16,7 +26,7 @@ export interface JevChange {
  */
 export interface JevRequest {
   readonly task: string;
-  readonly rule: JevRuleCriteria;
+  readonly question: JevNoulQuestion;
   readonly change: JevChange;
 }
 

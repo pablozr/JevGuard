@@ -116,20 +116,25 @@ describe("core domain contracts", () => {
     expect(verdicts.filter((outcome) => operational.includes(outcome))).toEqual([]);
   });
 
-  test("builds one Jev request per rule with allowed inside the same criteria", () => {
+  test("builds one Noul request per rule with allowed inside the same criteria", () => {
     const request: JevRequest = {
       task: turn.task,
-      rule: {
-        id: rule.id,
-        description: rule.description,
-        violation: rule.violation,
-        ...(rule.allowed === null ? {} : { allowed: rule.allowed }),
+      question: {
+        type: "noul",
+        instructions: "Return the probability that the change violates the rule.",
+        criteria: {
+          id: rule.id,
+          description: rule.description,
+          violation: rule.violation,
+          ...(rule.allowed === null ? {} : { allowed: rule.allowed }),
+        },
       },
       change: { files: evidence.files, diff: evidence.diff },
     };
 
-    expect(request.rule.allowed).toBe(rule.allowed);
-    expect("allowed" in request.rule).toBe(true);
+    expect(request.question.type).toBe("noul");
+    expect(request.question.criteria.allowed).toBe(rule.allowed);
+    expect("allowed" in request.question.criteria).toBe(true);
     expect(request.change.diff).toBe(evidence.diff);
   });
 });

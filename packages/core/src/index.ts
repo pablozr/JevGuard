@@ -24,11 +24,16 @@ export type {
   JevEvaluationResult,
   JevFailureReason,
   JevNoul,
+  JevNoulQuestion,
   JevRequest,
   JevRuleCriteria,
   PolicySource,
   PolicySourcePort,
 } from "./ports/types";
+export type { EvaluateRuleDependencies, EvaluateRuleInput } from "./evaluation/types";
+export { buildJevRequest } from "./evaluation/build-request";
+export { buildReviewContext } from "./evaluation/build-context";
+export { evaluateRule } from "./evaluation/evaluate-rule";
 export type {
   InvalidRuleReason,
   RuleParseErrorCode,
