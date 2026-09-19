@@ -1,0 +1,27 @@
+# Dependencies and package-manager artifacts
+node_modules/
+.pnpm-store/
+
+# Build output, coverage, and tooling caches
+dist/
+coverage/
+.turbo/
+.cache/
+*.tsbuildinfo
+
+# Environment files and local secrets
+.env
+.env.*
+!.env.example
+
+# Local planning and product-design workspace
+/SPEC.md
+/CONTEXT.md
+/docs/adr/
+/docs/tasks/
+
+# Editor and operating-system files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
