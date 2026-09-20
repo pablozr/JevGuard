@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { parseRule } from "../src/index";
+import { parseRule, parseRules } from "../src/index";
 import type { ParsedRule, RuleParseErrorCode, RuleParseResult } from "../src/index";
 
 const validRule = [
@@ -41,6 +41,22 @@ function expectInvalid(text: string, code: RuleParseErrorCode): void {
     expect(result.reason).toBe("INVALID_RULE");
     expect(result.code).toBe(code);
   }
+}
+
+function ruleBlock(id: string, description: string, violation: string): string {
+  return [
+    `## ${id}`,
+    "",
+    "severity: error",
+    "",
+    "### Rule",
+    "",
+    description,
+    "",
+    "### Violation",
+    "",
+    violation,
+  ].join("\n");
 }
 
 describe("parseRule", () => {
@@ -257,5 +273,122 @@ describe("parseRule", () => {
     ].join("\n");
 
     expectInvalid(text, "ALLOWED_EQUALS_VIOLATION");
+  });
+
+  test("keeps the V0.1 failure shape without a ruleId", () => {
+    const text = ["## R-1", "### Rule", "A rule.", "### Violation", "A violation."].join("\n");
+
+    const result: RuleParseResult = parseRule(text);
+
+    expect(result).toEqual({ status: "INVALID", reason: "INVALID_RULE", code: "MISSING_SEVERITY" });
+    expect("ruleId" in result).toBe(false);
+  });
+});
+
+describe("parseRules", () => {
+  test("parses every rule block in source order", () => {
+    const text = [
+      ruleBlock("A-1", "Rule A.", "Violation A."),
+      ruleBlock("B-2", "Rule B.", "Violation B."),
+    ].join("\n");
+
+    const results = parseRules(text);
+
+    expect(results).toHaveLength(2);
+    expect(results[0]).toMatchObject({ status: "PARSED", rule: { id: "A-1" } });
+    expect(results[1]).toMatchObject({ status: "PARSED", rule: { id: "B-2" } });
+  });
+
+  test("continues past an invalid sibling block", () => {
+    const text = [
+      "## A-1",
+      "### Rule",
+      "A rule.",
+      "### Violation",
+      "A violation.",
+      ruleBlock("B-2", "Rule B.", "Violation B."),
+    ].join("\n");
+
+    const results = parseRules(text);
+
+    expect(results).toHaveLength(2);
+    expect(results[0]).toMatchObject({
+      status: "INVALID",
+      code: "MISSING_SEVERITY",
+      ruleId: "A-1",
+    });
+    expect(results[1]).toMatchObject({ status: "PARSED", rule: { id: "B-2" } });
+  });
+
+  test("invalidates every occurrence of a duplicated rule ID", () => {
+    const text = [
+      ruleBlock("A-1", "Rule A.", "Violation A."),
+      ruleBlock("B-2", "Rule B.", "Violation B."),
+      ruleBlock("A-1", "Rule A again.", "Violation A again."),
+    ].join("\n");
+
+    const results = parseRules(text);
+
+    expect(results).toHaveLength(3);
+    expect(results[0]).toMatchObject({ status: "INVALID", code: "DUPLICATE_ID", ruleId: "A-1" });
+    expect(results[1]).toMatchObject({ status: "PARSED", rule: { id: "B-2" } });
+    expect(results[2]).toMatchObject({ status: "INVALID", code: "DUPLICATE_ID", ruleId: "A-1" });
+  });
+
+  test("ranks duplicate detection above other block failures", () => {
+    const duplicateWithoutSeverity = [
+      "## A-1",
+      "### Rule",
+      "A rule.",
+      "### Violation",
+      "A violation.",
+    ].join("\n");
+
+    const results = parseRules(
+      [duplicateWithoutSeverity, ruleBlock("A-1", "Rule A.", "Violation A.")].join("\n"),
+    );
+
+    expect(results[0]).toMatchObject({ status: "INVALID", code: "DUPLICATE_ID", ruleId: "A-1" });
+    expect(results[1]).toMatchObject({ status: "INVALID", code: "DUPLICATE_ID", ruleId: "A-1" });
+  });
+
+  test("returns one missing-ID failure when no rule heading exists", () => {
+    const text = [
+      "# Repository rules",
+      "### Rule",
+      "A rule.",
+      "### Violation",
+      "A violation.",
+    ].join("\n");
+
+    const results = parseRules(text);
+
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({
+      status: "INVALID",
+      reason: "INVALID_RULE",
+      code: "MISSING_ID",
+      ruleId: null,
+    });
+  });
+
+  test("ignores preamble and reports an invalid heading ID with a null rule ID", () => {
+    const text = ["# Repository rules", "## ARCH 001", "severity: error"].join("\n");
+
+    const results = parseRules(text);
+
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({ status: "INVALID", code: "INVALID_ID", ruleId: null });
+  });
+
+  test("does not apply MULTIPLE_RULES to a multi-rule document", () => {
+    const text = [
+      ruleBlock("A-1", "Rule A.", "Violation A."),
+      ruleBlock("B-2", "Rule B.", "Violation B."),
+    ].join("\n");
+
+    const statuses = parseRules(text).map((result) => result.status);
+
+    expect(statuses).toEqual(["PARSED", "PARSED"]);
   });
 });

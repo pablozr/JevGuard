@@ -105,4 +105,7 @@ export interface ReviewContext {
   readonly scopedPaths: readonly string[];
 }
 
-export type ReviewResult = ReviewContext & (GateResult | OperationalResult);
+export type RuleReviewResult = ReviewContext & (GateResult | OperationalResult);
+
+/** V0.1 compatibility alias for {@link RuleReviewResult}. */
+export type ReviewResult = RuleReviewResult;

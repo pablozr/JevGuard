@@ -8,6 +8,7 @@ export type RuleParseErrorCode =
   | "MISSING_ID"
   | "INVALID_ID"
   | "MULTIPLE_RULES"
+  | "DUPLICATE_ID"
   | "MISSING_SEVERITY"
   | "INVALID_SEVERITY"
   | "MALFORMED_METADATA"
@@ -41,9 +42,27 @@ export interface RuleParseFailure {
 /** Result of parsing exactly one `.jev/rules.md` document. */
 export type RuleParseResult = RuleParseSuccess | RuleParseFailure;
 
-export interface RuleHeading {
-  readonly index: number;
+/**
+ * Failure of parsing one rule block. `ruleId` carries the block's heading ID when
+ * that heading is valid, and is `null` when the block has no valid ID.
+ */
+export type RuleCandidateFailure = RuleParseFailure & { readonly ruleId: string | null };
+
+/**
+ * Result of parsing one rule block. It shares the V0.1 success shape and extends
+ * only failures with the heading ID needed to attribute the block.
+ */
+export type RuleCandidateResult = RuleParseSuccess | RuleCandidateFailure;
+
+/**
+ * Results of parsing every rule block of a `.jev/rules.md` document, in source
+ * order. A document with no rule heading yields a single `MISSING_ID` candidate.
+ */
+export type RuleParseResults = readonly RuleCandidateResult[];
+
+export interface RuleBlock {
   readonly id: string;
+  readonly body: readonly string[];
 }
 
 export interface MetadataEntry {
