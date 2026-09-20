@@ -7,6 +7,7 @@ interface PackageManifest {
   readonly engines?: { readonly bun?: string };
   readonly description?: string;
   readonly license?: string;
+  readonly exports?: Readonly<Record<string, string>>;
 }
 
 function readManifest(): PackageManifest {
@@ -16,25 +17,24 @@ function readManifest(): PackageManifest {
 }
 
 /**
- * Publication contents are a Task 11 acceptance boundary: the packed artifact must
- * ship the runtime source without tests, tsconfig, or planning records.
+ * The development manifest is never packed. The installable artifact manifest is
+ * generated into `dist` and asserted by `artifact.test.ts`, which owns the packed
+ * file allowlist and the absence of workspace dependencies.
  */
-describe("package publication manifest", () => {
+describe("plugin development manifest", () => {
   test("blocks an accidental registry publish", () => {
     expect(readManifest().private).toBe(true);
   });
 
-  test("whitelists runtime source and excludes test and tooling files", () => {
-    const files = readManifest().files ?? [];
-
-    expect(files).toContain("src");
-
-    for (const entry of files) {
-      expect(entry).not.toMatch(/^(test|tsconfig)/);
-    }
-  });
-
   test("documents the Bun runtime requirement", () => {
     expect(readManifest().engines?.bun).toBeDefined();
+  });
+
+  test("keeps TypeScript entrypoints for workspace development", () => {
+    expect(readManifest().exports?.["."]).toBe("./src/index.ts");
+  });
+
+  test("does not present the source tree as packaged output", () => {
+    expect(readManifest().files).toBeUndefined();
   });
 });

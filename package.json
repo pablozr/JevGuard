@@ -13,6 +13,8 @@
     "lint": "biome lint .",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
+    "artifact:build": "bun packages/plugin/scripts/build-artifact.ts",
+    "artifact:pack": "bun packages/plugin/scripts/pack-artifact.ts",
     "check": "pnpm format && pnpm lint && pnpm typecheck && pnpm test"
   },
   "devDependencies": {

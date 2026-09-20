@@ -59,14 +59,15 @@ diff or by another file's patch.
 
 ## Credentials
 
-For normal local use, run:
+For normal local use, install the packed artifact globally and run:
 
 ```sh
+bun install --global /path/to/jevguard-plugin-<version>.tgz
 jevguard login
 ```
 
-From the workspace before the package is published, run the same command with Bun:
-`bun packages/plugin/src/cli/main.ts login`.
+If the artifact is not on `PATH`, run the installed binary directly, or from this
+workspace use the Bun fallback `bun packages/plugin/src/cli/main.ts login`.
 
 The CLI reads the key using a masked terminal prompt and stores it in the native
 operating-system credential store:

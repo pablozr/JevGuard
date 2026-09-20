@@ -12,9 +12,6 @@
   "bin": {
     "jevguard": "./src/cli/main.ts"
   },
-  "files": [
-    "src"
-  ],
   "engines": {
     "bun": ">=1.1.0"
   },

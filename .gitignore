@@ -2,8 +2,9 @@
 node_modules/
 .pnpm-store/
 
-# Build output, coverage, and tooling caches
+# Build output, locally packed artifacts, coverage, and tooling caches
 dist/
+artifacts/
 coverage/
 .turbo/
 .cache/

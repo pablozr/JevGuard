@@ -106,46 +106,78 @@ Thresholds are locally configurable in `.jev/config.yaml`.
 
 `@jevguard/plugin` is **not published to npm**. It is `private`, and its
 `@jevguard/core` and `@jevguard/opencode-adapter` dependencies are private
-workspace packages that export TypeScript source. A clean public consumer cannot
-install `@jevguard/plugin` from a registry until the publish topology is solved,
-so do not expect `npm install @jevguard/plugin` or an `opencode.json` `plugin`
-entry to work yet.
+workspace packages. P1 ships the plugin as a **locally packed tarball** that
+bundles that workspace code, so a clean consumer installs one tarball and never
+resolves a workspace link or a private registry package.
 
-For local development, load the plugin from OpenCode's project plugin directory
-after installing workspace dependencies:
+Build the tarball from this repository:
 
-```text
-<repo>/.opencode/plugins/jevguard.ts
+```sh
+corepack enable
+pnpm install
+pnpm artifact:build
+pnpm artifact:pack
+```
+
+`pnpm artifact:pack` writes `artifacts/jevguard-plugin-<version>.tgz`. Both
+`packages/plugin/dist/` and `artifacts/` are build output and are not committed.
+
+The packed manifest depends only on public runtime packages
+(`@inquirer/password`, `@napi-rs/keyring`, `@typesafe-ai/sdk`, `yaml`). Installing
+the tarball therefore needs npm registry access for those packages; the artifact
+does not vendor them and does not promise an offline install.
+
+### Load the plugin in a consumer project
+
+Install the tarball in the consumer project, then add the plugin shim OpenCode
+loads:
+
+```sh
+cd /path/to/consumer
+bun add /path/to/jevguard-plugin-<version>.tgz
 ```
 
 ```ts
-export { JevGuardPlugin } from "../../packages/plugin/src/index";
+// .opencode/plugins/jevguard.ts
+export { JevGuardPlugin } from "@jevguard/plugin";
 ```
 
-OpenCode loads `.opencode/plugins/` at startup and runs the file with its bundled
-Bun runtime. Because the file imports the workspace source, this path requires
-`pnpm install` in this repository and a host version matching the target below.
+OpenCode loads `.opencode/plugins/` at startup and runs the shim with its bundled
+Bun runtime. Do not point an `opencode.json` `plugin` entry directly at the
+tarball path; install it and load the package export through the shim above.
+
+### Install the CLI
+
+The same tarball installs a `jevguard` binary. Install it globally so the login
+command is on `PATH`:
+
+```sh
+bun install --global /path/to/jevguard-plugin-<version>.tgz
+jevguard login
+```
 
 Known limitations:
 
-- Target host is OpenCode `1.18.31`. Real-host validation is still pending on an
-  exact `1.18.31` install; the locally available binary is `1.18.28`.
-- The `jevguard login` CLI has a Bun shebang and requires the Bun runtime. Run it
-  from the workspace with `bun packages/plugin/src/cli/main.ts login`.
+- P1 is a local, private artifact. There is no registry install and no publish
+  topology yet.
+- Target host is OpenCode `1.18.31`. Exact `1.18.31` runtime smoke is still
+  pending; a local `1.18.28` run worked.
+- The plugin and CLI run on Bun, and the packed `jevguard` bin keeps a Bun
+  shebang. Install and run the artifact with the Bun runtime.
 
 ## Connect Jev
 
-For local use, connect once with:
+For local use, connect once with the installed command:
 
 ```sh
-bun packages/plugin/src/cli/main.ts login
+jevguard login
 ```
 
-The installed command is `jevguard login`; until the package is published or
-linked onto `PATH`, use the Bun workspace path above. JevGuard stores the key in
-your operating system's credential store instead of a repository file or shell
-history. In CI, provide `TYPESAFE_API_KEY` through the platform secret manager.
-See the [security model](./docs/security.md) for details.
+If the artifact is not on `PATH`, run the installed binary directly, or from this
+workspace use the Bun fallback `bun packages/plugin/src/cli/main.ts login`.
+JevGuard stores the key in your operating system's credential store instead of a
+repository file or shell history. In CI, provide `TYPESAFE_API_KEY` through the
+platform secret manager. See the [security model](./docs/security.md) for details.
 
 ```text
 JEVGUARD REVIEW
@@ -179,6 +211,8 @@ The path is deliberately layered:
 
 ```text
 V0.1  One rule, attributed turn, local gate
+  ↓
+P1    Local installable artifact (private tarball)
   ↓
 V0.2  Multiple scoped rules and review aggregation
   ↓
@@ -222,6 +256,9 @@ The V0.1 vertical slice is implemented and observe-only. It loads in OpenCode,
 attributes one completed turn, parses one scoped rule from `.jev/rules.md`, asks
 Jev once per applicable rule, applies the local gate, and presents one result as a
 transient TUI toast and a structured log entry.
+
+P1 packages that slice as a local, private tarball (`pnpm artifact:build`,
+`pnpm artifact:pack`) that a clean consumer can install without workspace links.
 
 OpenCode sees only transient toasts and structured logs. JevGuard does not inject
 anything into the agent context, does not add session messages, and does not block
