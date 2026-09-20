@@ -13,9 +13,11 @@
     "format": "biome format --write .",
     "lint": "biome lint .",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --root ../.. packages/plugin"
   },
   "dependencies": {
-    "@jevguard/opencode-adapter": "workspace:*"
+    "@jevguard/core": "workspace:*",
+    "@jevguard/opencode-adapter": "workspace:*",
+    "@opencode-ai/plugin": "1.18.31"
   }
 }

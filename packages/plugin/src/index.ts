@@ -1,1 +1,1 @@
-export {};
+export { JevGuardPlugin } from "./plugin";
