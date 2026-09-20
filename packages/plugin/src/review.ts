@@ -10,7 +10,11 @@ import {
   type Turn,
   type UnavailableReason,
 } from "@jevguard/core";
-import { parsePolicyConfig, type PolicyLoadResult } from "@jevguard/opencode-adapter";
+import {
+  parsePolicyConfig,
+  type PolicyLoadResult,
+  type PolicyLoader,
+} from "@jevguard/opencode-adapter";
 import { presentReview } from "./present";
 import { reviewLevelUnavailable } from "./review-result";
 import type { ReviewDependencies } from "./types";
@@ -20,18 +24,18 @@ type ConfigValue =
   | { readonly status: "INVALID" };
 
 /**
- * Reviews one attributed turn: load the fixed policy paths once, run the local rule
- * lane and the scope-creep built-in concurrently, then present exactly one aggregate.
- * A loader or rule/config failure only degrades the rule lane; the built-in always
- * runs. Rules stay sequential inside their lane, so a turn has at most the built-in
- * and one rule in flight, and the final results are rules in source order then scope
- * creep.
+ * Reviews one attributed turn: read the fixed policy paths once, then run the local
+ * rule lane and the scope-creep built-in concurrently and present exactly one
+ * aggregate. A rejected loader or rule/config failure degrades only the rule lane to a
+ * review-level `UNAVAILABLE` and never suppresses the built-in. Rules stay sequential
+ * inside their lane, so a turn has at most the built-in and one rule in flight, and
+ * the final results are rules in source order then scope creep.
  */
 export async function reviewAttributedTurn(
   turn: Turn,
   dependencies: ReviewDependencies,
 ): Promise<void> {
-  const loaded = await dependencies.policy.load();
+  const loaded = await loadPolicy(dependencies.policy);
 
   const [ruleResults, scopeCreepResult] = await Promise.all([
     evaluateRuleLane(turn, loaded, dependencies),
@@ -48,9 +52,13 @@ export async function reviewAttributedTurn(
 
 async function evaluateRuleLane(
   turn: Turn,
-  loaded: PolicyLoadResult,
+  loaded: PolicyLoadResult | null,
   dependencies: Pick<ReviewDependencies, "jev">,
 ): Promise<readonly ReviewResult[]> {
+  if (loaded === null) {
+    return [reviewLevelUnavailable(turn.id, "INVALID_RULE")];
+  }
+
   if (loaded.status === "FAILED") {
     const reason: UnavailableReason =
       loaded.reason === "CONFIG_READ_FAILURE" ? "INVALID_CONFIG" : "INVALID_RULE";
@@ -78,6 +86,19 @@ async function evaluateRuleLane(
   );
 
   return review.results;
+}
+
+/**
+ * Reads the policy loader once for the rule lane. A rejected promise is an unknown
+ * infrastructure failure, contained here as `null` so it can degrade only the rule
+ * lane and never reach the built-in lane or the presenter.
+ */
+async function loadPolicy(policy: PolicyLoader): Promise<PolicyLoadResult | null> {
+  try {
+    return await policy.load();
+  } catch {
+    return null;
+  }
 }
 
 function readGateConfig(config: string | null): GateConfigResult {

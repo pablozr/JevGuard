@@ -745,15 +745,20 @@ describe("JevGuardPlugin deduplication and containment", () => {
     expect(presenter.reviews).toEqual([]);
   });
 
-  test("swallows an unknown failure without mislabeling a review", async () => {
+  test("degrades only the rule lane when the loader rejects unexpectedly", async () => {
     const { hooks, policy, presenter, jev } = harness();
     policy.failure = new Error("programming bug");
 
     await expect(dispatch(hooks, idleEvent())).resolves.toBeUndefined();
 
-    expect(jev.requests).toHaveLength(0);
-    expect(presenter.attempts).toBe(0);
-    expect(presenter.reviews).toEqual([]);
+    expect(policy.calls).toEqual(["load"]);
+    expect(jevIds(jev)).toEqual([SCOPE_CREEP_ID]);
+    expect(presenter.attempts).toBe(1);
+    expect(lastResults(presenter)).toEqual([
+      reviewUnavailable(ASSISTANT_ID, "INVALID_RULE"),
+      builtInEvaluated("PASS", 0.1, ["src/a.ts"]),
+    ]);
+    expect(JSON.stringify(lastReview(presenter))).not.toContain("programming bug");
   });
 
   test("keeps handling later idle events after a contained failure", async () => {
