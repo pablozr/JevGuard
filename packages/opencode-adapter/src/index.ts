@@ -74,15 +74,18 @@ export type {
   PolicyLoadResult,
 } from "./policy";
 export {
+  countSummary,
   createOpenCodeLogSink,
   createOpenCodePresentationClient,
   createOpenCodeToastSink,
   createReviewPresenter,
-  formatRuleLabel,
+  displayOutcome,
   logLevelFor,
   reviewLogMessage,
   toReviewLogEntry,
+  toReviewLogResult,
   toReviewToast,
+  toastVariantFor,
 } from "./presentation";
 export type {
   DeliveryStatus,
@@ -94,6 +97,8 @@ export type {
   PresentationDelivery,
   PresentationPorts,
   ReviewLogEntry,
+  ReviewLogResult,
+  ReviewLogSummary,
   ReviewPresenter,
   ReviewToast,
   StructuredLogSink,

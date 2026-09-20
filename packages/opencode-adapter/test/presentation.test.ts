@@ -1,9 +1,18 @@
-import type { ReviewResult, SkippedReason, UnavailableReason } from "@jevguard/core";
+import type {
+  ReviewCounts,
+  RuleReviewResult,
+  SemanticVerdict,
+  SkippedReason,
+  TurnReview,
+  UnavailableReason,
+} from "@jevguard/core";
+import { aggregateReview } from "@jevguard/core";
 import { describe, expect, test } from "vitest";
 import {
   createOpenCodeLogSink,
   createOpenCodeToastSink,
   createReviewPresenter,
+  displayOutcome,
   logLevelFor,
   toReviewLogEntry,
   toReviewToast,
@@ -18,11 +27,14 @@ import type {
   ReviewLogEntry,
   StructuredLogSink,
   ToastSink,
+  ToastVariant,
 } from "../src/index";
 
-function semantic(outcome: "PASS" | "WARN" | "FAIL", probability: number): ReviewResult {
+const TURN_ID = "turn-1";
+
+function semanticResult(outcome: SemanticVerdict, probability: number): RuleReviewResult {
   return {
-    turnId: "turn-1",
+    turnId: TURN_ID,
     ruleId: "ARCH-001",
     severity: "error",
     scopedPaths: ["src/a.ts", "src/b.ts"],
@@ -31,9 +43,9 @@ function semantic(outcome: "PASS" | "WARN" | "FAIL", probability: number): Revie
   };
 }
 
-function skipped(reason: SkippedReason): ReviewResult {
+function skippedResult(reason: SkippedReason): RuleReviewResult {
   return {
-    turnId: "turn-1",
+    turnId: TURN_ID,
     ruleId: null,
     severity: null,
     scopedPaths: [],
@@ -42,9 +54,9 @@ function skipped(reason: SkippedReason): ReviewResult {
   };
 }
 
-function unavailable(reason: UnavailableReason): ReviewResult {
+function unavailableResult(reason: UnavailableReason): RuleReviewResult {
   return {
-    turnId: "turn-1",
+    turnId: TURN_ID,
     ruleId: null,
     severity: null,
     scopedPaths: [],
@@ -53,13 +65,24 @@ function unavailable(reason: UnavailableReason): ReviewResult {
   };
 }
 
+function reviewOf(results: readonly RuleReviewResult[]): TurnReview {
+  return aggregateReview(TURN_ID, results);
+}
+
+function counts(overrides: Partial<ReviewCounts> = {}): ReviewCounts {
+  return { pass: 0, warn: 0, fail: 0, skipped: 0, unavailable: 0, ...overrides };
+}
+
 class FakeLogSink implements StructuredLogSink {
   result: DeliveryStatus = "DELIVERED";
   error: Error | null = null;
   readonly entries: ReviewLogEntry[] = [];
 
+  constructor(private readonly order: string[] = []) {}
+
   async write(entry: ReviewLogEntry): Promise<DeliveryStatus> {
     this.entries.push(entry);
+    this.order.push("log");
 
     if (this.error !== null) {
       throw this.error;
@@ -74,8 +97,11 @@ class FakeToastSink implements ToastSink {
   error: Error | null = null;
   readonly toasts: ReturnType<typeof toReviewToast>[] = [];
 
+  constructor(private readonly order: string[] = []) {}
+
   async show(toast: ReturnType<typeof toReviewToast>): Promise<DeliveryStatus> {
     this.toasts.push(toast);
+    this.order.push("toast");
 
     if (this.error !== null) {
       throw this.error;
@@ -118,8 +144,183 @@ class FakeOpenCodeClient implements OpenCodePresentationClient {
   };
 }
 
-describe("structured log mapping", () => {
-  test.each<[ReviewResult["outcome"], "info" | "warn" | "error"]>([
+const mixedResults = (): RuleReviewResult[] => [
+  semanticResult("FAIL", 0.91),
+  semanticResult("WARN", 0.4),
+  unavailableResult("JEV_FAILURE"),
+  skippedResult("NO_SCOPE_MATCH"),
+];
+
+describe("aggregate log mapping", () => {
+  test("projects the aggregate summary and nested results exactly", () => {
+    const entry = toReviewLogEntry(reviewOf(mixedResults()));
+
+    expect(entry).toEqual({
+      turnId: TURN_ID,
+      summary: {
+        highestVerdict: "FAIL",
+        hasUnavailable: true,
+        counts: { pass: 0, warn: 1, fail: 1, skipped: 1, unavailable: 1 },
+      },
+      results: [
+        {
+          ruleId: "ARCH-001",
+          severity: "error",
+          scopedPaths: ["src/a.ts", "src/b.ts"],
+          outcome: "FAIL",
+          violationProbability: 0.91,
+        },
+        {
+          ruleId: "ARCH-001",
+          severity: "error",
+          scopedPaths: ["src/a.ts", "src/b.ts"],
+          outcome: "WARN",
+          violationProbability: 0.4,
+        },
+        {
+          ruleId: null,
+          severity: null,
+          scopedPaths: [],
+          outcome: "UNAVAILABLE",
+          reason: "JEV_FAILURE",
+        },
+        {
+          ruleId: null,
+          severity: null,
+          scopedPaths: [],
+          outcome: "SKIPPED",
+          reason: "NO_SCOPE_MATCH",
+        },
+      ],
+    });
+  });
+
+  test("records semantic counts as zero when no rule reached that verdict", () => {
+    const entry = toReviewLogEntry(reviewOf([skippedResult("NO_ATTRIBUTED_PATCH")]));
+
+    expect(entry.summary.counts).toEqual({
+      pass: 0,
+      warn: 0,
+      fail: 0,
+      skipped: 1,
+      unavailable: 0,
+    });
+    expect(entry.summary.highestVerdict).toBeNull();
+    expect(entry.summary.hasUnavailable).toBe(false);
+  });
+
+  test("keeps exactly the nested allowlist and leaks no task, prose, diff, or key material", () => {
+    const entry = toReviewLogEntry(reviewOf(mixedResults()));
+
+    expect(Object.keys(entry).sort()).toEqual(["results", "summary", "turnId"]);
+    expect(Object.keys(entry.summary).sort()).toEqual([
+      "counts",
+      "hasUnavailable",
+      "highestVerdict",
+    ]);
+    expect(Object.keys(entry.summary.counts).sort()).toEqual([
+      "fail",
+      "pass",
+      "skipped",
+      "unavailable",
+      "warn",
+    ]);
+
+    for (const result of entry.results) {
+      if (result.outcome === "PASS" || result.outcome === "WARN" || result.outcome === "FAIL") {
+        expect(Object.keys(result).sort()).toEqual([
+          "outcome",
+          "ruleId",
+          "scopedPaths",
+          "severity",
+          "violationProbability",
+        ]);
+      } else {
+        expect(Object.keys(result).sort()).toEqual([
+          "outcome",
+          "reason",
+          "ruleId",
+          "scopedPaths",
+          "severity",
+        ]);
+      }
+    }
+
+    const serialized = JSON.stringify(entry);
+    expect(serialized).not.toMatch(/task|description|diff|api[-_]?key|typesafe|token|secret/i);
+  });
+});
+
+describe("display outcome precedence", () => {
+  test("resolves FAIL over UNAVAILABLE and all lower outcomes", () => {
+    expect(displayOutcome(counts({ fail: 1, unavailable: 2, warn: 3 }))).toBe("FAIL");
+  });
+
+  test("resolves UNAVAILABLE over WARN and PASS", () => {
+    expect(displayOutcome(counts({ unavailable: 1, warn: 2, pass: 3 }))).toBe("UNAVAILABLE");
+  });
+
+  test("resolves WARN over PASS and SKIPPED", () => {
+    expect(displayOutcome(counts({ warn: 1, pass: 2, skipped: 3 }))).toBe("WARN");
+  });
+
+  test("resolves PASS over SKIPPED", () => {
+    expect(displayOutcome(counts({ pass: 1, skipped: 2 }))).toBe("PASS");
+  });
+
+  test("resolves SKIPPED when every result is operational", () => {
+    expect(displayOutcome(counts({ skipped: 2 }))).toBe("SKIPPED");
+  });
+
+  test.each<[RuleReviewResult[], string]>([
+    [[semanticResult("FAIL", 0.9), unavailableResult("JEV_FAILURE")], "FAIL"],
+    [[semanticResult("WARN", 0.4), unavailableResult("JEV_FAILURE")], "UNAVAILABLE"],
+    [[semanticResult("PASS", 0.1), skippedResult("NO_SCOPE_MATCH")], "PASS"],
+    [[skippedResult("NO_SCOPE_MATCH"), skippedResult("NO_ATTRIBUTED_PATCH")], "SKIPPED"],
+  ])("titles the aggregate toast with the display outcome %#", (results, display) => {
+    expect(toReviewToast(reviewOf(results)).title).toBe(`JevGuard ${display}`);
+  });
+});
+
+describe("aggregate toast mapping", () => {
+  test("summarizes counts only, never probabilities, paths, or evidence", () => {
+    const toast = toReviewToast(reviewOf(mixedResults()));
+
+    expect(toast).toEqual({
+      title: "JevGuard FAIL",
+      message: "pass 0 · warn 1 · fail 1 · skipped 1 · unavailable 1",
+      variant: "error",
+    });
+    expect(toast.message).not.toMatch(/0\.91|0\.4|src\/a\.ts|src\/b\.ts/);
+  });
+
+  test.each<[ReviewCounts, ToastVariant]>([
+    [counts({ fail: 1 }), "error"],
+    [counts({ unavailable: 1 }), "error"],
+    [counts({ warn: 1 }), "warning"],
+    [counts({ pass: 1 }), "success"],
+    [counts({ skipped: 1 }), "info"],
+  ])("maps %# to the expected variant", (summaryCounts, variant) => {
+    const results: RuleReviewResult[] = [];
+
+    if (summaryCounts.fail > 0) results.push(semanticResult("FAIL", 0.9));
+    if (summaryCounts.unavailable > 0) results.push(unavailableResult("JEV_FAILURE"));
+    if (summaryCounts.warn > 0) results.push(semanticResult("WARN", 0.5));
+    if (summaryCounts.pass > 0) results.push(semanticResult("PASS", 0.1));
+    if (summaryCounts.skipped > 0) results.push(skippedResult("NO_SCOPE_MATCH"));
+
+    expect(toReviewToast(reviewOf(results)).variant).toBe(variant);
+  });
+
+  test("shows zero-valued semantic counts in the message", () => {
+    expect(toReviewToast(reviewOf([skippedResult("NO_ATTRIBUTED_PATCH")])).message).toBe(
+      "pass 0 · warn 0 · fail 0 · skipped 1 · unavailable 0",
+    );
+  });
+});
+
+describe("log levels", () => {
+  test.each<["PASS" | "WARN" | "FAIL" | "SKIPPED" | "UNAVAILABLE", "info" | "warn" | "error"]>([
     ["PASS", "info"],
     ["SKIPPED", "info"],
     ["WARN", "warn"],
@@ -128,72 +329,20 @@ describe("structured log mapping", () => {
   ])("maps %s to the %s level", (outcome, level) => {
     expect(logLevelFor(outcome)).toBe(level);
   });
-
-  test("keeps exactly the allowlisted semantic fields", () => {
-    const entry = toReviewLogEntry(semantic("PASS", 0.12));
-
-    expect(entry).toEqual({
-      turnId: "turn-1",
-      ruleId: "ARCH-001",
-      severity: "error",
-      scopedPaths: ["src/a.ts", "src/b.ts"],
-      outcome: "PASS",
-      violationProbability: 0.12,
-    });
-  });
-
-  test("keeps exactly the allowlisted operational fields", () => {
-    const entry = toReviewLogEntry(unavailable("JEV_FAILURE"));
-
-    expect(entry).toEqual({
-      turnId: "turn-1",
-      ruleId: null,
-      severity: null,
-      scopedPaths: [],
-      outcome: "UNAVAILABLE",
-      reason: "JEV_FAILURE",
-    });
-  });
-});
-
-describe("toast mapping", () => {
-  test.each<[ReviewResult, "success" | "warning" | "error" | "info"]>([
-    [semantic("PASS", 0.1), "success"],
-    [semantic("WARN", 0.5), "warning"],
-    [semantic("FAIL", 0.9), "error"],
-    [skipped("NO_SCOPE_MATCH"), "info"],
-    [unavailable("BLOCKED_EVIDENCE"), "error"],
-  ])("maps %# to the expected variant", (result, variant) => {
-    expect(toReviewToast(result).variant).toBe(variant);
-  });
-
-  test("includes the rule and probability for a semantic outcome", () => {
-    expect(toReviewToast(semantic("WARN", 0.5))).toEqual({
-      title: "JevGuard WARN",
-      message: "ARCH-001 · probability 0.50",
-      variant: "warning",
-    });
-  });
-
-  test("includes the rule fallback and reason for an operational outcome", () => {
-    expect(toReviewToast(skipped("NO_ATTRIBUTED_PATCH"))).toEqual({
-      title: "JevGuard SKIPPED",
-      message: "unknown · NO_ATTRIBUTED_PATCH",
-      variant: "info",
-    });
-  });
 });
 
 describe("review presenter", () => {
-  test("delivers to both sinks and reports delivered", async () => {
-    const log = new FakeLogSink();
-    const toast = new FakeToastSink();
+  test("delivers exactly one log and one toast per aggregate review, log first", async () => {
+    const order: string[] = [];
+    const log = new FakeLogSink(order);
+    const toast = new FakeToastSink(order);
 
-    const delivery = await createReviewPresenter({ log, toast }).present(semantic("FAIL", 0.9));
+    const delivery = await createReviewPresenter({ log, toast }).present(reviewOf(mixedResults()));
 
     expect(delivery).toEqual({ log: "DELIVERED", toast: "DELIVERED" });
     expect(log.entries).toHaveLength(1);
     expect(toast.toasts).toHaveLength(1);
+    expect(order).toEqual(["log", "toast"]);
   });
 
   test("isolates a log failure from the toast delivery", async () => {
@@ -201,7 +350,9 @@ describe("review presenter", () => {
     log.error = new Error("log backend down");
     const toast = new FakeToastSink();
 
-    const delivery = await createReviewPresenter({ log, toast }).present(semantic("PASS", 0.1));
+    const delivery = await createReviewPresenter({ log, toast }).present(
+      reviewOf([semanticResult("PASS", 0.1)]),
+    );
 
     expect(delivery).toEqual({ log: "FAILED", toast: "DELIVERED" });
     expect(toast.toasts).toHaveLength(1);
@@ -212,98 +363,133 @@ describe("review presenter", () => {
     const toast = new FakeToastSink();
     toast.error = new Error("toast backend down");
 
-    const delivery = await createReviewPresenter({ log, toast }).present(semantic("PASS", 0.1));
+    const delivery = await createReviewPresenter({ log, toast }).present(
+      reviewOf([semanticResult("PASS", 0.1)]),
+    );
 
     expect(delivery).toEqual({ log: "DELIVERED", toast: "FAILED" });
     expect(log.entries).toHaveLength(1);
   });
 
-  test("propagates a typed sink failure without throwing", async () => {
+  test("propagates typed sink failures without throwing", async () => {
     const log = new FakeLogSink();
     log.result = "FAILED";
     const toast = new FakeToastSink();
     toast.result = "FAILED";
 
     await expect(
-      createReviewPresenter({ log, toast }).present(semantic("WARN", 0.5)),
+      createReviewPresenter({ log, toast }).present(reviewOf([semanticResult("WARN", 0.5)])),
     ).resolves.toEqual({ log: "FAILED", toast: "FAILED" });
   });
 });
 
 describe("OpenCode sinks", () => {
-  test("sends a safe log payload with the allowlisted extra fields", async () => {
+  test("sends the exact aggregate extra and level for a mixed review", async () => {
     const client = new FakeOpenCodeClient();
     const sink = createOpenCodeLogSink(client);
 
-    const status = await sink.write(toReviewLogEntry(semantic("FAIL", 0.9)));
+    const status = await sink.write(toReviewLogEntry(reviewOf(mixedResults())));
 
     expect(status).toBe("DELIVERED");
     expect(client.logCalls).toHaveLength(1);
     expect(client.logCalls[0]?.body).toEqual({
       service: "jevguard",
       level: "error",
-      message: "JevGuard FAIL for ARCH-001 (probability 0.9)",
+      message: `JevGuard FAIL for turn ${TURN_ID}`,
       extra: {
-        turnId: "turn-1",
-        ruleId: "ARCH-001",
-        severity: "error",
-        scopedPaths: ["src/a.ts", "src/b.ts"],
-        outcome: "FAIL",
-        violationProbability: 0.9,
+        turnId: TURN_ID,
+        summary: {
+          highestVerdict: "FAIL",
+          hasUnavailable: true,
+          counts: { pass: 0, warn: 1, fail: 1, skipped: 1, unavailable: 1 },
+        },
+        results: [
+          {
+            ruleId: "ARCH-001",
+            severity: "error",
+            scopedPaths: ["src/a.ts", "src/b.ts"],
+            outcome: "FAIL",
+            violationProbability: 0.91,
+          },
+          {
+            ruleId: "ARCH-001",
+            severity: "error",
+            scopedPaths: ["src/a.ts", "src/b.ts"],
+            outcome: "WARN",
+            violationProbability: 0.4,
+          },
+          {
+            ruleId: null,
+            severity: null,
+            scopedPaths: [],
+            outcome: "UNAVAILABLE",
+            reason: "JEV_FAILURE",
+          },
+          {
+            ruleId: null,
+            severity: null,
+            scopedPaths: [],
+            outcome: "SKIPPED",
+            reason: "NO_SCOPE_MATCH",
+          },
+        ],
       },
     });
   });
 
-  test("maps a log result error to FAILED", async () => {
+  test("logs UNAVAILABLE and SKIPPED at error and info levels", async () => {
     const client = new FakeOpenCodeClient();
-    client.logResult = { error: { message: "bad request" } };
+    const sink = createOpenCodeLogSink(client);
 
-    expect(await createOpenCodeLogSink(client).write(toReviewLogEntry(semantic("PASS", 0.1)))).toBe(
-      "FAILED",
-    );
+    await sink.write(toReviewLogEntry(reviewOf([unavailableResult("JEV_FAILURE")])));
+    await sink.write(toReviewLogEntry(reviewOf([skippedResult("NO_SCOPE_MATCH")])));
+
+    expect(client.logCalls[0]?.body.level).toBe("error");
+    expect(client.logCalls[1]?.body.level).toBe("info");
   });
 
-  test("maps a rejected log request to FAILED", async () => {
-    const client = new FakeOpenCodeClient();
-    client.logError = new Error("connection reset");
+  test("maps a log result error and a rejected log request to FAILED", async () => {
+    const errored = new FakeOpenCodeClient();
+    errored.logResult = { error: { message: "bad request" } };
+    expect(
+      await createOpenCodeLogSink(errored).write(toReviewLogEntry(reviewOf(mixedResults()))),
+    ).toBe("FAILED");
 
-    expect(await createOpenCodeLogSink(client).write(toReviewLogEntry(semantic("PASS", 0.1)))).toBe(
-      "FAILED",
-    );
+    const rejected = new FakeOpenCodeClient();
+    rejected.logError = new Error("connection reset");
+    expect(
+      await createOpenCodeLogSink(rejected).write(toReviewLogEntry(reviewOf(mixedResults()))),
+    ).toBe("FAILED");
   });
 
   test("sends a transient toast and never a session message", async () => {
     const client = new FakeOpenCodeClient();
     const sink = createOpenCodeToastSink(client);
 
-    const status = await sink.show(toReviewToast(semantic("WARN", 0.5)));
+    const status = await sink.show(toReviewToast(reviewOf(mixedResults())));
 
     expect(status).toBe("DELIVERED");
     expect(client.toastCalls).toHaveLength(1);
     expect(client.toastCalls[0]?.body).toEqual({
-      title: "JevGuard WARN",
-      message: "ARCH-001 · probability 0.50",
-      variant: "warning",
+      title: "JevGuard FAIL",
+      message: "pass 0 · warn 1 · fail 1 · skipped 1 · unavailable 1",
+      variant: "error",
       duration: 5000,
     });
     expect("session" in client).toBe(false);
   });
 
-  test("maps a toast result error to FAILED", async () => {
-    const client = new FakeOpenCodeClient();
-    client.toastResult = { error: { message: "tui unavailable" } };
+  test("maps a toast result error and a rejected toast request to FAILED", async () => {
+    const errored = new FakeOpenCodeClient();
+    errored.toastResult = { error: { message: "tui unavailable" } };
+    expect(
+      await createOpenCodeToastSink(errored).show(toReviewToast(reviewOf(mixedResults()))),
+    ).toBe("FAILED");
 
-    expect(await createOpenCodeToastSink(client).show(toReviewToast(semantic("PASS", 0.1)))).toBe(
-      "FAILED",
-    );
-  });
-
-  test("maps a rejected toast request to FAILED", async () => {
-    const client = new FakeOpenCodeClient();
-    client.toastError = new Error("connection reset");
-
-    expect(await createOpenCodeToastSink(client).show(toReviewToast(semantic("PASS", 0.1)))).toBe(
-      "FAILED",
-    );
+    const rejected = new FakeOpenCodeClient();
+    rejected.toastError = new Error("connection reset");
+    expect(
+      await createOpenCodeToastSink(rejected).show(toReviewToast(reviewOf(mixedResults()))),
+    ).toBe("FAILED");
   });
 });

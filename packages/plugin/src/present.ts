@@ -1,16 +1,13 @@
-import type { ReviewResult } from "@jevguard/core";
+import type { TurnReview } from "@jevguard/core";
 import type { ReviewPresenter } from "@jevguard/opencode-adapter";
 
 /**
- * Delivers one review result without letting a presentation failure reject the
- * caller, retry the review, or replace the result.
+ * Delivers one aggregate turn review without letting a presentation failure reject
+ * the caller, retry the review, or replace the review.
  */
-export async function presentResult(
-  presenter: ReviewPresenter,
-  result: ReviewResult,
-): Promise<void> {
+export async function presentReview(presenter: ReviewPresenter, review: TurnReview): Promise<void> {
   try {
-    await presenter.present(result);
+    await presenter.present(review);
   } catch {
     return;
   }

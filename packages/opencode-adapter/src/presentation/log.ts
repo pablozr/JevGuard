@@ -1,11 +1,21 @@
-import type { ReviewOutcome, ReviewResult } from "@jevguard/core";
-import type { ReviewLogEntry } from "./types";
+import type { ReviewOutcome, RuleReviewResult, TurnReview } from "@jevguard/core";
+import { displayOutcome } from "./display";
+import type { ReviewLogEntry, ReviewLogResult } from "./types";
 
-const RULE_FALLBACK = "unknown";
+export function toReviewLogEntry(review: TurnReview): ReviewLogEntry {
+  return {
+    turnId: review.turnId,
+    summary: {
+      highestVerdict: review.summary.verdict,
+      hasUnavailable: review.summary.hasUnavailable,
+      counts: { ...review.summary.counts },
+    },
+    results: review.results.map(toReviewLogResult),
+  };
+}
 
-export function toReviewLogEntry(result: ReviewResult): ReviewLogEntry {
+export function toReviewLogResult(result: RuleReviewResult): ReviewLogResult {
   const context = {
-    turnId: result.turnId,
     ruleId: result.ruleId,
     severity: result.severity,
     scopedPaths: [...result.scopedPaths],
@@ -40,19 +50,5 @@ export function logLevelFor(outcome: ReviewOutcome): "info" | "warn" | "error" {
 }
 
 export function reviewLogMessage(entry: ReviewLogEntry): string {
-  const rule = formatRuleLabel(entry.ruleId);
-
-  switch (entry.outcome) {
-    case "PASS":
-    case "WARN":
-    case "FAIL":
-      return `JevGuard ${entry.outcome} for ${rule} (probability ${entry.violationProbability})`;
-    case "SKIPPED":
-    case "UNAVAILABLE":
-      return `JevGuard ${entry.outcome} for ${rule} (${entry.reason})`;
-  }
-}
-
-export function formatRuleLabel(ruleId: string | null): string {
-  return ruleId ?? RULE_FALLBACK;
+  return `JevGuard ${displayOutcome(entry.summary.counts)} for turn ${entry.turnId}`;
 }

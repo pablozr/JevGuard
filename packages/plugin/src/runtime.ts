@@ -1,8 +1,8 @@
 import { attributeTurn } from "@jevguard/opencode-adapter";
 import { idleSessionID } from "./idle-event";
-import { presentResult } from "./present";
+import { presentReview } from "./present";
 import { reviewAttributedTurn } from "./review";
-import { unavailableResult } from "./review-result";
+import { unavailableReview } from "./review-result";
 import type { PluginEventInput, PluginHooks, PluginRuntimeDependencies } from "./types";
 
 /**
@@ -49,9 +49,9 @@ async function processIdle(
       case "ALREADY_PROCESSED":
         return;
       case "UNAVAILABLE":
-        await presentResult(
+        await presentReview(
           dependencies.presenter,
-          unavailableResult(sessionID, null, "MISSING_ATTRIBUTED_DIFF"),
+          unavailableReview(sessionID, null, "MISSING_ATTRIBUTED_DIFF"),
         );
         return;
       case "ATTRIBUTED":

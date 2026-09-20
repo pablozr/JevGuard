@@ -1,4 +1,4 @@
-import type { ReviewResult } from "@jevguard/core";
+import type { TurnReview } from "@jevguard/core";
 import { toReviewLogEntry } from "./log";
 import { toReviewToast } from "./toast";
 import type {
@@ -12,13 +12,14 @@ import type {
   ToastSink,
 } from "./types";
 
-export { formatRuleLabel, logLevelFor, reviewLogMessage, toReviewLogEntry } from "./log";
+export { displayOutcome } from "./display";
+export { logLevelFor, reviewLogMessage, toReviewLogEntry, toReviewLogResult } from "./log";
 export {
   createOpenCodeLogSink,
   createOpenCodePresentationClient,
   createOpenCodeToastSink,
 } from "./opencode";
-export { toReviewToast } from "./toast";
+export { countSummary, toReviewToast, toastVariantFor } from "./toast";
 export type {
   DeliveryStatus,
   OpenCodeLogInput,
@@ -29,6 +30,8 @@ export type {
   PresentationDelivery,
   PresentationPorts,
   ReviewLogEntry,
+  ReviewLogResult,
+  ReviewLogSummary,
   ReviewPresenter,
   ReviewToast,
   StructuredLogSink,
@@ -37,14 +40,15 @@ export type {
 } from "./types";
 
 /**
- * Delivers one review result to both sinks. Each delivery is isolated so a log or
- * toast failure never prevents the other and never propagates to the caller.
+ * Delivers one aggregate turn review to both sinks. Log is attempted before
+ * toast, and each delivery is isolated so a log or toast failure never prevents
+ * the other and never propagates to the caller.
  */
 export function createReviewPresenter(ports: PresentationPorts): ReviewPresenter {
   return {
-    async present(result: ReviewResult): Promise<PresentationDelivery> {
-      const log = await deliverLog(ports.log, toReviewLogEntry(result));
-      const toast = await deliverToast(ports.toast, toReviewToast(result));
+    async present(review: TurnReview): Promise<PresentationDelivery> {
+      const log = await deliverLog(ports.log, toReviewLogEntry(review));
+      const toast = await deliverToast(ports.toast, toReviewToast(review));
 
       return { log, toast };
     },

@@ -1,9 +1,11 @@
 import type { OpencodeClient } from "@opencode-ai/sdk";
+import { displayOutcome } from "./display";
 import { logLevelFor, reviewLogMessage } from "./log";
 import type {
   DeliveryStatus,
   OpenCodePresentationClient,
   ReviewLogEntry,
+  ReviewLogResult,
   ReviewToast,
   StructuredLogSink,
   ToastSink,
@@ -31,7 +33,7 @@ export function createOpenCodePresentationClient(
 }
 
 /**
- * OpenCode structured-log sink. Only the allowlisted entry fields are sent as
+ * OpenCode structured-log sink. Only the allowlisted aggregate fields are sent as
  * `extra`; the SDK's non-throwing result is still checked and every rejection is
  * swallowed into a typed status.
  */
@@ -42,7 +44,7 @@ export function createOpenCodeLogSink(client: OpenCodePresentationClient): Struc
         const result = await client.app.log({
           body: {
             service: SERVICE_NAME,
-            level: logLevelFor(entry.outcome),
+            level: logLevelFor(displayOutcome(entry.summary.counts)),
             message: reviewLogMessage(entry),
             extra: toLogExtra(entry),
           },
@@ -79,21 +81,32 @@ export function createOpenCodeToastSink(client: OpenCodePresentationClient): Toa
 }
 
 function toLogExtra(entry: ReviewLogEntry): Record<string, unknown> {
-  const context = {
+  return {
     turnId: entry.turnId,
-    ruleId: entry.ruleId,
-    severity: entry.severity,
-    scopedPaths: [...entry.scopedPaths],
-    outcome: entry.outcome,
+    summary: {
+      highestVerdict: entry.summary.highestVerdict,
+      hasUnavailable: entry.summary.hasUnavailable,
+      counts: { ...entry.summary.counts },
+    },
+    results: entry.results.map(toResultExtra),
+  };
+}
+
+function toResultExtra(result: ReviewLogResult): Record<string, unknown> {
+  const context = {
+    ruleId: result.ruleId,
+    severity: result.severity,
+    scopedPaths: [...result.scopedPaths],
+    outcome: result.outcome,
   };
 
-  switch (entry.outcome) {
+  switch (result.outcome) {
     case "PASS":
     case "WARN":
     case "FAIL":
-      return { ...context, violationProbability: entry.violationProbability };
+      return { ...context, violationProbability: result.violationProbability };
     case "SKIPPED":
     case "UNAVAILABLE":
-      return { ...context, reason: entry.reason };
+      return { ...context, reason: result.reason };
   }
 }

@@ -1,41 +1,32 @@
-import type { ReviewResult } from "@jevguard/core";
-import { formatRuleLabel } from "./log";
+import type { ReviewCounts, ReviewOutcome, TurnReview } from "@jevguard/core";
+import { displayOutcome } from "./display";
 import type { ReviewToast, ToastVariant } from "./types";
 
-export function toReviewToast(result: ReviewResult): ReviewToast {
-  const rule = formatRuleLabel(result.ruleId);
+export function toReviewToast(review: TurnReview): ReviewToast {
+  const outcome = displayOutcome(review.summary.counts);
 
-  switch (result.outcome) {
+  return {
+    title: `JevGuard ${outcome}`,
+    message: countSummary(review.summary.counts),
+    variant: toastVariantFor(outcome),
+  };
+}
+
+export function toastVariantFor(outcome: ReviewOutcome): ToastVariant {
+  switch (outcome) {
     case "PASS":
-      return semanticToast(result.outcome, rule, result.violationProbability, "success");
+      return "success";
     case "WARN":
-      return semanticToast(result.outcome, rule, result.violationProbability, "warning");
+      return "warning";
     case "FAIL":
-      return semanticToast(result.outcome, rule, result.violationProbability, "error");
-    case "SKIPPED":
-      return {
-        title: `JevGuard ${result.outcome}`,
-        message: `${rule} · ${result.reason}`,
-        variant: "info",
-      };
     case "UNAVAILABLE":
-      return {
-        title: `JevGuard ${result.outcome}`,
-        message: `${rule} · ${result.reason}`,
-        variant: "error",
-      };
+      return "error";
+    case "SKIPPED":
+      return "info";
   }
 }
 
-function semanticToast(
-  outcome: "PASS" | "WARN" | "FAIL",
-  rule: string,
-  probability: number,
-  variant: ToastVariant,
-): ReviewToast {
-  return {
-    title: `JevGuard ${outcome}`,
-    message: `${rule} · probability ${probability.toFixed(2)}`,
-    variant,
-  };
+/** Safe aggregate message: rule outcome counts only, never probabilities or paths. */
+export function countSummary(counts: ReviewCounts): string {
+  return `pass ${counts.pass} · warn ${counts.warn} · fail ${counts.fail} · skipped ${counts.skipped} · unavailable ${counts.unavailable}`;
 }

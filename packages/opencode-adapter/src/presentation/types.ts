@@ -1,9 +1,10 @@
 import type {
   OperationalStatus,
-  ReviewResult,
+  ReviewCounts,
   RuleSeverity,
   SemanticVerdict,
   SkippedReason,
+  TurnReview,
   UnavailableReason,
 } from "@jevguard/core";
 
@@ -11,26 +12,40 @@ export type ToastVariant = "info" | "success" | "warning" | "error";
 
 export type DeliveryStatus = "DELIVERED" | "FAILED";
 
-interface ReviewLogContext {
-  readonly turnId: string;
+interface ReviewLogResultContext {
   readonly ruleId: string | null;
   readonly severity: RuleSeverity | null;
   readonly scopedPaths: readonly string[];
 }
 
 /**
- * Exact structured-log allowlist. Semantic outcomes carry the raw probability;
- * operational outcomes carry the typed reason. Nothing else may be logged.
+ * Nested per-rule aggregate-log payload with an exact allowlist. Semantic
+ * outcomes carry the raw probability; operational outcomes carry the typed
+ * reason. Nothing else may be logged.
  */
-export type ReviewLogEntry =
-  | (ReviewLogContext & {
+export type ReviewLogResult =
+  | (ReviewLogResultContext & {
       readonly outcome: SemanticVerdict;
       readonly violationProbability: number;
     })
-  | (ReviewLogContext & {
+  | (ReviewLogResultContext & {
       readonly outcome: OperationalStatus;
       readonly reason: SkippedReason | UnavailableReason;
     });
+
+/** Aggregate summary projection for the structured log; `verdict` maps to `highestVerdict`. */
+export interface ReviewLogSummary {
+  readonly highestVerdict: SemanticVerdict | null;
+  readonly hasUnavailable: boolean;
+  readonly counts: ReviewCounts;
+}
+
+/** Exact structured-log allowlist for one aggregate turn review. */
+export interface ReviewLogEntry {
+  readonly turnId: string;
+  readonly summary: ReviewLogSummary;
+  readonly results: readonly ReviewLogResult[];
+}
 
 export interface ReviewToast {
   readonly title: string;
@@ -57,7 +72,7 @@ export interface PresentationDelivery {
 }
 
 export interface ReviewPresenter {
-  present(result: ReviewResult): Promise<PresentationDelivery>;
+  present(review: TurnReview): Promise<PresentationDelivery>;
 }
 
 export interface OpenCodeLogInput {
