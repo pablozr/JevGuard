@@ -25,8 +25,7 @@ corepack enable
 pnpm install
 ```
 
-The workspace scaffold and package scripts are landing with the MVP implementation.
-Until then, these commands describe the required development contract:
+Run the workspace checks before opening a pull request:
 
 ```sh
 pnpm format
@@ -34,6 +33,10 @@ pnpm lint
 pnpm typecheck
 pnpm test
 ```
+
+`pnpm check` runs the same sequence in one command. The CLI (`jevguard login`) and
+the OpenCode plugin run under the Bun runtime; Bun is not the workspace package
+manager.
 
 ## Contribution expectations
 

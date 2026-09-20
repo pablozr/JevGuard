@@ -27,9 +27,9 @@ specific policy, and leaves planning, code generation, and correction with the
 coding agent.
 
 > [!WARNING]
-> JevGuard is in active development. The first release targets OpenCode V1 and
-> runs in observe mode only: it reports results but never alters the agent context
-> or blocks a task.
+> JevGuard is in active development. The first release targets OpenCode `1.18.31`
+> and runs in observe mode only: it reports results but never alters the agent
+> context or blocks a task.
 
 ## Why JevGuard
 
@@ -102,17 +102,50 @@ policy that translates it into an outcome.
 
 Thresholds are locally configurable in `.jev/config.yaml`.
 
+## Install and run locally
+
+`@jevguard/plugin` is **not published to npm**. It is `private`, and its
+`@jevguard/core` and `@jevguard/opencode-adapter` dependencies are private
+workspace packages that export TypeScript source. A clean public consumer cannot
+install `@jevguard/plugin` from a registry until the publish topology is solved,
+so do not expect `npm install @jevguard/plugin` or an `opencode.json` `plugin`
+entry to work yet.
+
+For local development, load the plugin from OpenCode's project plugin directory
+after installing workspace dependencies:
+
+```text
+<repo>/.opencode/plugins/jevguard.ts
+```
+
+```ts
+export { JevGuardPlugin } from "../../packages/plugin/src/index";
+```
+
+OpenCode loads `.opencode/plugins/` at startup and runs the file with its bundled
+Bun runtime. Because the file imports the workspace source, this path requires
+`pnpm install` in this repository and a host version matching the target below.
+
+Known limitations:
+
+- Target host is OpenCode `1.18.31`. Real-host validation is still pending on an
+  exact `1.18.31` install; the locally available binary is `1.18.28`.
+- The `jevguard login` CLI has a Bun shebang and requires the Bun runtime. Run it
+  from the workspace with `bun packages/plugin/src/cli/main.ts login`.
+
 ## Connect Jev
 
 For local use, connect once with:
 
 ```sh
-jevguard login
+bun packages/plugin/src/cli/main.ts login
 ```
 
-JevGuard stores the key in your operating system's credential store instead of a
-repository file or shell history. In CI, provide `TYPESAFE_API_KEY` through the
-platform secret manager. See the [security model](./docs/security.md) for details.
+The installed command is `jevguard login`; until the package is published or
+linked onto `PATH`, use the Bun workspace path above. JevGuard stores the key in
+your operating system's credential store instead of a repository file or shell
+history. In CI, provide `TYPESAFE_API_KEY` through the platform secret manager.
+See the [security model](./docs/security.md) for details.
 
 ```text
 JEVGUARD REVIEW
@@ -177,7 +210,7 @@ its runtime, which keeps the evaluation model portable to future adapters.
 packages/
 ├── core/                 domain, policy, evaluation, gate
 ├── opencode-adapter/     OpenCode attribution and presentation
-├── plugin/               published OpenCode composition root
+├── plugin/               OpenCode composition root and CLI
 └── testkit/              fixtures and contract helpers
 
 plugin → opencode-adapter → core
@@ -185,8 +218,29 @@ plugin → opencode-adapter → core
 
 ## Status
 
-JevGuard is in the design-to-MVP transition. The initial implementation scaffold is
-the next milestone.
+The V0.1 vertical slice is implemented and observe-only. It loads in OpenCode,
+attributes one completed turn, parses one scoped rule from `.jev/rules.md`, asks
+Jev once per applicable rule, applies the local gate, and presents one result as a
+transient TUI toast and a structured log entry.
+
+OpenCode sees only transient toasts and structured logs. JevGuard does not inject
+anything into the agent context, does not add session messages, and does not block
+a task. Real-host validation against exact OpenCode `1.18.31` is still pending.
+
+## Development
+
+Requirements: Node.js `>=22.13.0`, pnpm `10.33.2` (via Corepack), and the Bun
+runtime for the CLI and OpenCode plugin loading.
+
+```sh
+corepack enable
+pnpm install
+pnpm typecheck
+pnpm test
+```
+
+Use `pnpm check` to run format, lint, typecheck, and tests in sequence. See
+[CONTRIBUTING.md](./CONTRIBUTING.md) for the full contribution workflow.
 
 ## Documentation
 

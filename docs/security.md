@@ -16,21 +16,46 @@ It does not send repository-wide diffs as a fallback.
 
 ## Evidence must be complete
 
-JevGuard never truncates a relevant diff. If evidence exceeds the configured input
-limit, the review is `UNAVAILABLE`.
+JevGuard never truncates a relevant diff. The assembled diff for the rule's
+applicable files is capped at `100000` characters; a larger diff is
+`UNAVAILABLE` with reason `OVERSIZED_DIFF`.
 
-It also does not evaluate a rule from a subset of its relevant files. If an
-applicable file is rejected by the safety policy, the rule is `UNAVAILABLE`.
+It also does not evaluate a rule from a subset of its relevant files. If any
+applicable file is rejected by the safety policy, the rule is `UNAVAILABLE` with
+reason `BLOCKED_EVIDENCE`.
 
 ## File safety policy
 
-Only configured textual/code extensions may be sent. Sensitive paths are rejected,
-including environment files, private keys, and credential files. The exact
-allowlist/denylist becomes configurable with the implementation; the invariant is
-that rejected content never leaves the machine.
+The V0.1 evidence policy is fixed in core (not yet configurable). Only common
+code and text extensions may be sent; a file without an allowlisted extension is
+rejected rather than assumed textual.
+
+Allowed extensions are broad and cover common source, config, docs, shell, and
+data text formats: for example `.ts`, `.tsx`, `.js`, `.jsx`, `.json`, `.md`,
+`.yaml`, `.toml`, `.css`, `.html`, `.py`, `.rb`, `.go`, `.rs`, `.java`, `.cs`,
+`.php`, `.c`, `.cpp`, `.swift`, `.sh`, `.ps1`, `.sql`, `.graphql`, `.tf`, and
+`.patch`.
+
+Sensitive paths are always rejected, including:
+
+- exact file names such as `.env`, `.envrc`, `.netrc`, `_netrc`, `.npmrc`,
+  `.pypirc`, `.pgpass`, `.git-credentials`, `.htpasswd`, `.dockercfg`, `id_rsa`,
+  `id_dsa`, `id_ecdsa`, `id_ed25519`, `credentials`, `credentials.json`,
+  `credentials.yaml`, `credentials.yml`, `secrets`, `secrets.json`,
+  `secrets.yaml`, `secrets.yml`, `shadow`, and `master.key`;
+- extensions such as `.pem`, `.key`, `.p12`, `.pfx`, `.jks`, `.keystore`, and
+  `.ppk`;
+- directory segments such as `.ssh`, `.aws`, `.gnupg`, `.azure`, `.kube`, and
+  `.docker`.
+
+Matching is case-insensitive and treats both `/` and `\` as separators. A
+dot-prefixed denied name also matches its dotted variants, so `.env` rejects
+`.env.local`; entries without a leading dot such as `credentials` and `secrets`
+match exactly. The invariant is that rejected content never leaves the machine.
 
 Structured logs may record a rejected path and reason. They must never record the
-rejected file contents.
+rejected file contents, and a rejected file is never replaced by the repository
+diff or by another file's patch.
 
 ## Credentials
 
@@ -40,6 +65,9 @@ For normal local use, run:
 jevguard login
 ```
 
+From the workspace before the package is published, run the same command with Bun:
+`bun packages/plugin/src/cli/main.ts login`.
+
 The CLI reads the key using a masked terminal prompt and stores it in the native
 operating-system credential store:
 
@@ -47,7 +75,7 @@ operating-system credential store:
 - Windows: Credential Manager;
 - Linux: Secret Service/keyring.
 
-JevGuard reads the credential automatically when OpenCode starts. The API key never
+JevGuard reads the credential each time it evaluates a turn. The API key never
 belongs in `.jev/`, `opencode.json`, agent messages, logs, toasts, test fixtures,
 or a committed file.
 
