@@ -19,12 +19,22 @@ const RUNTIME_DEPENDENCIES: Readonly<Record<string, string>> = {
   yaml: "2.9.1",
 };
 
+interface SourceRepository {
+  readonly type: string;
+  readonly url: string;
+  readonly directory: string;
+}
+
 interface SourceManifest {
   readonly name: string;
   readonly version: string;
-  readonly description?: string;
-  readonly license?: string;
-  readonly keywords?: readonly string[];
+  readonly description: string;
+  readonly license: string;
+  readonly repository: SourceRepository;
+  readonly homepage: string;
+  readonly bugs: { readonly url: string };
+  readonly engines: Readonly<Record<string, string>>;
+  readonly keywords: readonly string[];
 }
 
 async function readSourceManifest(): Promise<SourceManifest> {
@@ -61,16 +71,19 @@ async function writeArtifactManifest(source: SourceManifest): Promise<void> {
   const manifest = {
     name: source.name,
     version: source.version,
-    private: true,
     description: source.description,
     license: source.license,
     type: "module",
-    engines: { bun: ">=1.1.0" },
     main: "./index.js",
     exports: { ".": "./index.js" },
-    bin: { jevguard: "./cli/main.js" },
+    bin: { jevguard: "cli/main.js" },
     files: ["index.js", "cli/main.js", "README.md", "LICENSE"],
+    engines: source.engines,
+    repository: source.repository,
+    homepage: source.homepage,
+    bugs: source.bugs,
     keywords: source.keywords,
+    publishConfig: { access: "public", registry: "https://registry.npmjs.org" },
     dependencies: RUNTIME_DEPENDENCIES,
   };
 

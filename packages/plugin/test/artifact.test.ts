@@ -1,5 +1,13 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,8 +23,11 @@ const PACK_SCRIPT = join(PLUGIN_DIR, "scripts", "pack-artifact.ts");
 const BUILD_SENTINEL_VARIABLE = "JEVGUARD_ARTIFACT_BUILD_SENTINEL";
 const BUILD_SENTINEL_VALUE = "JEVGUARD_ARTIFACT_BUILD_SENTINEL_7f3c9d2a";
 
+const PLUGIN_PACKAGE_NAME = "@jevguard/plugin";
+const PLUGIN_VERSION = "0.1.0";
 const EXPECTED_DIST_FILES = ["LICENSE", "README.md", "cli/main.js", "index.js", "package.json"];
 const EXPECTED_ARCHIVE_FILES = EXPECTED_DIST_FILES.map((file) => `package/${file}`).sort();
+const EXPECTED_PACKED_FILES = ["index.js", "cli/main.js", "README.md", "LICENSE"];
 const EXPECTED_RUNTIME_DEPENDENCIES = {
   "@inquirer/password": "^5.2.2",
   "@napi-rs/keyring": "2.1.0",
@@ -29,17 +40,48 @@ const FORBIDDEN_DEPENDENCIES = [
   "@opencode-ai/plugin",
   "@opencode-ai/sdk",
 ];
+const EXPECTED_REPOSITORY = {
+  type: "git",
+  url: "git+https://github.com/pablozr/JevGuard.git",
+  directory: "packages/plugin",
+};
+const EXPECTED_HOMEPAGE = "https://github.com/pablozr/JevGuard#readme";
+const EXPECTED_BUGS = { url: "https://github.com/pablozr/JevGuard/issues" };
+const EXPECTED_ENGINES = { bun: ">=1.1.0", opencode: ">=1.18.31 <2" };
+const EXPECTED_PUBLISH_CONFIG = { access: "public", registry: "https://registry.npmjs.org" };
+
+const LOCAL_SHIM = 'export { JevGuardPlugin } from "@jevguard/plugin";\n';
+const SHIM_IMPORT_CHECK = [
+  'import * as module from "./jevguard";',
+  "const names = Object.keys(module).sort();",
+  "console.log(JSON.stringify({ names, type: typeof module.JevGuardPlugin }));",
+  "",
+].join("\n");
 
 const INSTALL_TIMEOUT = 300_000;
 
+const PUBLISH_CHECK_SCRIPT =
+  "bun packages/plugin/scripts/build-artifact.ts && npm publish --dry-run ./packages/plugin/dist --access public";
+
 interface ArtifactManifest {
+  readonly name?: string;
+  readonly version?: string;
   readonly private?: boolean;
+  readonly description?: string;
+  readonly license?: string;
   readonly type?: string;
   readonly main?: string;
   readonly exports?: Readonly<Record<string, string>>;
   readonly bin?: Readonly<Record<string, string>>;
+  readonly files?: readonly string[];
   readonly engines?: Readonly<Record<string, string>>;
+  readonly repository?: Readonly<Record<string, string>>;
+  readonly homepage?: string;
+  readonly bugs?: Readonly<Record<string, string>>;
+  readonly keywords?: readonly string[];
+  readonly publishConfig?: Readonly<Record<string, string>>;
   readonly dependencies?: Readonly<Record<string, string>>;
+  readonly scripts?: Readonly<Record<string, string>>;
 }
 
 interface RootManifest {
@@ -49,19 +91,20 @@ interface RootManifest {
 let tempRoot = "";
 let tarballPath = "";
 let extractedDir = "";
-let consumerDir = "";
+let opencodeDir = "";
+let pluginsDir = "";
 
 function listFiles(root: string, prefix = ""): string[] {
   const directory = prefix === "" ? root : join(root, prefix);
   const files: string[] = [];
 
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
-    const relative = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
+    const relativePath = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
 
     if (entry.isDirectory()) {
-      files.push(...listFiles(root, relative));
+      files.push(...listFiles(root, relativePath));
     } else {
-      files.push(relative);
+      files.push(relativePath);
     }
   }
 
@@ -96,30 +139,41 @@ function buildAndPack(): void {
   execFileSync("tar", ["-xzf", tarballPath, "-C", extractedDir], { stdio: "pipe" });
 }
 
-function installIntoCleanConsumer(): void {
-  consumerDir = join(tempRoot, "consumer");
-  mkdirSync(consumerDir, { recursive: true });
-  writeFileSync(
-    join(consumerDir, "package.json"),
-    `${JSON.stringify(
-      { name: "jevguard-artifact-consumer", private: true, type: "module" },
-      null,
-      2,
-    )}\n`,
-  );
+/**
+ * Mirrors the supported pre-publication flow: the tarball is installed into the
+ * consumer's `.opencode` directory and loaded through a local plugin shim, because
+ * OpenCode resolves a bare `opencode.json` plugin entry from the registry or cache,
+ * not from the consumer's `node_modules`.
+ */
+function installLocalArtifact(): void {
+  opencodeDir = join(tempRoot, "consumer", ".opencode");
+  pluginsDir = join(opencodeDir, "plugins");
+  mkdirSync(pluginsDir, { recursive: true });
 
-  execFileSync("bun", ["add", tarballPath, "--no-save", "--prefer-offline"], {
-    cwd: consumerDir,
+  execFileSync("bun", ["add", tarballPath], {
+    cwd: opencodeDir,
     stdio: "pipe",
     timeout: INSTALL_TIMEOUT,
   });
+
+  writeFileSync(join(pluginsDir, "jevguard.ts"), LOCAL_SHIM);
+}
+
+function npmCommand(args: readonly string[]): [string, readonly string[]] {
+  if (process.platform === "win32") {
+    const command = ["npm", ...args].join(" ");
+
+    return [process.env.ComSpec ?? "cmd.exe", ["/d", "/s", "/c", command]];
+  }
+
+  return ["npm", [...args]];
 }
 
 beforeAll(() => {
   tempRoot = mkdtempSync(join(tmpdir(), "jevguard-artifact-"));
 
   buildAndPack();
-  installIntoCleanConsumer();
+  installLocalArtifact();
 }, INSTALL_TIMEOUT);
 
 afterAll(() => {
@@ -143,16 +197,27 @@ describe("local package artifact", () => {
     expect(listed).toEqual(EXPECTED_ARCHIVE_FILES);
   });
 
-  test("declares no workspace or type-only dependencies in the packed manifest", () => {
+  test("publishes the exact public manifest with only runtime dependencies", () => {
     const manifest = readJson<ArtifactManifest>(join(extractedDir, "package", "package.json"));
+    const source = readJson<ArtifactManifest>(join(PLUGIN_DIR, "package.json"));
 
-    expect(manifest.private).toBe(true);
+    expect(manifest.name).toBe(PLUGIN_PACKAGE_NAME);
+    expect(manifest.version).toBe(PLUGIN_VERSION);
+    expect(manifest.private ?? false).toBe(false);
     expect(manifest.type).toBe("module");
-    expect(manifest.dependencies).toEqual(EXPECTED_RUNTIME_DEPENDENCIES);
+    expect(manifest.description).toBe(source.description);
+    expect(manifest.license).toBe("MIT");
     expect(manifest.main).toBe("./index.js");
     expect(manifest.exports).toEqual({ ".": "./index.js" });
-    expect(manifest.bin).toEqual({ jevguard: "./cli/main.js" });
-    expect(manifest.engines?.bun).toBeDefined();
+    expect(manifest.bin).toEqual({ jevguard: "cli/main.js" });
+    expect(manifest.files).toEqual(EXPECTED_PACKED_FILES);
+    expect(manifest.engines).toEqual(EXPECTED_ENGINES);
+    expect(manifest.repository).toEqual(EXPECTED_REPOSITORY);
+    expect(manifest.homepage).toBe(EXPECTED_HOMEPAGE);
+    expect(manifest.bugs).toEqual(EXPECTED_BUGS);
+    expect(manifest.publishConfig).toEqual(EXPECTED_PUBLISH_CONFIG);
+    expect(manifest.dependencies).toEqual(EXPECTED_RUNTIME_DEPENDENCIES);
+    expect(manifest.scripts).toBeUndefined();
 
     const serialized = JSON.stringify(manifest);
 
@@ -161,6 +226,14 @@ describe("local package artifact", () => {
     for (const dependency of FORBIDDEN_DEPENDENCIES) {
       expect(serialized).not.toContain(dependency);
     }
+  });
+
+  test("keeps the Bun shebang on the generated CLI entry", () => {
+    const generated = readFileSync(join(DIST_DIR, "cli", "main.js"), "utf8");
+    const packed = readFileSync(join(extractedDir, "package", "cli", "main.js"), "utf8");
+
+    expect(generated.startsWith("#!/usr/bin/env bun")).toBe(true);
+    expect(packed.startsWith("#!/usr/bin/env bun")).toBe(true);
   });
 
   test("does not embed build-process environment values", () => {
@@ -176,21 +249,27 @@ describe("local package artifact", () => {
     }
   });
 
-  test("installs in a clean consumer and imports exactly the plugin export", () => {
-    const importCheckPath = join(consumerDir, "import-check.mjs");
+  test("installs the tarball into .opencode without internal or host SDK packages", () => {
+    for (const dependency of FORBIDDEN_DEPENDENCIES) {
+      expect(existsSync(join(opencodeDir, "node_modules", dependency))).toBe(false);
+    }
 
-    writeFileSync(
-      importCheckPath,
-      [
-        'import * as module from "@jevguard/plugin";',
-        "const names = Object.keys(module).sort();",
-        "console.log(JSON.stringify({ names, type: typeof module.JevGuardPlugin }));",
-        "",
-      ].join("\n"),
+    const installed = readJson<ArtifactManifest>(
+      join(opencodeDir, "node_modules", PLUGIN_PACKAGE_NAME, "package.json"),
     );
 
-    const output = execFileSync("bun", [importCheckPath], {
-      cwd: consumerDir,
+    expect(installed.name).toBe(PLUGIN_PACKAGE_NAME);
+    expect(installed.version).toBe(PLUGIN_VERSION);
+    expect(installed.dependencies).toEqual(EXPECTED_RUNTIME_DEPENDENCIES);
+  });
+
+  test("loads the local .opencode plugin shim with Bun from the plugins path", () => {
+    const checkPath = join(pluginsDir, "import-check.ts");
+
+    writeFileSync(checkPath, SHIM_IMPORT_CHECK);
+
+    const output = execFileSync("bun", [checkPath], {
+      cwd: pluginsDir,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -203,12 +282,29 @@ describe("local package artifact", () => {
     expect(result.type).toBe("function");
   });
 
-  test("runs the installed CLI without resolution errors", () => {
-    const result = spawnSync("bun", ["run", "jevguard"], { cwd: consumerDir, encoding: "utf8" });
+  test("runs the installed CLI through the Bun bin mapping from .opencode", () => {
+    const result = spawnSync("bun", ["run", "jevguard"], { cwd: opencodeDir, encoding: "utf8" });
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("Usage: jevguard login");
     expect(result.stderr).not.toMatch(/Cannot find (module|package)|ERR_MODULE_NOT_FOUND/);
+  });
+
+  test("validates the dist with npm publish --dry-run without publishing", () => {
+    const result = spawnSync(
+      ...npmCommand(["publish", "--dry-run", DIST_DIR, "--access", "public"]),
+      {
+        cwd: REPO_ROOT,
+        encoding: "utf8",
+      },
+    );
+    const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+
+    expect(result.status).toBe(0);
+    expect(output).toContain(`${PLUGIN_PACKAGE_NAME}@${PLUGIN_VERSION}`);
+    expect(output).toContain("dry-run");
+    expect(output).not.toContain("auto-corrected");
+    expect(output).not.toContain("npm warn publish");
   });
 
   test("exposes the artifact workflow through root scripts", () => {
@@ -220,5 +316,6 @@ describe("local package artifact", () => {
     expect(manifest.scripts?.["artifact:pack"]).toBe(
       "bun packages/plugin/scripts/pack-artifact.ts",
     );
+    expect(manifest.scripts?.["artifact:publish:check"]).toBe(PUBLISH_CHECK_SCRIPT);
   });
 });

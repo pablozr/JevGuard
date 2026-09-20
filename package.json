@@ -15,6 +15,7 @@
     "test": "vitest run",
     "artifact:build": "bun packages/plugin/scripts/build-artifact.ts",
     "artifact:pack": "bun packages/plugin/scripts/pack-artifact.ts",
+    "artifact:publish:check": "bun packages/plugin/scripts/build-artifact.ts && npm publish --dry-run ./packages/plugin/dist --access public",
     "check": "pnpm format && pnpm lint && pnpm typecheck && pnpm test"
   },
   "devDependencies": {

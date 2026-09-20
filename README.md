@@ -2,7 +2,7 @@
 
 > **Semantic policy engine for coding agents.**
 
-![JevGuard: semantic policy engine for coding agents](./27b864b2-3f64-4211-99dd-26764c549d03.png)
+![JevGuard: semantic policy engine for coding agents](https://raw.githubusercontent.com/pablozr/JevGuard/main/27b864b2-3f64-4211-99dd-26764c549d03.png)
 
 JevGuard checks the code an agent just changed against the policies that matter in
 your repository. It uses Jev for a narrow semantic judgment per rule, then applies
@@ -109,13 +109,31 @@ policy that translates it into an outcome.
 
 Thresholds are locally configurable in `.jev/config.yaml`.
 
-## Install and run locally
+## Install
 
-`@jevguard/plugin` is **not published to npm**. It is `private`, and its
-`@jevguard/core` and `@jevguard/opencode-adapter` dependencies are private
-workspace packages. The artifact ships the plugin as a **locally packed tarball**
-that bundles that workspace code, so a clean consumer installs one tarball and
-never resolves a workspace link or a private registry package.
+Once `@jevguard/plugin` is published to npm, the intended install is one line in
+`opencode.json`:
+
+```json
+{ "plugin": ["@jevguard/plugin"] }
+```
+
+OpenCode then resolves the package from the npm registry or its cache and loads it
+on the next start. Adding the entry only loads the plugin; it does **not** put the
+`jevguard` CLI on `PATH` (see [Install the CLI](#install-the-cli)). Restart
+OpenCode after changing the plugin list.
+
+> [!IMPORTANT]
+> `@jevguard/plugin` is **not published to npm yet**. The one-line entry above is
+> future behavior and will not resolve until the package is released. Before
+> publication, load the plugin as a local artifact plugin instead.
+
+### Build the local artifact
+
+The artifact ships the plugin as a **locally packed tarball** that bundles the
+private `@jevguard/core` and `@jevguard/opencode-adapter` workspace code, so a
+clean consumer installs one tarball and never resolves a workspace link or a
+private registry package.
 
 Build the tarball from this repository:
 
@@ -134,13 +152,15 @@ The packed manifest depends only on public runtime packages
 the tarball therefore needs npm registry access for those packages; the artifact
 does not vendor them and does not promise an offline install.
 
-### Load the plugin in a consumer project
+### Load the local plugin before publication
 
-Install the tarball in the consumer project, then add the plugin shim OpenCode
-loads:
+OpenCode `1.18.31` resolves a **bare** `opencode.json` `plugin` entry from the npm
+registry or its cache, not from the consumer's `node_modules`. Until the package is
+published, install the tarball into the project's `.opencode` directory and load it
+through a local plugin shim:
 
 ```sh
-cd /path/to/consumer
+cd /path/to/consumer/.opencode
 bun add /path/to/jevguard-plugin-<version>.tgz
 ```
 
@@ -149,14 +169,28 @@ bun add /path/to/jevguard-plugin-<version>.tgz
 export { JevGuardPlugin } from "@jevguard/plugin";
 ```
 
-OpenCode loads `.opencode/plugins/` at startup and runs the shim with its bundled
-Bun runtime. Do not point an `opencode.json` `plugin` entry directly at the
-tarball path; install it and load the package export through the shim above.
+OpenCode loads `.opencode/plugins/` with its bundled Bun runtime. The shim runs as
+a local plugin module and resolves `@jevguard/plugin` from
+`.opencode/node_modules`. Do **not** add `@jevguard/plugin` to the `opencode.json`
+`plugin` list before publication; that bare entry does not resolve locally.
 
 ### Install the CLI
 
-The same tarball installs a `jevguard` binary. Install it globally so the login
-command is on `PATH`:
+Loading the plugin does not expose the `jevguard` binary on `PATH`. Once the
+package is published, run the login command without a global install:
+
+```sh
+bunx --package @jevguard/plugin jevguard login
+```
+
+Or install the package globally so `jevguard` is on `PATH`:
+
+```sh
+bun install --global @jevguard/plugin
+jevguard login
+```
+
+Until the package is published, install the local tarball globally instead:
 
 ```sh
 bun install --global /path/to/jevguard-plugin-<version>.tgz
@@ -165,8 +199,8 @@ jevguard login
 
 Known limitations:
 
-- This is a local, private artifact. There is no registry install and no publish
-  topology yet.
+- `@jevguard/plugin` has no registry release yet, so the one-line `opencode.json`
+  plugin entry does not resolve until the package is published.
 - Target host is OpenCode `1.18.31`. Exact `1.18.31` runtime smoke is still
   pending; a local `1.18.28` run worked.
 - The plugin and CLI run on Bun, and the packed `jevguard` bin keeps a Bun
@@ -180,8 +214,13 @@ For local use, connect once with the installed command:
 jevguard login
 ```
 
-If the artifact is not on `PATH`, run the installed binary directly, or from this
-workspace use the Bun fallback `bun packages/plugin/src/cli/main.ts login`.
+Loading the plugin does not put `jevguard` on `PATH`. If it is not installed
+globally, run the one-line login instead:
+
+```sh
+bunx --package @jevguard/plugin jevguard login
+```
+
 JevGuard stores the key in your operating system's credential store instead of a
 repository file or shell history. In CI, provide `TYPESAFE_API_KEY` through the
 platform secret manager. See the [security model](./docs/security.md) for details.

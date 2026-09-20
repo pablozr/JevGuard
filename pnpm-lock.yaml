@@ -52,6 +52,7 @@ importers:
       '@jevguard/opencode-adapter':
         specifier: workspace:*
         version: link:../opencode-adapter
+    devDependencies:
       '@opencode-ai/plugin':
         specifier: 1.18.31
         version: 1.18.31

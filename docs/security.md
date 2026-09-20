@@ -64,15 +64,22 @@ diff or by another file's patch.
 
 ## Credentials
 
-For normal local use, install the packed artifact globally and run:
+For normal local use, run the login command with the published package:
 
 ```sh
-bun install --global /path/to/jevguard-plugin-<version>.tgz
+bunx --package @jevguard/plugin jevguard login
+```
+
+Or install it globally so `jevguard` is on `PATH`:
+
+```sh
+bun install --global @jevguard/plugin
 jevguard login
 ```
 
-If the artifact is not on `PATH`, run the installed binary directly, or from this
-workspace use the Bun fallback `bun packages/plugin/src/cli/main.ts login`.
+Adding the plugin to `opencode.json` does not put `jevguard` on `PATH`.
+`@jevguard/plugin` is not published yet; until then, install the packed local
+tarball globally and run `jevguard login`.
 
 The CLI reads the key using a masked terminal prompt and stores it in the native
 operating-system credential store:
