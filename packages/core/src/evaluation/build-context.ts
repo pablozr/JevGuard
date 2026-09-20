@@ -1,11 +1,12 @@
-import type { ParsedRule, ReviewContext, Turn } from "../domain/types";
+import type { ParsedRule, RuleReviewContext, Turn } from "../domain/types";
 
 export function buildReviewContext(
   turn: Turn,
   rule: ParsedRule,
   scopedPaths: readonly string[],
-): ReviewContext {
+): RuleReviewContext {
   return {
+    kind: "RULE",
     turnId: turn.id,
     ruleId: rule.id,
     severity: rule.severity,

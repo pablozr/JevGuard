@@ -1,9 +1,9 @@
-import type { ReviewResult } from "../domain/types";
+import type { RuleReviewResult } from "../domain/types";
 import { selectRuleEvidence } from "../evidence/select-evidence";
 import { evaluateGate } from "../gate/evaluate-gate";
-import type { JevEvaluationPort, JevEvaluationResult, JevRequest } from "../ports/types";
 import { buildJevRequest } from "./build-request";
 import { buildReviewContext } from "./build-context";
+import { evaluateWithPort } from "./evaluate-with-port";
 import type { EvaluateRuleDependencies, EvaluateRuleInput } from "./types";
 
 /**
@@ -15,7 +15,7 @@ import type { EvaluateRuleDependencies, EvaluateRuleInput } from "./types";
 export async function evaluateRule(
   input: EvaluateRuleInput,
   dependencies: EvaluateRuleDependencies,
-): Promise<ReviewResult> {
+): Promise<RuleReviewResult> {
   const selection = selectRuleEvidence(input.turn, input.rule, input.evidencePolicy);
 
   if (selection.status === "SKIPPED") {
@@ -43,15 +43,4 @@ export async function evaluateRule(
   );
 
   return { ...context, ...gate };
-}
-
-async function evaluateWithPort(
-  port: JevEvaluationPort,
-  request: JevRequest,
-): Promise<JevEvaluationResult> {
-  try {
-    return await port.evaluate(request);
-  } catch {
-    return { status: "FAILED", reason: "API_ERROR" };
-  }
 }

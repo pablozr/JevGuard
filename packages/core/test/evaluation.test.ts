@@ -77,6 +77,7 @@ function firstRequest(port: FakeJevPort): JevRequest {
 }
 
 const selectedContext = {
+  kind: "RULE",
   turnId: "turn-1",
   ruleId: "ARCH-001",
   severity: "error",

@@ -1,4 +1,9 @@
 export type {
+  BuiltInOperationalResult,
+  BuiltInReviewContext,
+  BuiltInReviewResult,
+  BuiltInSkippedReason,
+  BuiltInUnavailableReason,
   ErrorThresholds,
   GateConfig,
   GateResult,
@@ -7,9 +12,13 @@ export type {
   OperationalStatus,
   ParsedRule,
   ReviewContext,
+  ReviewLevelContext,
+  ReviewLevelResult,
   ReviewOutcome,
   ReviewResult,
+  ReviewResultKind,
   RuleEvidence,
+  RuleReviewContext,
   RuleReviewResult,
   RuleSeverity,
   SemanticVerdict,
@@ -20,6 +29,7 @@ export type {
   WarningThresholds,
 } from "./domain/types";
 export type {
+  JevBuiltInRequest,
   JevChange,
   JevEvaluationPort,
   JevEvaluationResult,
@@ -28,6 +38,7 @@ export type {
   JevNoulQuestion,
   JevRequest,
   JevRuleCriteria,
+  JevRuleRequest,
   PolicySource,
   PolicySourcePort,
 } from "./ports/types";
@@ -66,11 +77,23 @@ export type {
   EvidenceUnavailableReason,
   FileRejectionReason,
   PathSafety,
+  TurnEvidenceSelection,
 } from "./evidence/types";
 export { DEFAULT_EVIDENCE_POLICY } from "./evidence/defaults";
 export { checkFilePath } from "./evidence/safety";
 export { matchesScope } from "./evidence/scope";
-export { selectRuleEvidence } from "./evidence/select-evidence";
+export { selectRuleEvidence, selectTurnEvidence } from "./evidence/select-evidence";
+export type {
+  EvaluateBuiltInDependencies,
+  EvaluateBuiltInInput,
+  EvaluateScopeCreepDependencies,
+  EvaluateScopeCreepInput,
+} from "./builtins/types";
+export {
+  buildScopeCreepRequest,
+  evaluateScopeCreep,
+  SCOPE_CREEP_CHECK_ID,
+} from "./builtins/scope-creep";
 export type { GateConfigResult, GateEvaluation, GateUnavailable } from "./gate/types";
 export { DEFAULT_GATE_CONFIG } from "./gate/defaults";
 export { resolveGateConfig } from "./gate/config";

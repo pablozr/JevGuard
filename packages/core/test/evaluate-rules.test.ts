@@ -122,6 +122,7 @@ describe("evaluateRules", () => {
 
     expect(review.results[0]).toMatchObject({ ruleId: "SRC-1", outcome: "PASS" });
     expect(review.results[1]).toEqual({
+      kind: "RULE",
       turnId: "turn-1",
       ruleId: "DOCS-1",
       severity: "error",
@@ -155,6 +156,7 @@ describe("evaluateRules", () => {
     );
 
     expect(review.results[0]).toEqual({
+      kind: "RULE",
       turnId: "turn-1",
       ruleId: "SRC-1",
       severity: "error",
@@ -215,6 +217,7 @@ describe("evaluateRules", () => {
     );
 
     expect(review.results[0]).toEqual({
+      kind: "RULE",
       turnId: "turn-1",
       ruleId: "A-1",
       severity: null,
@@ -251,6 +254,7 @@ describe("evaluateRules", () => {
     );
 
     expect(review.results[0]).toEqual({
+      kind: "RULE",
       turnId: "turn-1",
       ruleId: "R-1",
       severity: "warning",
@@ -259,6 +263,7 @@ describe("evaluateRules", () => {
       reason: "INVALID_CONFIG",
     });
     expect(review.results[1]).toEqual({
+      kind: "RULE",
       turnId: "turn-1",
       ruleId: "R-2",
       severity: "error",

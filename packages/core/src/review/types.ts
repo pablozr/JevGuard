@@ -1,4 +1,4 @@
-import type { RuleReviewResult, SemanticVerdict } from "../domain/types";
+import type { ReviewResult, SemanticVerdict } from "../domain/types";
 
 /** Per-outcome counts over every rule result in a turn review. */
 export interface ReviewCounts {
@@ -21,9 +21,9 @@ export interface ReviewSummary {
   readonly counts: ReviewCounts;
 }
 
-/** One turn's per-rule results in source order plus their aggregate summary. */
+/** One turn's results across lanes in source order plus their aggregate summary. */
 export interface TurnReview {
   readonly turnId: string;
-  readonly results: readonly RuleReviewResult[];
+  readonly results: readonly ReviewResult[];
   readonly summary: ReviewSummary;
 }

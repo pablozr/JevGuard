@@ -1,15 +1,18 @@
 import {
   DEFAULT_EVIDENCE_POLICY,
+  aggregateReview,
   evaluateRules,
+  evaluateScopeCreep,
   type GateConfigResult,
   parseRules,
   resolveGateConfig,
+  type ReviewResult,
   type Turn,
   type UnavailableReason,
 } from "@jevguard/core";
-import { parsePolicyConfig, type ReviewPresenter } from "@jevguard/opencode-adapter";
+import { parsePolicyConfig, type PolicyLoadResult } from "@jevguard/opencode-adapter";
 import { presentReview } from "./present";
-import { unavailableReview } from "./review-result";
+import { reviewLevelUnavailable } from "./review-result";
 import type { ReviewDependencies } from "./types";
 
 type ConfigValue =
@@ -17,10 +20,12 @@ type ConfigValue =
   | { readonly status: "INVALID" };
 
 /**
- * Reviews one attributed turn: load the fixed policy paths once, parse every rule
- * block and resolve the config once, then evaluate the rules sequentially through
- * core and present exactly one aggregate review. Invalid individual rule blocks and
- * an invalid config become per-rule results without suppressing their siblings.
+ * Reviews one attributed turn: load the fixed policy paths once, run the local rule
+ * lane and the scope-creep built-in concurrently, then present exactly one aggregate.
+ * A loader or rule/config failure only degrades the rule lane; the built-in always
+ * runs. Rules stay sequential inside their lane, so a turn has at most the built-in
+ * and one rule in flight, and the final results are rules in source order then scope
+ * creep.
  */
 export async function reviewAttributedTurn(
   turn: Turn,
@@ -28,19 +33,35 @@ export async function reviewAttributedTurn(
 ): Promise<void> {
   const loaded = await dependencies.policy.load();
 
+  const [ruleResults, scopeCreepResult] = await Promise.all([
+    evaluateRuleLane(turn, loaded, dependencies),
+    evaluateScopeCreep(
+      { turn, evidencePolicy: DEFAULT_EVIDENCE_POLICY },
+      { jev: dependencies.jev },
+    ),
+  ]);
+
+  const review = aggregateReview(turn.id, [...ruleResults, scopeCreepResult]);
+
+  await presentReview(dependencies.presenter, review);
+}
+
+async function evaluateRuleLane(
+  turn: Turn,
+  loaded: PolicyLoadResult,
+  dependencies: Pick<ReviewDependencies, "jev">,
+): Promise<readonly ReviewResult[]> {
   if (loaded.status === "FAILED") {
     const reason: UnavailableReason =
       loaded.reason === "CONFIG_READ_FAILURE" ? "INVALID_CONFIG" : "INVALID_RULE";
 
-    await presentUnavailable(dependencies.presenter, turn.id, reason);
-    return;
+    return [reviewLevelUnavailable(turn.id, reason)];
   }
 
   const rules = loaded.source.rules;
 
   if (rules === null) {
-    await presentUnavailable(dependencies.presenter, turn.id, "INVALID_RULE");
-    return;
+    return [reviewLevelUnavailable(turn.id, "INVALID_RULE")];
   }
 
   const parsedRules = parseRules(rules);
@@ -56,7 +77,7 @@ export async function reviewAttributedTurn(
     { jev: dependencies.jev },
   );
 
-  await presentReview(dependencies.presenter, review);
+  return review.results;
 }
 
 function readGateConfig(config: string | null): GateConfigResult {
@@ -79,12 +100,4 @@ function readConfigValue(config: string | null): ConfigValue {
   return parsed.status === "PARSED"
     ? { status: "VALUE", value: parsed.value }
     : { status: "INVALID" };
-}
-
-async function presentUnavailable(
-  presenter: ReviewPresenter,
-  turnId: string,
-  reason: UnavailableReason,
-): Promise<void> {
-  await presentReview(presenter, unavailableReview(turnId, null, reason));
 }

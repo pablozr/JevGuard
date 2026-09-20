@@ -1,6 +1,7 @@
 import type {
   CredentialProvider,
   CredentialResolution,
+  JevBuiltInRequest,
   JevEvaluationResult,
   JevRequest,
 } from "@jevguard/core";
@@ -76,6 +77,25 @@ function request(overrides: Partial<JevRequest> = {}): JevRequest {
         id: "ARCH-001",
         description: "Controllers stay thin.",
         violation: "The controller performs domain logic.",
+      },
+    },
+    change: { files: ["src/health.ts"], diff: DIFF },
+    ...overrides,
+  };
+}
+
+function builtInRequest(overrides: Partial<JevBuiltInRequest> = {}): JevBuiltInRequest {
+  return {
+    kind: "BUILT_IN",
+    task: TASK,
+    question: {
+      type: "noul",
+      instructions: "Answer true when the change contains scope creep.",
+      criteria: {
+        id: "SCOPE-CREEP",
+        description: "The change introduces work the task did not request.",
+        violation: "The change adds unrequested work.",
+        allowed: "Supporting, testing, and documentation changes.",
       },
     },
     change: { files: ["src/health.ts"], diff: DIFF },
@@ -202,13 +222,64 @@ describe("Jev transport request payload", () => {
     await h.port.evaluate(withAllowed);
 
     const sent = h.client.requests[0];
-    expect(sent?.state.rule).toEqual({
+
+    if (sent === undefined || !("rule" in sent.state)) {
+      throw new Error("expected a rule state");
+    }
+
+    expect(sent.state.rule).toEqual({
       id: "ARCH-001",
       description: "Controllers stay thin.",
       violation: "The controller performs domain logic.",
       allowed: "Validation and HTTP mapping.",
     });
-    expect(sent?.questions.violation.criteria.false).toBe("Validation and HTTP mapping.");
+    expect(sent.questions.violation.criteria.false).toBe("Validation and HTTP mapping.");
+  });
+
+  test("maps a built-in request to a check state with the check Noul criteria", async () => {
+    const h = harness();
+
+    await h.port.evaluate(builtInRequest());
+
+    expect(h.client.requests).toHaveLength(1);
+    expect(h.client.requests[0]).toEqual({
+      state: {
+        task: TASK,
+        check: {
+          id: "SCOPE-CREEP",
+          description: "The change introduces work the task did not request.",
+          violation: "The change adds unrequested work.",
+          allowed: "Supporting, testing, and documentation changes.",
+        },
+        change: { files: ["src/health.ts"], diff: DIFF },
+      },
+      questions: {
+        violation: {
+          type: "noul",
+          instructions: "Answer true when the change contains scope creep.",
+          criteria: {
+            true: "The change adds unrequested work.",
+            false: "Supporting, testing, and documentation changes.",
+          },
+        },
+      },
+      model: "jev-latest",
+    });
+  });
+
+  test("never sends the request kind or a rule field on a built-in state", async () => {
+    const h = harness();
+
+    await h.port.evaluate(builtInRequest());
+
+    const state = h.client.requests[0]?.state;
+
+    expect(state).toBeDefined();
+    expect(state === undefined ? {} : Object.keys(state).sort()).toEqual([
+      "change",
+      "check",
+      "task",
+    ]);
   });
 });
 

@@ -54,6 +54,8 @@ export {
 export type {
   JevTransport,
   JevTransportChange,
+  JevTransportCheck,
+  JevTransportCriterion,
   JevTransportDependencies,
   JevTransportRule,
   JevTransportState,

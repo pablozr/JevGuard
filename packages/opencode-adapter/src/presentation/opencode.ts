@@ -93,20 +93,38 @@ function toLogExtra(entry: ReviewLogEntry): Record<string, unknown> {
 }
 
 function toResultExtra(result: ReviewLogResult): Record<string, unknown> {
-  const context = {
-    ruleId: result.ruleId,
-    severity: result.severity,
-    scopedPaths: [...result.scopedPaths],
-    outcome: result.outcome,
-  };
+  return { ...toIdentityExtra(result), ...toOutcomeExtra(result) };
+}
 
+function toIdentityExtra(result: ReviewLogResult): Record<string, unknown> {
+  switch (result.kind) {
+    case "RULE":
+      return {
+        kind: result.kind,
+        ruleId: result.ruleId,
+        severity: result.severity,
+        scopedPaths: [...result.scopedPaths],
+      };
+    case "BUILT_IN":
+      return {
+        kind: result.kind,
+        checkId: result.checkId,
+        severity: result.severity,
+        scopedPaths: [...result.scopedPaths],
+      };
+    case "REVIEW":
+      return { kind: result.kind };
+  }
+}
+
+function toOutcomeExtra(result: ReviewLogResult): Record<string, unknown> {
   switch (result.outcome) {
     case "PASS":
     case "WARN":
     case "FAIL":
-      return { ...context, violationProbability: result.violationProbability };
+      return { outcome: result.outcome, violationProbability: result.violationProbability };
     case "SKIPPED":
     case "UNAVAILABLE":
-      return { ...context, reason: result.reason };
+      return { outcome: result.outcome, reason: result.reason };
   }
 }

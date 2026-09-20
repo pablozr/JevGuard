@@ -1,25 +1,24 @@
 import {
   aggregateReview,
-  type ParsedRule,
-  type RuleReviewResult,
+  type ReviewLevelResult,
   type TurnReview,
   type UnavailableReason,
 } from "@jevguard/core";
 
 /**
- * Builds the observe-only result for one rule that never reached a semantic
- * judgment. `rule` is present only when a rule was parsed before the failure; its
- * paths are always empty because no evidence was selected.
+ * Builds the observe-only result for a review lane that fails before it can reach
+ * any rule or check identity. It carries the `REVIEW` kind so the presentation can
+ * distinguish it from a rule result whose heading ID was also unavailable.
  */
-function unavailableResult(
+export function reviewLevelUnavailable(
   turnId: string,
-  rule: ParsedRule | null,
   reason: UnavailableReason,
-): RuleReviewResult {
+): ReviewLevelResult {
   return {
+    kind: "REVIEW",
     turnId,
-    ruleId: rule?.id ?? null,
-    severity: rule?.severity ?? null,
+    ruleId: null,
+    severity: null,
     scopedPaths: [],
     outcome: "UNAVAILABLE",
     reason,
@@ -27,13 +26,9 @@ function unavailableResult(
 }
 
 /**
- * Wraps one synthetic unavailable result in the same aggregate review shape core
+ * Wraps one synthetic review-level result in the same aggregate review shape core
  * evaluation returns, so every failure path presents exactly one aggregate.
  */
-export function unavailableReview(
-  turnId: string,
-  rule: ParsedRule | null,
-  reason: UnavailableReason,
-): TurnReview {
-  return aggregateReview(turnId, [unavailableResult(turnId, rule, reason)]);
+export function unavailableReview(turnId: string, reason: UnavailableReason): TurnReview {
+  return aggregateReview(turnId, [reviewLevelUnavailable(turnId, reason)]);
 }

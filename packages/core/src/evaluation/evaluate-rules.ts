@@ -50,6 +50,7 @@ async function evaluateRuleResult(
 
 function invalidRuleResult(turnId: string, failure: RuleCandidateFailure): RuleReviewResult {
   return {
+    kind: "RULE",
     turnId,
     ruleId: failure.ruleId,
     severity: null,

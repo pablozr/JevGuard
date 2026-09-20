@@ -1,5 +1,8 @@
 import type {
+  BuiltInReviewResult,
   ReviewCounts,
+  ReviewLevelResult,
+  ReviewResult,
   RuleReviewResult,
   SemanticVerdict,
   SkippedReason,
@@ -34,6 +37,7 @@ const TURN_ID = "turn-1";
 
 function semanticResult(outcome: SemanticVerdict, probability: number): RuleReviewResult {
   return {
+    kind: "RULE",
     turnId: TURN_ID,
     ruleId: "ARCH-001",
     severity: "error",
@@ -45,6 +49,7 @@ function semanticResult(outcome: SemanticVerdict, probability: number): RuleRevi
 
 function skippedResult(reason: SkippedReason): RuleReviewResult {
   return {
+    kind: "RULE",
     turnId: TURN_ID,
     ruleId: null,
     severity: null,
@@ -56,6 +61,7 @@ function skippedResult(reason: SkippedReason): RuleReviewResult {
 
 function unavailableResult(reason: UnavailableReason): RuleReviewResult {
   return {
+    kind: "RULE",
     turnId: TURN_ID,
     ruleId: null,
     severity: null,
@@ -65,7 +71,45 @@ function unavailableResult(reason: UnavailableReason): RuleReviewResult {
   };
 }
 
-function reviewOf(results: readonly RuleReviewResult[]): TurnReview {
+function reviewUnavailableResult(reason: UnavailableReason): ReviewLevelResult {
+  return {
+    kind: "REVIEW",
+    turnId: TURN_ID,
+    ruleId: null,
+    severity: null,
+    scopedPaths: [],
+    outcome: "UNAVAILABLE",
+    reason,
+  };
+}
+
+function builtInResult(outcome: SemanticVerdict, probability: number): BuiltInReviewResult {
+  return {
+    kind: "BUILT_IN",
+    turnId: TURN_ID,
+    ruleId: null,
+    checkId: "SCOPE-CREEP",
+    severity: "error",
+    scopedPaths: ["src/a.ts", "src/b.ts"],
+    outcome,
+    violationProbability: probability,
+  };
+}
+
+function builtInSkippedResult(): BuiltInReviewResult {
+  return {
+    kind: "BUILT_IN",
+    turnId: TURN_ID,
+    ruleId: null,
+    checkId: "SCOPE-CREEP",
+    severity: "error",
+    scopedPaths: [],
+    outcome: "SKIPPED",
+    reason: "NO_ATTRIBUTED_PATCH",
+  };
+}
+
+function reviewOf(results: readonly ReviewResult[]): TurnReview {
   return aggregateReview(TURN_ID, results);
 }
 
@@ -164,6 +208,7 @@ describe("aggregate log mapping", () => {
       },
       results: [
         {
+          kind: "RULE",
           ruleId: "ARCH-001",
           severity: "error",
           scopedPaths: ["src/a.ts", "src/b.ts"],
@@ -171,6 +216,7 @@ describe("aggregate log mapping", () => {
           violationProbability: 0.91,
         },
         {
+          kind: "RULE",
           ruleId: "ARCH-001",
           severity: "error",
           scopedPaths: ["src/a.ts", "src/b.ts"],
@@ -178,6 +224,7 @@ describe("aggregate log mapping", () => {
           violationProbability: 0.4,
         },
         {
+          kind: "RULE",
           ruleId: null,
           severity: null,
           scopedPaths: [],
@@ -185,6 +232,7 @@ describe("aggregate log mapping", () => {
           reason: "JEV_FAILURE",
         },
         {
+          kind: "RULE",
           ruleId: null,
           severity: null,
           scopedPaths: [],
@@ -193,6 +241,49 @@ describe("aggregate log mapping", () => {
         },
       ],
     });
+  });
+
+  test("distinguishes RULE, BUILT_IN, and REVIEW kinds with the correct identity", () => {
+    const entry = toReviewLogEntry(
+      reviewOf([
+        semanticResult("FAIL", 0.91),
+        builtInResult("WARN", 0.5),
+        builtInSkippedResult(),
+        reviewUnavailableResult("INVALID_CONFIG"),
+      ]),
+    );
+
+    expect(entry.results).toEqual([
+      {
+        kind: "RULE",
+        ruleId: "ARCH-001",
+        severity: "error",
+        scopedPaths: ["src/a.ts", "src/b.ts"],
+        outcome: "FAIL",
+        violationProbability: 0.91,
+      },
+      {
+        kind: "BUILT_IN",
+        checkId: "SCOPE-CREEP",
+        severity: "error",
+        scopedPaths: ["src/a.ts", "src/b.ts"],
+        outcome: "WARN",
+        violationProbability: 0.5,
+      },
+      {
+        kind: "BUILT_IN",
+        checkId: "SCOPE-CREEP",
+        severity: "error",
+        scopedPaths: [],
+        outcome: "SKIPPED",
+        reason: "NO_ATTRIBUTED_PATCH",
+      },
+      {
+        kind: "REVIEW",
+        outcome: "UNAVAILABLE",
+        reason: "INVALID_CONFIG",
+      },
+    ]);
   });
 
   test("records semantic counts as zero when no rule reached that verdict", () => {
@@ -229,6 +320,7 @@ describe("aggregate log mapping", () => {
     for (const result of entry.results) {
       if (result.outcome === "PASS" || result.outcome === "WARN" || result.outcome === "FAIL") {
         expect(Object.keys(result).sort()).toEqual([
+          "kind",
           "outcome",
           "ruleId",
           "scopedPaths",
@@ -237,6 +329,7 @@ describe("aggregate log mapping", () => {
         ]);
       } else {
         expect(Object.keys(result).sort()).toEqual([
+          "kind",
           "outcome",
           "reason",
           "ruleId",
@@ -245,6 +338,20 @@ describe("aggregate log mapping", () => {
         ]);
       }
     }
+
+    const kindEntry = toReviewLogEntry(
+      reviewOf([builtInResult("PASS", 0.1), reviewUnavailableResult("INVALID_CONFIG")]),
+    );
+
+    expect(Object.keys(kindEntry.results[0] ?? {}).sort()).toEqual([
+      "checkId",
+      "kind",
+      "outcome",
+      "scopedPaths",
+      "severity",
+      "violationProbability",
+    ]);
+    expect(Object.keys(kindEntry.results[1] ?? {}).sort()).toEqual(["kind", "outcome", "reason"]);
 
     const serialized = JSON.stringify(entry);
     expect(serialized).not.toMatch(/task|description|diff|api[-_]?key|typesafe|token|secret/i);
@@ -405,6 +512,7 @@ describe("OpenCode sinks", () => {
         },
         results: [
           {
+            kind: "RULE",
             ruleId: "ARCH-001",
             severity: "error",
             scopedPaths: ["src/a.ts", "src/b.ts"],
@@ -412,6 +520,7 @@ describe("OpenCode sinks", () => {
             violationProbability: 0.91,
           },
           {
+            kind: "RULE",
             ruleId: "ARCH-001",
             severity: "error",
             scopedPaths: ["src/a.ts", "src/b.ts"],
@@ -419,6 +528,7 @@ describe("OpenCode sinks", () => {
             violationProbability: 0.4,
           },
           {
+            kind: "RULE",
             ruleId: null,
             severity: null,
             scopedPaths: [],
@@ -426,6 +536,7 @@ describe("OpenCode sinks", () => {
             reason: "JEV_FAILURE",
           },
           {
+            kind: "RULE",
             ruleId: null,
             severity: null,
             scopedPaths: [],
@@ -434,6 +545,49 @@ describe("OpenCode sinks", () => {
           },
         ],
       },
+    });
+  });
+
+  test("sends kind and check identity for a built-in result", async () => {
+    const client = new FakeOpenCodeClient();
+    const sink = createOpenCodeLogSink(client);
+
+    await sink.write(toReviewLogEntry(reviewOf([builtInResult("PASS", 0.2)])));
+
+    expect(client.logCalls[0]?.body.extra).toEqual({
+      turnId: TURN_ID,
+      summary: {
+        highestVerdict: "PASS",
+        hasUnavailable: false,
+        counts: { pass: 1, warn: 0, fail: 0, skipped: 0, unavailable: 0 },
+      },
+      results: [
+        {
+          kind: "BUILT_IN",
+          checkId: "SCOPE-CREEP",
+          severity: "error",
+          scopedPaths: ["src/a.ts", "src/b.ts"],
+          outcome: "PASS",
+          violationProbability: 0.2,
+        },
+      ],
+    });
+  });
+
+  test("sends only kind and outcome for a review-level result", async () => {
+    const client = new FakeOpenCodeClient();
+    const sink = createOpenCodeLogSink(client);
+
+    await sink.write(toReviewLogEntry(reviewOf([reviewUnavailableResult("INVALID_RULE")])));
+
+    expect(client.logCalls[0]?.body.extra).toEqual({
+      turnId: TURN_ID,
+      summary: {
+        highestVerdict: null,
+        hasUnavailable: true,
+        counts: { pass: 0, warn: 0, fail: 0, skipped: 0, unavailable: 1 },
+      },
+      results: [{ kind: "REVIEW", outcome: "UNAVAILABLE", reason: "INVALID_RULE" }],
     });
   });
 

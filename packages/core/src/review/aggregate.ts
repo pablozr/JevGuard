@@ -1,21 +1,21 @@
-import type { ReviewOutcome, RuleReviewResult, SemanticVerdict } from "../domain/types";
+import type { ReviewOutcome, ReviewResult, SemanticVerdict } from "../domain/types";
 import type { ReviewCounts, ReviewSummary, TurnReview } from "./types";
 
 const VERDICT_RANK: Record<SemanticVerdict, number> = { PASS: 0, WARN: 1, FAIL: 2 };
 
 /**
- * Aggregates per-rule results into one turn review. The input array is snapshotted
- * so later mutation cannot change the returned review; results keep their source
- * order, and the summary counts every outcome and reports the highest verdict
- * `FAIL > WARN > PASS` while ignoring `SKIPPED` and `UNAVAILABLE`.
+ * Aggregates rule, built-in, and review-level results into one turn review. The
+ * input array is snapshotted so later mutation cannot change the returned review;
+ * results keep their source order, and the summary counts every outcome and reports
+ * the highest verdict `FAIL > WARN > PASS` while ignoring `SKIPPED` and `UNAVAILABLE`.
  */
-export function aggregateReview(turnId: string, results: readonly RuleReviewResult[]): TurnReview {
+export function aggregateReview(turnId: string, results: readonly ReviewResult[]): TurnReview {
   const snapshot = [...results];
 
   return { turnId, results: snapshot, summary: summarize(snapshot) };
 }
 
-function summarize(results: readonly RuleReviewResult[]): ReviewSummary {
+function summarize(results: readonly ReviewResult[]): ReviewSummary {
   const counts = countOutcomes(results);
 
   return {
@@ -25,7 +25,7 @@ function summarize(results: readonly RuleReviewResult[]): ReviewSummary {
   };
 }
 
-function countOutcomes(results: readonly RuleReviewResult[]): ReviewCounts {
+function countOutcomes(results: readonly ReviewResult[]): ReviewCounts {
   const counts = { pass: 0, warn: 0, fail: 0, skipped: 0, unavailable: 0 };
 
   for (const result of results) {
@@ -51,7 +51,7 @@ function countOutcomes(results: readonly RuleReviewResult[]): ReviewCounts {
   return counts;
 }
 
-function highestVerdict(results: readonly RuleReviewResult[]): SemanticVerdict | null {
+function highestVerdict(results: readonly ReviewResult[]): SemanticVerdict | null {
   let highest: SemanticVerdict | null = null;
 
   for (const result of results) {

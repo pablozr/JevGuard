@@ -38,6 +38,174 @@ pnpm test
 the OpenCode plugin run under the Bun runtime; Bun is not the workspace package
 manager.
 
+## Architecture and debugging guide
+
+This is a working map for locating and fixing behavior. `SPEC.md`, `CONTEXT.md`,
+and `docs/adr/` remain authoritative for scope and contracts.
+
+### Package dependency direction
+
+```text
+plugin → opencode-adapter → core
+testkit ───────────────────┘
+```
+
+- `core` is pure domain logic: rules, scope, evidence policy, gates, Jev ports,
+  and use cases. It must not import OpenCode, Bun, Node filesystem/environment, HTTP,
+  or TUI APIs.
+- `opencode-adapter` owns host integration and I/O: event handling, turn
+  attribution, policy file reads, concrete Jev transport, credentials, logging, and
+  toasts.
+- `plugin` is composition only: it constructs dependencies and exposes the OpenCode
+  entrypoint. No policy logic belongs here.
+- `testkit` provides fixtures and fakes; production packages must never import it.
+
+When a bug crosses a boundary, fix it in the layer that owns that concern. A
+presentation symptom with an attribution cause belongs in `opencode-adapter`, not
+in `plugin` or `core`.
+
+### End-to-end runtime flow
+
+1. OpenCode emits a session idle event. `idleSessionID` accepts only
+   `session.status` with `properties.status.type === "idle"`; the separate
+   `session.idle` event is ignored.
+2. `createPluginRuntime` serializes idle work through a promise queue so
+   attribution and the dedupe mark never overlap.
+3. `attributeTurn` finds the completed assistant message, its direct parent user
+   message, and the patch attributed to that parent message ID. Failures are never
+   marked, so the turn can be retried.
+4. `reviewAttributedTurn` loads `.jev/rules.md` and `.jev/config.yaml` once, parses
+   every rule block, and resolves the gate config once.
+5. The local rule lane and the `SCOPE-CREEP` built-in run concurrently. Rules stay
+   sequential in source order inside their lane; the built-in selects the turn's
+   complete, safe, attributed patch and calls Jev at most once with its fixed
+   `0.40`/`0.70` error thresholds. A turn therefore has at most two Jev calls in
+   flight: one rule plus the built-in.
+6. `evaluateRules` evaluates each parsed rule in source order. One rule's failure
+   never suppresses its siblings.
+7. `evaluateRule` selects the rule's scoped, safe, complete evidence, then calls the
+   Jev port at most once with one Noul request. Missing scope or patch is `SKIPPED`
+   without calling Jev.
+8. `evaluateGate` converts the returned violation probability into a local
+   `PASS`/`WARN`/`FAIL` using exact thresholds; `SCOPE-CREEP` uses its fixed gate.
+9. `aggregateReview` counts every outcome and picks the highest verdict;
+   `reviewAttributedTurn` presents exactly one aggregate to the structured log and
+   the TUI toast. Results are the rules in source order, then the scope-creep result.
+
+```mermaid
+flowchart TD
+    A["OpenCode idle event: session.status -> idle"] --> B["Serialized idle queue (plugin runtime)"]
+    B --> C["attributeTurn: completed assistant + direct parent task"]
+    C --> D["Fetch attributed patch by parent user message ID"]
+    D --> E{"Attributed evidence complete?"}
+    E -->|no| X["UNAVAILABLE, never a global-diff fallback"]
+    E -->|yes| F["Load .jev/rules.md and .jev/config.yaml once"]
+    F --> G["Rule lane (sequential): per rule scope filter + evidence safety"]
+    F --> N["Built-in lane: SCOPE-CREEP over the complete safe patch"]
+    G --> H{"Applicable and safe?"}
+    H -->|no patch or no scope match| S["SKIPPED, no Jev call"]
+    H -->|blocked, oversized, or incomplete| X
+    H -->|yes| I["One Jev Noul per rule, sequential"]
+    N --> O{"Complete safe patch?"}
+    O -->|no| X
+    O -->|yes| Q["One Jev Noul, fixed 0.40 / 0.70"]
+    I --> J["Local gate: PASS / WARN / FAIL"]
+    Q --> J
+    J --> K["aggregateReview: counts + highest verdict"]
+    S --> K
+    X --> K
+    K --> L["One structured log + TUI toast, rules then built-in"]
+```
+
+### Key files by bug category
+
+- Attribution
+  - `packages/plugin/src/idle-event.ts` — host event filter.
+  - `packages/plugin/src/runtime.ts` — idle queue, failure containment.
+  - `packages/opencode-adapter/src/attribution/attribute-turn.ts` — turn orchestration.
+  - `.../attribution/locate-turn.ts` — completed assistant and direct parent selection.
+  - `.../attribution/task.ts` — user task extraction.
+  - `.../attribution/normalize-patch.ts` — patch completeness.
+  - `.../attribution/deduplicator.ts` — per-assistant-message dedupe.
+- Parser and policy
+  - `packages/core/src/rules/` — rule parsing, blocks, headings, metadata.
+  - `packages/opencode-adapter/src/policy/file-source.ts` — fixed `.jev/` paths.
+  - `packages/opencode-adapter/src/policy/config-yaml.ts` — strict YAML parsing.
+- Evidence and gate
+  - `packages/core/src/evidence/select-evidence.ts` — scope, size, and assembly.
+  - `.../evidence/safety.ts` — sensitive path and extension policy.
+  - `.../evidence/scope.ts`, `.../evidence/paths.ts` — matching helpers.
+  - `packages/core/src/gate/evaluate-gate.ts` — threshold boundaries.
+  - `.../gate/config.ts`, `.../gate/probability.ts` — config validation.
+- Built-in checks
+  - `packages/core/src/builtins/scope-creep.ts` — `SCOPE-CREEP` request, complete-patch
+    evidence selection, and fixed `0.40`/`0.70` error gate.
+  - `packages/plugin/src/review.ts` — runs the rule lane and scope creep concurrently.
+- Jev and credential
+  - `packages/opencode-adapter/src/jev/transport.ts` — TypeSafe transport and response reading.
+  - `packages/core/src/ports/types.ts` — the Jev port contract.
+  - `packages/opencode-adapter/src/credentials/provider.ts` — override/store precedence.
+  - `.../credentials/environment.ts`, `.../credentials/keyring-store.ts` — stores.
+  - `packages/plugin/src/cli/` — `jevguard login` dispatch and messages.
+- Presentation
+  - `packages/plugin/src/present.ts` — non-throwing delivery.
+  - `packages/plugin/src/review-result.ts` — synthetic pre-evaluation `UNAVAILABLE`.
+  - `packages/opencode-adapter/src/presentation/opencode.ts` — SDK log/toast sinks.
+  - `.../presentation/display.ts`, `.../presentation/log.ts`, `.../presentation/toast.ts`
+    — outcome precedence and safe aggregate messages.
+- Composition and artifact
+  - `packages/plugin/src/plugin.ts` — composition root.
+  - `packages/plugin/src/review.ts` — policy load + evaluate + present.
+  - `packages/plugin/scripts/build-artifact.ts`, `pack-artifact.ts` — packaging.
+
+### Non-negotiable invariants
+
+- Use attributed evidence only. Never substitute the current repository diff when
+  attribution fails.
+- Never emit a semantic verdict from partial evidence. Oversized, missing, blocked,
+  invalid, or incomplete evidence is `UNAVAILABLE`.
+- One applicable rule maps to exactly one Jev Noul. `Allowed` stays inside that
+  Noul's criteria; never add a second decision.
+- No patch or no scope match is `SKIPPED` without calling Jev.
+- V0.1 is observe-only: do not inject agent context, block a turn, or remediate.
+- Never expose the API key in config, arguments, logs, errors, toasts, fixtures, or
+  agent context. Accept the key only through the OS credential store or the
+  CI/automation environment override.
+
+### Built-in checks
+
+V0.1 evaluates the rule blocks declared in `.jev/rules.md` plus one built-in check,
+`SCOPE-CREEP`. Scope creep runs concurrently with the sequential rule lane over the
+turn's complete, safe attributed patch and uses the fixed `0.40`/`0.70` error
+thresholds, independent of the configured rule gate. Other built-in semantic checks
+such as complexity and test adequacy remain planned, not implemented; do not
+describe or test them as existing behavior.
+
+### Focused validation
+
+Run the full workspace checks before a pull request:
+
+```sh
+pnpm format
+pnpm lint
+pnpm typecheck
+pnpm test
+```
+
+During debugging, run the narrowest Vitest target for the area you changed, for
+example:
+
+```sh
+pnpm test packages/core/src/evidence
+pnpm test packages/opencode-adapter/src/attribution
+pnpm test packages/plugin
+```
+
+Cover threshold boundaries exactly and add a regression test for every corrected
+defect. Contract-test attribution and presentation behavior in the adapter with
+fakes from `testkit`; unit-test pure parsing, scope, evidence safety, gates, and
+orchestration in `core`.
+
 ## Contribution expectations
 
 - Keep changes focused and preserve package dependency direction.

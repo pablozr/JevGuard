@@ -3,13 +3,16 @@ import type {
   CredentialProvider,
   CredentialResolution,
   CredentialUnavailableReason,
+  JevBuiltInRequest,
   JevEvaluationPort,
   JevEvaluationResult,
   JevFailureReason,
   JevRequest,
+  JevRuleCriteria,
 } from "@jevguard/core";
 import {
   JEV_MODEL,
+  type JevTransportCriterion,
   type JevTransportDependencies,
   type JevTransportState,
   type TypeSafeClientConfiguration,
@@ -117,20 +120,29 @@ function toSystemOneRequest(request: JevRequest): TypeSafeSystemOneRequest {
 }
 
 function toState(request: JevRequest): JevTransportState {
-  const criteria = request.question.criteria;
+  const criterion = toCriterion(request.question.criteria);
+  const change = {
+    files: [...request.change.files],
+    diff: request.change.diff,
+  };
 
+  if (isBuiltInRequest(request)) {
+    return { task: request.task, check: criterion, change };
+  }
+
+  return { task: request.task, rule: criterion, change };
+}
+
+function isBuiltInRequest(request: JevRequest): request is JevBuiltInRequest {
+  return "kind" in request && request.kind === "BUILT_IN";
+}
+
+function toCriterion(criteria: JevRuleCriteria): JevTransportCriterion {
   return {
-    task: request.task,
-    rule: {
-      id: criteria.id,
-      description: criteria.description,
-      violation: criteria.violation,
-      ...(criteria.allowed === undefined ? {} : { allowed: criteria.allowed }),
-    },
-    change: {
-      files: [...request.change.files],
-      diff: request.change.diff,
-    },
+    id: criteria.id,
+    description: criteria.description,
+    violation: criteria.violation,
+    ...(criteria.allowed === undefined ? {} : { allowed: criteria.allowed }),
   };
 }
 

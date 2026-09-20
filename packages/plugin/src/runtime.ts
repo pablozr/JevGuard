@@ -51,7 +51,7 @@ async function processIdle(
       case "UNAVAILABLE":
         await presentReview(
           dependencies.presenter,
-          unavailableReview(sessionID, null, "MISSING_ATTRIBUTED_DIFF"),
+          unavailableReview(sessionID, "MISSING_ATTRIBUTED_DIFF"),
         );
         return;
       case "ATTRIBUTED":

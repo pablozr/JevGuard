@@ -33,3 +33,13 @@ export type EvidenceSelection =
   | { readonly status: "SELECTED"; readonly evidence: RuleEvidence }
   | { readonly status: "SKIPPED"; readonly reason: SkippedReason }
   | { readonly status: "UNAVAILABLE"; readonly reason: EvidenceUnavailableReason };
+
+/**
+ * Result of selecting the turn's evidence for a scope-free built-in check. There is
+ * no scope, so `NO_SCOPE_MATCH` cannot occur and every attributed nonempty file is
+ * treated as applicable.
+ */
+export type TurnEvidenceSelection =
+  | { readonly status: "SELECTED"; readonly evidence: RuleEvidence }
+  | { readonly status: "SKIPPED"; readonly reason: Extract<SkippedReason, "NO_ATTRIBUTED_PATCH"> }
+  | { readonly status: "UNAVAILABLE"; readonly reason: EvidenceUnavailableReason };

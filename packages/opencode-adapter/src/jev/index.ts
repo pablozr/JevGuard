@@ -8,6 +8,8 @@ export { JEV_MODEL } from "./types";
 export type {
   JevTransport,
   JevTransportChange,
+  JevTransportCheck,
+  JevTransportCriterion,
   JevTransportDependencies,
   JevTransportRule,
   JevTransportState,

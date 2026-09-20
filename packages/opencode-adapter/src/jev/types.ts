@@ -14,12 +14,16 @@ export interface TypeSafeClientConfiguration {
   readonly logLevel: "off";
 }
 
-export type JevTransportRule = {
+export type JevTransportCriterion = {
   readonly id: string;
   readonly description: string;
   readonly violation: string;
   readonly allowed?: string;
 };
+
+export type JevTransportRule = JevTransportCriterion;
+
+export type JevTransportCheck = JevTransportCriterion;
 
 export type JevTransportChange = {
   readonly files: string[];
@@ -27,14 +31,21 @@ export type JevTransportChange = {
 };
 
 /**
- * State sent to Jev for the single Noul of one rule. Declared as a type alias so it
+ * State sent to Jev for the single Noul of one judgment. A rule request carries
+ * `rule`; a built-in request carries `check`. Declared as type aliases so each
  * carries an implicit index signature for the SDK's JSON-compatible state.
  */
-export type JevTransportState = {
-  readonly task: string;
-  readonly rule: JevTransportRule;
-  readonly change: JevTransportChange;
-};
+export type JevTransportState =
+  | {
+      readonly task: string;
+      readonly rule: JevTransportRule;
+      readonly change: JevTransportChange;
+    }
+  | {
+      readonly task: string;
+      readonly check: JevTransportCheck;
+      readonly change: JevTransportChange;
+    };
 
 export interface TypeSafeNoulQuestion {
   readonly type: "noul";

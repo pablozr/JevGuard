@@ -1,6 +1,13 @@
 import { describe, expect, test } from "vitest";
 import { aggregateReview } from "../src/index";
-import type { RuleReviewResult, SkippedReason, UnavailableReason } from "../src/index";
+import type {
+  BuiltInReviewResult,
+  ReviewLevelResult,
+  ReviewResult,
+  RuleReviewResult,
+  SkippedReason,
+  UnavailableReason,
+} from "../src/index";
 
 function semantic(
   outcome: "PASS" | "WARN" | "FAIL",
@@ -8,6 +15,7 @@ function semantic(
   ruleId: string,
 ): RuleReviewResult {
   return {
+    kind: "RULE",
     turnId: "turn-1",
     ruleId,
     severity: "error",
@@ -19,6 +27,7 @@ function semantic(
 
 function skipped(ruleId: string, reason: SkippedReason): RuleReviewResult {
   return {
+    kind: "RULE",
     turnId: "turn-1",
     ruleId,
     severity: "error",
@@ -30,6 +39,7 @@ function skipped(ruleId: string, reason: SkippedReason): RuleReviewResult {
 
 function unavailable(ruleId: string | null, reason: UnavailableReason): RuleReviewResult {
   return {
+    kind: "RULE",
     turnId: "turn-1",
     ruleId,
     severity: null,
@@ -120,5 +130,79 @@ describe("aggregateReview", () => {
       skipped: 0,
       unavailable: 0,
     });
+  });
+});
+
+function builtInSemantic(
+  outcome: "PASS" | "WARN" | "FAIL",
+  probability: number,
+): BuiltInReviewResult {
+  return {
+    kind: "BUILT_IN",
+    turnId: "turn-1",
+    ruleId: null,
+    checkId: "SCOPE-CREEP",
+    severity: "error",
+    scopedPaths: ["src/a.ts"],
+    outcome,
+    violationProbability: probability,
+  };
+}
+
+function builtInSkipped(): BuiltInReviewResult {
+  return {
+    kind: "BUILT_IN",
+    turnId: "turn-1",
+    ruleId: null,
+    checkId: "SCOPE-CREEP",
+    severity: "error",
+    scopedPaths: [],
+    outcome: "SKIPPED",
+    reason: "NO_ATTRIBUTED_PATCH",
+  };
+}
+
+function reviewLevel(): ReviewLevelResult {
+  return {
+    kind: "REVIEW",
+    turnId: "turn-1",
+    ruleId: null,
+    severity: null,
+    scopedPaths: [],
+    outcome: "UNAVAILABLE",
+    reason: "INVALID_CONFIG",
+  };
+}
+
+describe("aggregateReview result kinds", () => {
+  test("counts rule, built-in, and review-level results without changing verdict precedence", () => {
+    const results: readonly ReviewResult[] = [
+      semantic("PASS", 0.1, "R-PASS"),
+      builtInSemantic("WARN", 0.5),
+      builtInSkipped(),
+      reviewLevel(),
+    ];
+
+    const review = aggregateReview("turn-1", results);
+
+    expect(review.results).toEqual(results);
+    expect(review.summary.verdict).toBe("WARN");
+    expect(review.summary.hasUnavailable).toBe(true);
+    expect(review.summary.counts).toEqual({
+      pass: 1,
+      warn: 1,
+      fail: 0,
+      skipped: 1,
+      unavailable: 1,
+    });
+  });
+
+  test("a failing built-in raises the aggregate verdict to FAIL", () => {
+    const review = aggregateReview("turn-1", [
+      semantic("PASS", 0.1, "R-PASS"),
+      builtInSemantic("FAIL", 0.9),
+    ]);
+
+    expect(review.summary.verdict).toBe("FAIL");
   });
 });

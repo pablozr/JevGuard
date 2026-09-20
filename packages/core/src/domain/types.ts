@@ -105,7 +105,60 @@ export interface ReviewContext {
   readonly scopedPaths: readonly string[];
 }
 
-export type RuleReviewResult = ReviewContext & (GateResult | OperationalResult);
+/**
+ * Result context for one local rule. `kind: "RULE"` completes the review-result
+ * discrimination so presentation can switch exhaustively on `kind` with no absence
+ * fallback.
+ */
+export interface RuleReviewContext extends ReviewContext {
+  readonly kind: "RULE";
+}
 
-/** V0.1 compatibility alias for {@link RuleReviewResult}. */
-export type ReviewResult = RuleReviewResult;
+export type RuleReviewResult = RuleReviewContext & (GateResult | OperationalResult);
+
+/** Discriminants across the review lanes: local rules, built-in checks, review-level failures. */
+export type ReviewResultKind = "RULE" | "BUILT_IN" | "REVIEW";
+
+/**
+ * Operational states a built-in check can reach. A built-in has no scope, so it
+ * never reports `NO_SCOPE_MATCH`, and it shares the typed Jev failure contract.
+ */
+export type BuiltInSkippedReason = Extract<SkippedReason, "NO_ATTRIBUTED_PATCH">;
+
+export type BuiltInUnavailableReason = Extract<
+  UnavailableReason,
+  "OVERSIZED_DIFF" | "BLOCKED_EVIDENCE" | "JEV_FAILURE"
+>;
+
+export type BuiltInOperationalResult =
+  | { readonly outcome: "SKIPPED"; readonly reason: BuiltInSkippedReason }
+  | { readonly outcome: "UNAVAILABLE"; readonly reason: BuiltInUnavailableReason };
+
+/**
+ * Result context for one built-in check. `ruleId` stays `null`; the `kind`
+ * discriminant keeps it distinct from a local rule in the fully discriminated
+ * review-result union.
+ */
+export interface BuiltInReviewContext extends ReviewContext {
+  readonly kind: "BUILT_IN";
+  readonly ruleId: null;
+  readonly checkId: string;
+  readonly severity: "error";
+}
+
+export type BuiltInReviewResult = BuiltInReviewContext & (GateResult | BuiltInOperationalResult);
+
+/**
+ * Result reserved for a review lane that fails before reaching a check. It carries
+ * no check identity, so both `ruleId` and `severity` are `null`.
+ */
+export interface ReviewLevelContext extends ReviewContext {
+  readonly kind: "REVIEW";
+  readonly ruleId: null;
+  readonly severity: null;
+}
+
+export type ReviewLevelResult = ReviewLevelContext & OperationalResult;
+
+/** Every result a turn review can carry, across rules, built-ins, and review-level failures. */
+export type ReviewResult = RuleReviewResult | BuiltInReviewResult | ReviewLevelResult;

@@ -24,11 +24,25 @@ export interface JevChange {
  * State for one rule judgment. One applicable rule maps to exactly one Noul;
  * `allowed` stays inside the same criteria.
  */
-export interface JevRequest {
+export interface JevRuleRequest {
   readonly task: string;
   readonly question: JevNoulQuestion;
   readonly change: JevChange;
 }
+
+/**
+ * State for one built-in check judgment. `kind` discriminates it from a rule
+ * request; the check's Noul definition travels in the same `criteria` shape so the
+ * transport can stay uniform.
+ */
+export interface JevBuiltInRequest {
+  readonly kind: "BUILT_IN";
+  readonly task: string;
+  readonly question: JevNoulQuestion;
+  readonly change: JevChange;
+}
+
+export type JevRequest = JevRuleRequest | JevBuiltInRequest;
 
 export interface JevNoul {
   /** Probability that the attributed change violates the rule, in `[0, 1]`. */

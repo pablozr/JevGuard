@@ -28,8 +28,9 @@ coding agent.
 
 > [!WARNING]
 > JevGuard is in active development. The current release targets OpenCode `1.18.31`,
-> evaluates every rule block declared in `.jev/rules.md`, and runs in observe mode
-> only: it reports results but never alters the agent context or blocks a task.
+> evaluates every rule block declared in `.jev/rules.md` plus the `SCOPE-CREEP`
+> built-in, and runs in observe mode only: it reports results but never alters the
+> agent context or blocks a task.
 
 ## Why JevGuard
 
@@ -88,10 +89,12 @@ turns incomplete evidence into a reassuring verdict. Evidence problems are scope
 to the rules they affect: a rule whose applicable files are all safe still runs
 even when another rule's evidence is blocked.
 
-Some failures happen before any policy rule is evaluated — the attributed diff
-cannot be built, the policy files cannot be read, or `.jev/rules.md` is missing.
-JevGuard reports those as a single synthetic `UNAVAILABLE` entry with no rule ID; it
-does not invent one result per declared rule.
+Some failures happen before any policy rule is evaluated. If the attributed diff
+cannot be built, the review is a single synthetic `UNAVAILABLE` entry with no rule
+ID, and neither lane runs. If the turn is attributed but the policy files cannot be
+read or validated, the rule lane reports one synthetic `UNAVAILABLE` entry with no
+rule ID — it does not invent one result per declared rule — while the `SCOPE-CREEP`
+built-in still runs against the turn's attributed patch.
 
 ## How a review works
 
@@ -107,7 +110,17 @@ policy that translates it into an outcome.
 | `error` | `< 40%` | `40%–69%` | `≥ 70%` |
 | `warning` | `< 60%` | `≥ 60%` | never |
 
-Thresholds are locally configurable in `.jev/config.yaml`.
+Those thresholds are per repository rule and locally configurable in
+`.jev/config.yaml`.
+
+JevGuard also runs one product-owned built-in, `SCOPE-CREEP`, on every attributed
+turn. It asks whether the attributed change contains material functional,
+behavioral, architectural, dependency, configuration, documentation, or refactoring
+work the task did not request and that is not reasonably necessary to complete it.
+It receives the turn's complete, safe attributed patch and uses fixed `error`
+thresholds (`40%`/`70%`), independent of `.jev/config.yaml`. The built-in runs
+concurrently with the sequential rule lane, so at most one rule and the built-in are
+in flight, and its result joins the same aggregate as one more entry.
 
 ## Install
 
@@ -254,24 +267,31 @@ The current release implements the full local, observe-only path:
   complete and safe; it produces one typed violation probability or an operational
   outcome.
 - A failure before rule evaluation — no attributed diff, unreadable policy files, or
-  a missing `.jev/rules.md` — is reported as one synthetic `UNAVAILABLE` entry with
-  no rule ID, not one result per declared rule.
+  a missing `.jev/rules.md` — is reported by the rule lane as one synthetic
+  `UNAVAILABLE` entry with no rule ID, not one result per declared rule. When the
+  turn itself is attributed, the `SCOPE-CREEP` built-in still runs.
+- The product-owned `SCOPE-CREEP` built-in runs on every attributed turn over the
+  turn's complete, safe attributed patch, with fixed `error` thresholds
+  (`0.40`/`0.70`) and no scope filtering. It runs concurrently with the sequential
+  rule lane, so at most one rule and the built-in are in flight. With no attributed
+  patch it is `SKIPPED`; blocked or oversized evidence is `UNAVAILABLE`; a rule,
+  policy-load, or config failure never suppresses it.
 - The local gate maps each rule to `PASS`, `WARN`, or `FAIL`; a rule with no
   applicable scope is `SKIPPED`, and a rule that cannot be safely evaluated is
   `UNAVAILABLE`.
 - One aggregate TUI toast and one structured log entry report the turn. The log
-  carries every entry's outcome, raw probability, or reason, and the counts include
-  the synthetic review-level entry when there is one.
+  carries every entry's outcome, raw probability, or reason, including the built-in
+  result and the synthetic review-level entry when there is one.
 
 No feedback is injected into the agent session. No remediation is attempted. No
 task is blocked.
 
 ## Roadmap
 
-The multi-rule slice is implemented. Planned work beyond it:
+The multi-rule and scope-creep slices are implemented. Planned work beyond them:
 
 ```text
-V0.3  Built-in semantic checks: scope creep, complexity, test adequacy
+V0.3  Remaining built-in semantic checks: complexity, test adequacy
   ↓
 V0.4  jev-init: evidence-based policy bootstrap
   ↓
@@ -307,10 +327,11 @@ plugin → opencode-adapter → core
 
 ## Status
 
-The multi-rule, observe-only review is implemented. It loads in OpenCode,
-attributes one completed turn, parses every rule block in `.jev/rules.md`, asks Jev
-once per applicable rule, applies the local gate to each, and presents one
-aggregate result as a transient TUI toast and a structured log entry.
+The multi-rule, scope-creep, observe-only review is implemented. It loads in
+OpenCode, attributes one completed turn, parses every rule block in `.jev/rules.md`,
+asks Jev once per applicable rule, runs the `SCOPE-CREEP` built-in over the complete
+attributed patch, applies the local gate to each, and presents one aggregate result
+as a transient TUI toast and a structured log entry.
 
 The local, private tarball (`pnpm artifact:build`, `pnpm artifact:pack`) packages
 that slice so a clean consumer can install it without workspace links.

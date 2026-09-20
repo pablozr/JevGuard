@@ -40,6 +40,7 @@ const gateConfig: GateConfig = {
 };
 
 const reviewContext = {
+  kind: "RULE" as const,
   turnId: turn.id,
   ruleId: rule.id,
   severity: rule.severity,

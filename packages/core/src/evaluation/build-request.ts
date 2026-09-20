@@ -1,5 +1,5 @@
 import type { ParsedRule, RuleEvidence } from "../domain/types";
-import type { JevRequest } from "../ports/types";
+import type { JevRuleRequest } from "../ports/types";
 
 const NOUL_INSTRUCTIONS =
   "Answer true when the attributed change violates the rule's Violation, excluding behavior described by the rule's Allowed exception. Answer false when the change does not violate the rule, including allowed behavior. Return the probability from 0 to 1 that the change violates the rule.";
@@ -12,7 +12,7 @@ export function buildJevRequest(
   task: string,
   rule: ParsedRule,
   evidence: RuleEvidence,
-): JevRequest {
+): JevRuleRequest {
   return {
     task,
     question: {

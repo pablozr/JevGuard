@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { DEFAULT_EVIDENCE_POLICY, selectRuleEvidence } from "../src/index";
+import { DEFAULT_EVIDENCE_POLICY, selectRuleEvidence, selectTurnEvidence } from "../src/index";
 import type { EvidencePolicy, ParsedRule, Turn, TurnFile } from "../src/index";
 
 function file(path: string, patch: string): TurnFile {
@@ -192,5 +192,107 @@ describe("selectRuleEvidence", () => {
     const result = selectRuleEvidence(turn, makeRule({ scope: "src/**" }));
 
     expect(result.status).not.toBe("SELECTED");
+  });
+});
+
+describe("selectTurnEvidence", () => {
+  test("selects every attributed nonempty file with no scope filtering", () => {
+    const turn = makeTurn({
+      files: [
+        file("src/a.ts", "patch-src"),
+        file("docs/readme.md", "patch-docs"),
+        file("config/app.yaml", "patch-config"),
+      ],
+    });
+
+    expect(selectTurnEvidence(turn)).toEqual({
+      status: "SELECTED",
+      evidence: {
+        files: ["src/a.ts", "docs/readme.md", "config/app.yaml"],
+        diff: "patch-src\npatch-docs\npatch-config",
+      },
+    });
+  });
+
+  test("skips when the turn has no attributed patch", () => {
+    expect(selectTurnEvidence(makeTurn({ files: [] }))).toEqual({
+      status: "SKIPPED",
+      reason: "NO_ATTRIBUTED_PATCH",
+    });
+
+    expect(selectTurnEvidence(makeTurn({ files: [file("src/a.ts", "")] }))).toEqual({
+      status: "SKIPPED",
+      reason: "NO_ATTRIBUTED_PATCH",
+    });
+
+    expect(selectTurnEvidence(makeTurn({ files: [file("src/a.ts", "  \n")] }))).toEqual({
+      status: "SKIPPED",
+      reason: "NO_ATTRIBUTED_PATCH",
+    });
+  });
+
+  test("drops empty patches but keeps every nonempty attributed file", () => {
+    const turn = makeTurn({
+      files: [
+        file("src/a.ts", "patch-src"),
+        file("docs/readme.md", ""),
+        file("config/app.yaml", "patch-config"),
+      ],
+    });
+
+    expect(selectTurnEvidence(turn)).toEqual({
+      status: "SELECTED",
+      evidence: { files: ["src/a.ts", "config/app.yaml"], diff: "patch-src\npatch-config" },
+    });
+  });
+
+  test("blocks the whole selection when any attributed file is unsafe", () => {
+    const turn = makeTurn({
+      files: [file("src/a.ts", "patch-src"), file(".env", "SECRET=1")],
+    });
+
+    expect(selectTurnEvidence(turn)).toEqual({
+      status: "UNAVAILABLE",
+      reason: "BLOCKED_EVIDENCE",
+    });
+  });
+
+  test("blocks an attributed file without an allowlisted extension", () => {
+    const turn = makeTurn({ files: [file("Dockerfile", "patch")] });
+
+    expect(selectTurnEvidence(turn)).toEqual({
+      status: "UNAVAILABLE",
+      reason: "BLOCKED_EVIDENCE",
+    });
+  });
+
+  test("reports an oversized diff before evaluating safety", () => {
+    const policy: EvidencePolicy = { ...DEFAULT_EVIDENCE_POLICY, maxDiffLength: 4 };
+    const turn = makeTurn({ files: [file("src/.env", "SECRET=1")] });
+
+    expect(selectTurnEvidence(turn, policy)).toEqual({
+      status: "UNAVAILABLE",
+      reason: "OVERSIZED_DIFF",
+    });
+  });
+
+  test("counts the size limit over the complete concatenated diff", () => {
+    const policy: EvidencePolicy = { ...DEFAULT_EVIDENCE_POLICY, maxDiffLength: 10 };
+    const turn = makeTurn({
+      files: [file("src/a.ts", "0123456789"), file("docs/b.md", "x".repeat(1_000))],
+    });
+
+    expect(selectTurnEvidence(turn, policy)).toEqual({
+      status: "UNAVAILABLE",
+      reason: "OVERSIZED_DIFF",
+    });
+  });
+
+  test("never returns partial evidence", () => {
+    const turn = makeTurn({
+      files: [file("src/a.ts", "patch-src"), file("src/.env", "SECRET=1")],
+    });
+
+    expect(selectTurnEvidence(turn).status).not.toBe("SELECTED");
   });
 });
