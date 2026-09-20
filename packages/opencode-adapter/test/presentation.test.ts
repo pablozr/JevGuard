@@ -109,6 +109,19 @@ function builtInSkippedResult(): BuiltInReviewResult {
   };
 }
 
+function complexityResult(outcome: SemanticVerdict, probability: number): BuiltInReviewResult {
+  return {
+    kind: "BUILT_IN",
+    turnId: TURN_ID,
+    ruleId: null,
+    checkId: "COMPLEXITY",
+    severity: "warning",
+    scopedPaths: ["src/a.ts", "src/b.ts"],
+    outcome,
+    violationProbability: probability,
+  };
+}
+
 function reviewOf(results: readonly ReviewResult[]): TurnReview {
   return aggregateReview(TURN_ID, results);
 }
@@ -284,6 +297,46 @@ describe("aggregate log mapping", () => {
         reason: "INVALID_CONFIG",
       },
     ]);
+  });
+
+  test("represents COMPLEXITY as a safe advisory built-in identity", () => {
+    const entry = toReviewLogEntry(reviewOf([complexityResult("WARN", 0.6)]));
+
+    expect(entry.results).toEqual([
+      {
+        kind: "BUILT_IN",
+        checkId: "COMPLEXITY",
+        severity: "warning",
+        scopedPaths: ["src/a.ts", "src/b.ts"],
+        outcome: "WARN",
+        violationProbability: 0.6,
+      },
+    ]);
+    expect(Object.keys(entry.results[0] ?? {}).sort()).toEqual([
+      "checkId",
+      "kind",
+      "outcome",
+      "scopedPaths",
+      "severity",
+      "violationProbability",
+    ]);
+    expect(JSON.stringify(entry)).not.toMatch(
+      /task|description|diff|api[-_]?key|typesafe|token|secret/i,
+    );
+  });
+
+  test("preserves rule, scope-creep, then complexity result order", () => {
+    const entry = toReviewLogEntry(
+      reviewOf([
+        semanticResult("PASS", 0.1),
+        builtInResult("PASS", 0.1),
+        complexityResult("WARN", 0.6),
+      ]),
+    );
+
+    expect(
+      entry.results.map((result) => ("checkId" in result ? result.checkId : result.kind)),
+    ).toEqual(["RULE", "SCOPE-CREEP", "COMPLEXITY"]);
   });
 
   test("records semantic counts as zero when no rule reached that verdict", () => {

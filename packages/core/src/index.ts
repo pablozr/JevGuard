@@ -86,6 +86,8 @@ export { selectRuleEvidence, selectTurnEvidence } from "./evidence/select-eviden
 export type {
   EvaluateBuiltInDependencies,
   EvaluateBuiltInInput,
+  EvaluateComplexityDependencies,
+  EvaluateComplexityInput,
   EvaluateScopeCreepDependencies,
   EvaluateScopeCreepInput,
 } from "./builtins/types";
@@ -94,6 +96,14 @@ export {
   evaluateScopeCreep,
   SCOPE_CREEP_CHECK_ID,
 } from "./builtins/scope-creep";
+export {
+  buildComplexityRequest,
+  COMPLEXITY_CHECK_ID,
+  COMPLEXITY_GATE_CONFIG,
+  evaluateComplexity,
+} from "./builtins/complexity";
+export type { FifoJevPortConfig } from "./concurrency/types";
+export { createFifoJevPort } from "./concurrency/fifo-port";
 export type { GateConfigResult, GateEvaluation, GateUnavailable } from "./gate/types";
 export { DEFAULT_GATE_CONFIG } from "./gate/defaults";
 export { resolveGateConfig } from "./gate/config";

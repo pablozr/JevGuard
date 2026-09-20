@@ -143,7 +143,7 @@ export interface BuiltInReviewContext extends ReviewContext {
   readonly kind: "BUILT_IN";
   readonly ruleId: null;
   readonly checkId: string;
-  readonly severity: "error";
+  readonly severity: RuleSeverity;
 }
 
 export type BuiltInReviewResult = BuiltInReviewContext & (GateResult | BuiltInOperationalResult);

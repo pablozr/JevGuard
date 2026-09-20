@@ -22,7 +22,7 @@ interface RuleLogIdentity {
 interface BuiltInLogIdentity {
   readonly kind: "BUILT_IN";
   readonly checkId: string;
-  readonly severity: "error";
+  readonly severity: RuleSeverity;
   readonly scopedPaths: readonly string[];
 }
 

@@ -281,6 +281,33 @@ describe("Jev transport request payload", () => {
       "task",
     ]);
   });
+
+  test("maps a complexity built-in request to its own check identity without a rule field", async () => {
+    const h = harness();
+    const complexity = builtInRequest({
+      question: {
+        type: "noul",
+        instructions: "Does this attributed change introduce material complexity?",
+        criteria: {
+          id: "COMPLEXITY",
+          description: "Material complexity disproportionate to the problem.",
+          violation: "The change adds unnecessary abstractions.",
+          allowed: "Complexity explicitly required by the task.",
+        },
+      },
+    });
+
+    await h.port.evaluate(complexity);
+
+    const state = h.client.requests[0]?.state;
+
+    expect(state === undefined || !("check" in state) ? {} : state.check.id).toBe("COMPLEXITY");
+    expect(state === undefined ? {} : Object.keys(state).sort()).toEqual([
+      "change",
+      "check",
+      "task",
+    ]);
+  });
 });
 
 describe("Jev transport response validation", () => {

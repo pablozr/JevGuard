@@ -12,9 +12,9 @@ For an applicable rule, JevGuard sends:
 - the full attributed textual diff for changed files within the rule scope;
 - the relevant file paths.
 
-For the `SCOPE-CREEP` built-in, JevGuard sends the same task, the built-in's own
-check definition, the complete attributed textual diff for every changed file with a
-nonempty patch, and those paths. It sends no rule-scoped subset.
+For each built-in (`SCOPE-CREEP` and `COMPLEXITY`), JevGuard sends the same task, the
+built-in's own check definition, the complete attributed textual diff for every
+changed file with a nonempty patch, and those paths. It sends no rule-scoped subset.
 
 It does not send repository-wide diffs as a fallback.
 
@@ -28,9 +28,9 @@ It also does not evaluate a rule from a subset of its relevant files. If any
 applicable file is rejected by the safety policy, that rule is `UNAVAILABLE` with
 reason `BLOCKED_EVIDENCE`.
 
-The same cap and rejection apply to the `SCOPE-CREEP` built-in over the whole
-attributed patch: an oversized or blocked file makes the built-in `UNAVAILABLE`
-rather than evaluating it on partial evidence.
+The same cap and rejection apply to each built-in over the whole attributed patch: an
+oversized or blocked file makes the built-in `UNAVAILABLE` rather than evaluating it
+on partial evidence.
 
 Rejections are scoped to the rules they affect. Evidence is selected per rule from
 that rule's applicable files, so an oversized or blocked file makes only the rules
@@ -120,6 +120,7 @@ If neither source provides a key, the plugin stays loaded and the evaluation is
 validate policy, access Jev, or retrieve the attributed diff. It is not a policy
 pass, a warning, or a failure, and the observe-only plugin does not block work.
 
-A policy-load or config failure does not suppress the `SCOPE-CREEP` built-in: when
-the turn is attributed, the built-in still evaluates the complete safe patch with
-its fixed thresholds.
+A policy-load or config failure does not suppress a built-in: when the turn is
+attributed, both built-ins still evaluate the complete safe patch with their fixed
+thresholds. `SCOPE-CREEP` can fail; `COMPLEXITY` is advisory and can only pass or
+warn.

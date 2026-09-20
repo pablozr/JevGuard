@@ -113,20 +113,35 @@ Alongside the repository rules, JevGuard runs product-owned built-in checks with
 their own fixed policy. They are not declared in `.jev/rules.md` and are not
 configured by `.jev/config.yaml`.
 
-`SCOPE-CREEP` is the implemented built-in. It asks whether the attributed change
-contains material work the task did not request and that is not reasonably necessary
-to complete it, and it receives the turn's complete, safe attributed patch with no
-scope filtering. It always uses fixed `error` thresholds — warn at `0.40`, fail at
-`0.70` — so `.jev/config.yaml` cannot change its outcome. It runs concurrently with
-the sequential rule lane, so a turn has at most one rule and the built-in in flight,
-and its result is appended after the rule results in source order.
+`SCOPE-CREEP` and `COMPLEXITY` are the implemented built-ins. Each receives the
+turn's complete, safe attributed patch with no scope filtering.
+
+`SCOPE-CREEP` asks whether the attributed change contains material functional,
+behavioral, architectural, dependency, configuration, documentation, or refactoring
+work the task did not request and that is not reasonably necessary to complete it. It
+always uses fixed `error` thresholds — warn at `0.40`, fail at `0.70` — so
+`.jev/config.yaml` cannot change its outcome.
+
+`COMPLEXITY` asks whether the attributed change introduces material complexity that is
+disproportionate to, or not reasonably necessary for, completing the task: unnecessary
+abstractions, layers or indirections without proportional gain, new dependencies
+without a clear need, excessive configuration, premature generalization, or structure
+materially larger than the problem requires. It always uses a fixed advisory threshold
+— warn at `0.50` — and can never fail, so `.jev/config.yaml` cannot change its outcome
+or turn it into a failure.
+
+The rule lane and both built-ins run concurrently. A single shared FIFO concurrency
+limit caps in-flight Jev calls at two across the rule lane and both built-ins, so
+completion timing never changes the result order. Results are always the rules in
+source order, then `SCOPE-CREEP`, then `COMPLEXITY`.
 
 A built-in has no rule scope. No attributed patch makes it `SKIPPED`
 (`NO_ATTRIBUTED_PATCH`), and blocked or oversized evidence makes it `UNAVAILABLE`
-(`BLOCKED_EVIDENCE` or `OVERSIZED_DIFF`). A rule, policy-load, or config failure
-never suppresses it: when `.jev/rules.md` is missing or `.jev/config.yaml` is
-invalid, the rule lane degrades while `SCOPE-CREEP` still runs. Built-ins are
-observe-only; their verdicts affect the aggregate outcome but never block a turn.
+(`BLOCKED_EVIDENCE` or `OVERSIZED_DIFF`). A rule, policy-load, or config failure never
+suppresses a built-in: when `.jev/rules.md` is missing or `.jev/config.yaml` is
+invalid, the rule lane degrades while both built-ins still run. One built-in's
+failure never suppresses the other. Built-ins are observe-only; their verdicts affect
+the aggregate outcome but never block a turn.
 
 ## `config.yaml`
 
@@ -166,7 +181,8 @@ Defaults: `error` warns at `0.40` and fails at `0.70`; `warning` warns at `0.60`
 and never fails.
 
 These thresholds apply to repository rules only. The `SCOPE-CREEP` built-in always
-uses its fixed `error` thresholds (`0.40`/`0.70`), even when the configuration is
+uses its fixed `error` thresholds (`0.40`/`0.70`), and `COMPLEXITY` always uses its
+fixed `warning` threshold (`0.50`) and never fails, even when the configuration is
 absent or invalid.
 
 ## Evidence
@@ -178,20 +194,19 @@ names, extensions, and directories. Oversized or blocked evidence makes only the
 affected matching rule `UNAVAILABLE` (never a partial judgment for that rule);
 rules whose applicable files are all safe still run.
 
-The `SCOPE-CREEP` built-in uses the same policy over every attributed file with a
-nonempty patch, with no scope filtering. An oversized or blocked file makes the
-built-in `UNAVAILABLE`, never partially evaluated. See the
-[security model](./security.md) for the defaults.
+The built-ins use the same policy over every attributed file with a nonempty patch,
+with no scope filtering. An oversized or blocked file makes a built-in `UNAVAILABLE`,
+never partially evaluated. See the [security model](./security.md) for the defaults.
 
 ## Outcomes
 
-Outcomes are per result: a repository rule or the `SCOPE-CREEP` built-in.
+Outcomes are per result: a repository rule or one of the built-ins.
 
 | Outcome | Meaning |
 | --- | --- |
 | `PASS` | Applicable result evaluated and stayed below its warning threshold. |
 | `WARN` | Applicable result evaluated and reached its warning threshold. |
-| `FAIL` | An `error`-severity result evaluated at or above its failure threshold. |
+| `FAIL` | An `error`-severity result evaluated at or above its failure threshold. `COMPLEXITY` is advisory and can never reach this outcome. |
 | `SKIPPED` | No attributed patch (`NO_ATTRIBUTED_PATCH`), or no file matched the rule scope (`NO_SCOPE_MATCH`; rules only). |
 | `UNAVAILABLE` | That result's evaluation could not safely or completely happen. |
 
@@ -207,8 +222,8 @@ once per declared rule. When the attributed diff itself cannot be built
 (`MISSING_ATTRIBUTED_DIFF`), that synthetic entry is the whole review. When the turn
 is attributed but the policy files are unreadable or invalid
 (`INVALID_RULE`/`INVALID_CONFIG`) or `.jev/rules.md` is missing (`INVALID_RULE`),
-the synthetic entry covers the rule lane and the `SCOPE-CREEP` built-in still adds
-its own result. The aggregate counts include every entry.
+the synthetic entry covers the rule lane and both built-ins still add their own
+results. The aggregate counts include every entry.
 
 ## Presentation
 
@@ -228,10 +243,10 @@ the whole review:
   (highest verdict, whether any result was unavailable, and per-outcome counts), and
   the full result list. Each result carries its identity — `ruleId` for a rule or
   `checkId` for a built-in — its severity, scoped paths, and either the raw
-  violation probability or the typed reason. Results are the rules in source order,
-  then the `SCOPE-CREEP` built-in, and a review-level failure contributes its single
-  synthetic entry (null rule ID and severity). All of them are included in the
-  counts.
+  violation probability or the typed reason. Results have a fixed order: the rules in
+  source order, then the `SCOPE-CREEP` built-in, then the `COMPLEXITY` built-in. A
+  review-level failure contributes its single synthetic entry (null rule ID and
+  severity). All of them are included in the counts.
 
 The toast is intentionally compact and never includes probabilities or paths. A
 generic count summary does not mean every rule was evaluated: an `UNAVAILABLE`

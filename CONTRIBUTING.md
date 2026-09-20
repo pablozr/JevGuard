@@ -76,21 +76,28 @@ in `plugin` or `core`.
    marked, so the turn can be retried.
 4. `reviewAttributedTurn` loads `.jev/rules.md` and `.jev/config.yaml` once, parses
    every rule block, and resolves the gate config once.
-5. The local rule lane and the `SCOPE-CREEP` built-in run concurrently. Rules stay
-   sequential in source order inside their lane; the built-in selects the turn's
-   complete, safe, attributed patch and calls Jev at most once with its fixed
-   `0.40`/`0.70` error thresholds. A turn therefore has at most two Jev calls in
-   flight: one rule plus the built-in.
-6. `evaluateRules` evaluates each parsed rule in source order. One rule's failure
-   never suppresses its siblings.
-7. `evaluateRule` selects the rule's scoped, safe, complete evidence, then calls the
+5. The local rule lane, `SCOPE-CREEP`, and `COMPLEXITY` run concurrently. Rules stay
+   sequential in source order inside their lane; each built-in selects the turn's
+   complete, safe, attributed patch and calls Jev at most once. `SCOPE-CREEP` uses
+   fixed `0.40`/`0.70` error thresholds; `COMPLEXITY` uses a fixed `0.50` advisory
+   threshold and never fails.
+6. The concrete transport is wrapped by one shared FIFO concurrency limit
+   (`createFifoJevPort`, default `2`) created in the composition root, so at most two
+   Jev calls are in flight across the rule lane and both built-ins of a plugin
+   instance.
+7. `evaluateRules` evaluates each parsed rule in source order. One rule's failure
+   never suppresses its siblings, and one built-in's failure never suppresses the
+   other.
+8. `evaluateRule` selects the rule's scoped, safe, complete evidence, then calls the
    Jev port at most once with one Noul request. Missing scope or patch is `SKIPPED`
    without calling Jev.
-8. `evaluateGate` converts the returned violation probability into a local
-   `PASS`/`WARN`/`FAIL` using exact thresholds; `SCOPE-CREEP` uses its fixed gate.
-9. `aggregateReview` counts every outcome and picks the highest verdict;
-   `reviewAttributedTurn` presents exactly one aggregate to the structured log and
-   the TUI toast. Results are the rules in source order, then the scope-creep result.
+9. `evaluateGate` converts the returned violation probability into a local
+   `PASS`/`WARN`/`FAIL` using exact thresholds; `SCOPE-CREEP` and `COMPLEXITY` use
+   their fixed gates.
+10. `aggregateReview` counts every outcome and picks the highest verdict;
+    `reviewAttributedTurn` presents exactly one aggregate to the structured log and
+    the TUI toast. Results are the rules in source order, then `SCOPE-CREEP`, then
+    `COMPLEXITY`, regardless of completion timing.
 
 ```mermaid
 flowchart TD
@@ -102,19 +109,22 @@ flowchart TD
     E -->|yes| F["Load .jev/rules.md and .jev/config.yaml once"]
     F --> G["Rule lane (sequential): per rule scope filter + evidence safety"]
     F --> N["Built-in lane: SCOPE-CREEP over the complete safe patch"]
+    F --> P["Built-in lane: COMPLEXITY over the complete safe patch"]
     G --> H{"Applicable and safe?"}
     H -->|no patch or no scope match| S["SKIPPED, no Jev call"]
     H -->|blocked, oversized, or incomplete| X
     H -->|yes| I["One Jev Noul per rule, sequential"]
     N --> O{"Complete safe patch?"}
+    P --> O
     O -->|no| X
-    O -->|yes| Q["One Jev Noul, fixed 0.40 / 0.70"]
-    I --> J["Local gate: PASS / WARN / FAIL"]
-    Q --> J
+    O -->|yes| Q["One Jev Noul per built-in, fixed gates"]
+    I --> R["Shared FIFO executor: max 2 Jev calls in flight"]
+    Q --> R
+    R --> J["Local gate: PASS / WARN / FAIL"]
     J --> K["aggregateReview: counts + highest verdict"]
     S --> K
     X --> K
-    K --> L["One structured log + TUI toast, rules then built-in"]
+    K --> L["One structured log + TUI toast, rules then SCOPE-CREEP then COMPLEXITY"]
 ```
 
 ### Key files by bug category
@@ -140,7 +150,10 @@ flowchart TD
 - Built-in checks
   - `packages/core/src/builtins/scope-creep.ts` — `SCOPE-CREEP` request, complete-patch
     evidence selection, and fixed `0.40`/`0.70` error gate.
-  - `packages/plugin/src/review.ts` — runs the rule lane and scope creep concurrently.
+  - `packages/core/src/builtins/complexity.ts` — `COMPLEXITY` request, complete-patch
+    evidence selection, and fixed `0.50` advisory gate that never fails.
+  - `packages/core/src/concurrency/fifo-port.ts` — shared FIFO Jev concurrency limit.
+  - `packages/plugin/src/review.ts` — runs the rule lane and both built-ins concurrently.
 - Jev and credential
   - `packages/opencode-adapter/src/jev/transport.ts` — TypeSafe transport and response reading.
   - `packages/core/src/ports/types.ts` — the Jev port contract.
@@ -174,12 +187,14 @@ flowchart TD
 
 ### Built-in checks
 
-V0.1 evaluates the rule blocks declared in `.jev/rules.md` plus one built-in check,
-`SCOPE-CREEP`. Scope creep runs concurrently with the sequential rule lane over the
-turn's complete, safe attributed patch and uses the fixed `0.40`/`0.70` error
-thresholds, independent of the configured rule gate. Other built-in semantic checks
-such as complexity and test adequacy remain planned, not implemented; do not
-describe or test them as existing behavior.
+V0.1 evaluates the rule blocks declared in `.jev/rules.md` plus two built-in checks,
+`SCOPE-CREEP` and `COMPLEXITY`. Both run concurrently with the sequential rule lane
+over the turn's complete, safe attributed patch. `SCOPE-CREEP` uses fixed `0.40`/`0.70`
+error thresholds; `COMPLEXITY` uses a fixed `0.50` advisory threshold and never fails.
+Neither reads the configured rule gate. The concrete transport is wrapped by one
+shared FIFO concurrency limit (`createFifoJevPort`, default `2`) so at most two Jev
+calls are in flight. Test adequacy remains a planned built-in, not implemented; do not
+describe or test it as existing behavior.
 
 ### Focused validation
 

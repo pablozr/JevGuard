@@ -28,9 +28,9 @@ coding agent.
 
 > [!WARNING]
 > JevGuard is in active development. The current release targets OpenCode `1.18.31`,
-> evaluates every rule block declared in `.jev/rules.md` plus the `SCOPE-CREEP`
-> built-in, and runs in observe mode only: it reports results but never alters the
-> agent context or blocks a task.
+> evaluates every rule block declared in `.jev/rules.md` plus the `SCOPE-CREEP` and
+> `COMPLEXITY` built-ins, and runs in observe mode only: it reports results but never
+> alters the agent context or blocks a task.
 
 ## Why JevGuard
 
@@ -113,14 +113,26 @@ policy that translates it into an outcome.
 Those thresholds are per repository rule and locally configurable in
 `.jev/config.yaml`.
 
-JevGuard also runs one product-owned built-in, `SCOPE-CREEP`, on every attributed
-turn. It asks whether the attributed change contains material functional,
-behavioral, architectural, dependency, configuration, documentation, or refactoring
-work the task did not request and that is not reasonably necessary to complete it.
-It receives the turn's complete, safe attributed patch and uses fixed `error`
-thresholds (`40%`/`70%`), independent of `.jev/config.yaml`. The built-in runs
-concurrently with the sequential rule lane, so at most one rule and the built-in are
-in flight, and its result joins the same aggregate as one more entry.
+JevGuard also runs two product-owned built-ins on every attributed turn,
+`SCOPE-CREEP` and `COMPLEXITY`. Both receive the turn's complete, safe attributed
+patch with no scope filtering.
+
+`SCOPE-CREEP` asks whether the change contains material functional, behavioral,
+architectural, dependency, configuration, documentation, or refactoring work the task
+did not request and that is not reasonably necessary to complete it. It uses fixed
+`error` thresholds (`40%`/`70%`), independent of `.jev/config.yaml`.
+
+`COMPLEXITY` asks whether the change introduces material complexity disproportionate
+to, or not reasonably necessary for, completing the task, such as unnecessary
+abstractions, layers or indirections without proportional gain, new dependencies
+without a clear need, excessive configuration, premature generalization, or structure
+materially larger than the problem requires. It is advisory: it warns at `50%` and
+can never fail.
+
+The rule lane and both built-ins are launched together, and one shared FIFO
+concurrency limit keeps at most two Jev calls in flight across the turn. Results join
+the same aggregate in a fixed order: rules in source order, then `SCOPE-CREEP`, then
+`COMPLEXITY`.
 
 ## Install
 
@@ -272,26 +284,34 @@ The current release implements the full local, observe-only path:
   turn itself is attributed, the `SCOPE-CREEP` built-in still runs.
 - The product-owned `SCOPE-CREEP` built-in runs on every attributed turn over the
   turn's complete, safe attributed patch, with fixed `error` thresholds
-  (`0.40`/`0.70`) and no scope filtering. It runs concurrently with the sequential
-  rule lane, so at most one rule and the built-in are in flight. With no attributed
-  patch it is `SKIPPED`; blocked or oversized evidence is `UNAVAILABLE`; a rule,
-  policy-load, or config failure never suppresses it.
+  (`0.40`/`0.70`) and no scope filtering. It can produce `PASS`, `WARN`, or `FAIL`.
+- The product-owned `COMPLEXITY` built-in runs on every attributed turn over the same
+  complete, safe attributed patch. It uses a fixed advisory threshold of `0.50`,
+  independent of `.jev/config.yaml`, and can produce `PASS` or `WARN` but never
+  `FAIL`.
+- Both built-ins run concurrently with the sequential rule lane. One shared FIFO
+  concurrency limit allows at most two Jev calls in flight across the rule lane and
+  both built-ins. With no attributed patch a built-in is `SKIPPED`; blocked or
+  oversized evidence is `UNAVAILABLE`; a rule, policy-load, or config failure never
+  suppresses either built-in, and one built-in's failure never suppresses the other.
 - The local gate maps each rule to `PASS`, `WARN`, or `FAIL`; a rule with no
   applicable scope is `SKIPPED`, and a rule that cannot be safely evaluated is
   `UNAVAILABLE`.
 - One aggregate TUI toast and one structured log entry report the turn. The log
   carries every entry's outcome, raw probability, or reason, including the built-in
-  result and the synthetic review-level entry when there is one.
+  results and the synthetic review-level entry when there is one. The fixed result
+  order is rules in source order, then `SCOPE-CREEP`, then `COMPLEXITY`.
 
 No feedback is injected into the agent session. No remediation is attempted. No
 task is blocked.
 
 ## Roadmap
 
-The multi-rule and scope-creep slices are implemented. Planned work beyond them:
+The multi-rule, scope-creep, and complexity slices are implemented. Planned work
+beyond them:
 
 ```text
-V0.3  Remaining built-in semantic checks: complexity, test adequacy
+V0.3  Remaining built-in semantic check: test adequacy
   ↓
 V0.4  jev-init: evidence-based policy bootstrap
   ↓
@@ -327,11 +347,12 @@ plugin → opencode-adapter → core
 
 ## Status
 
-The multi-rule, scope-creep, observe-only review is implemented. It loads in
+The multi-rule, multi-built-in, observe-only review is implemented. It loads in
 OpenCode, attributes one completed turn, parses every rule block in `.jev/rules.md`,
-asks Jev once per applicable rule, runs the `SCOPE-CREEP` built-in over the complete
-attributed patch, applies the local gate to each, and presents one aggregate result
-as a transient TUI toast and a structured log entry.
+asks Jev once per applicable rule, runs the `SCOPE-CREEP` and `COMPLEXITY` built-ins
+over the complete attributed patch behind one shared concurrency limit, applies the
+local gate to each, and presents one aggregate result as a transient TUI toast and a
+structured log entry.
 
 The local, private tarball (`pnpm artifact:build`, `pnpm artifact:pack`) packages
 that slice so a clean consumer can install it without workspace links.

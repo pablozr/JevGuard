@@ -15,3 +15,7 @@ export interface EvaluateBuiltInDependencies {
 export type EvaluateScopeCreepInput = EvaluateBuiltInInput;
 
 export type EvaluateScopeCreepDependencies = EvaluateBuiltInDependencies;
+
+export type EvaluateComplexityInput = EvaluateBuiltInInput;
+
+export type EvaluateComplexityDependencies = EvaluateBuiltInDependencies;

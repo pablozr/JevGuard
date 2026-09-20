@@ -2,6 +2,7 @@ import {
   DEFAULT_EVIDENCE_POLICY,
   type BuiltInReviewResult,
   type BuiltInUnavailableReason,
+  createFifoJevPort,
   type JevEvaluationPort,
   type JevEvaluationResult,
   type JevRequest,
@@ -33,6 +34,8 @@ const SESSION_ID = "ses_1";
 const ASSISTANT_ID = "msg_assistant";
 const USER_ID = "msg_user";
 const SCOPE_CREEP_ID = "SCOPE-CREEP";
+const COMPLEXITY_ID = "COMPLEXITY";
+const MAX_CONCURRENT_JEV_CALLS = 2;
 
 const PATCH = ["--- a/src/a.ts", "+++ b/src/a.ts", "@@ -1 +1 @@", "-old", "+new", ""].join("\n");
 
@@ -344,6 +347,10 @@ interface Harness {
   readonly jev: FakeJev;
 }
 
+/**
+ * Mirrors the composition root: the plugin wraps the concrete Jev port in one
+ * shared FIFO concurrency limit, so orchestration tests exercise the real cap.
+ */
 function harness(): Harness {
   const facade = new FakeFacade();
   const policy = new FakePolicyLoader();
@@ -355,7 +362,7 @@ function harness(): Harness {
     deduplicator: new InMemoryTurnDeduplicator(),
     policy,
     presenter,
-    jev,
+    jev: createFifoJevPort(jev, { maxConcurrency: MAX_CONCURRENT_JEV_CALLS }),
   };
 
   return { hooks: createPluginRuntime(dependencies), facade, policy, presenter, jev };
@@ -381,6 +388,10 @@ function lastResults(presenter: FakePresenter): readonly ReviewResult[] {
 
 function jevIds(jev: FakeJev): readonly string[] {
   return jev.requests.map((request) => request.question.criteria.id);
+}
+
+function jevIdSet(jev: FakeJev): ReadonlySet<string> {
+  return new Set(jevIds(jev));
 }
 
 function loadRules(policy: FakePolicyLoader, rules: string, config: string | null = null): void {
@@ -485,6 +496,52 @@ function builtInUnavailable(
   };
 }
 
+function complexityEvaluated(
+  outcome: SemanticVerdict,
+  probability: number,
+  scopedPaths: readonly string[],
+): BuiltInReviewResult {
+  return {
+    kind: "BUILT_IN",
+    turnId: ASSISTANT_ID,
+    ruleId: null,
+    checkId: COMPLEXITY_ID,
+    severity: "warning",
+    scopedPaths,
+    outcome,
+    violationProbability: probability,
+  };
+}
+
+function complexitySkipped(): BuiltInReviewResult {
+  return {
+    kind: "BUILT_IN",
+    turnId: ASSISTANT_ID,
+    ruleId: null,
+    checkId: COMPLEXITY_ID,
+    severity: "warning",
+    scopedPaths: [],
+    outcome: "SKIPPED",
+    reason: "NO_ATTRIBUTED_PATCH",
+  };
+}
+
+function complexityUnavailable(
+  reason: BuiltInUnavailableReason,
+  scopedPaths: readonly string[] = [],
+): BuiltInReviewResult {
+  return {
+    kind: "BUILT_IN",
+    turnId: ASSISTANT_ID,
+    ruleId: null,
+    checkId: COMPLEXITY_ID,
+    severity: "warning",
+    scopedPaths,
+    outcome: "UNAVAILABLE",
+    reason,
+  };
+}
+
 function reviewUnavailable(turnId: string, reason: UnavailableReason): ReviewLevelResult {
   return {
     kind: "REVIEW",
@@ -546,27 +603,29 @@ describe("JevGuardPlugin composition", () => {
     { probability: 0.5, outcome: "WARN" },
     { probability: 0.8, outcome: "FAIL" },
   ] as const)(
-    "presents one aggregate with the $outcome rule then scope creep for probability $probability",
+    "presents one aggregate with the $outcome rule, scope creep, and complexity for probability $probability",
     async ({ probability, outcome }) => {
       const { hooks, facade, policy, presenter, jev } = harness();
       jev.probability = probability;
       jev.probabilities.set(SCOPE_CREEP_ID, 0.1);
+      jev.probabilities.set(COMPLEXITY_ID, 0.1);
 
       await dispatch(hooks, idleEvent());
 
       expect(facade.calls).toEqual(["listMessages", "fetchDiff"]);
       expect(policy.calls).toEqual(["load"]);
-      expect(jevIds(jev)).toEqual(["TEST-1", SCOPE_CREEP_ID]);
+      expect(jevIds(jev)).toEqual(["TEST-1", SCOPE_CREEP_ID, COMPLEXITY_ID]);
       expect(presenter.reviews).toHaveLength(1);
       expect(lastResults(presenter)).toEqual([
         ruleEvaluated("TEST-1", "error", outcome, probability, ["src/a.ts"]),
         builtInEvaluated("PASS", 0.1, ["src/a.ts"]),
+        complexityEvaluated("PASS", 0.1, ["src/a.ts"]),
       ]);
       expect(lastReview(presenter).summary.verdict).toBe(outcome);
     },
   );
 
-  test("skips both lanes with no attributed patch and zero Jev calls", async () => {
+  test("skips every lane with no attributed patch and zero Jev calls", async () => {
     const { hooks, facade, presenter, jev } = harness();
     facade.diffs = [];
 
@@ -576,11 +635,12 @@ describe("JevGuardPlugin composition", () => {
     expect(lastResults(presenter)).toEqual([
       ruleSkipped("TEST-1", "error", "NO_ATTRIBUTED_PATCH"),
       builtInSkipped(),
+      complexitySkipped(),
     ]);
     expect(lastReview(presenter).summary).toEqual({
       verdict: null,
       hasUnavailable: false,
-      counts: { pass: 0, warn: 0, fail: 0, skipped: 2, unavailable: 0 },
+      counts: { pass: 0, warn: 0, fail: 0, skipped: 3, unavailable: 0 },
     });
   });
 
@@ -619,34 +679,36 @@ describe("JevGuardPlugin operational failures", () => {
     ]);
   });
 
-  test("runs scope creep when the rules file is absent", async () => {
+  test("runs both built-ins when the rules file is absent", async () => {
     const { hooks, policy, presenter, jev } = harness();
     policy.result = { status: "LOADED", source: { rules: null, config: null } };
 
     await dispatch(hooks, idleEvent());
 
-    expect(jevIds(jev)).toEqual([SCOPE_CREEP_ID]);
+    expect(jevIds(jev)).toEqual([SCOPE_CREEP_ID, COMPLEXITY_ID]);
     expect(lastResults(presenter)).toEqual([
       reviewUnavailable(ASSISTANT_ID, "INVALID_RULE"),
       builtInEvaluated("PASS", 0.1, ["src/a.ts"]),
+      complexityEvaluated("PASS", 0.1, ["src/a.ts"]),
     ]);
     expect(lastReview(presenter).summary).toEqual({
       verdict: "PASS",
       hasUnavailable: true,
-      counts: { pass: 1, warn: 0, fail: 0, skipped: 0, unavailable: 1 },
+      counts: { pass: 2, warn: 0, fail: 0, skipped: 0, unavailable: 1 },
     });
   });
 
-  test("runs scope creep when the rules read fails", async () => {
+  test("runs both built-ins when the rules read fails", async () => {
     const { hooks, policy, presenter, jev } = harness();
     policy.result = { status: "FAILED", reason: "RULES_READ_FAILURE" };
 
     await dispatch(hooks, idleEvent());
 
-    expect(jevIds(jev)).toEqual([SCOPE_CREEP_ID]);
+    expect(jevIds(jev)).toEqual([SCOPE_CREEP_ID, COMPLEXITY_ID]);
     expect(lastResults(presenter)).toEqual([
       reviewUnavailable(ASSISTANT_ID, "INVALID_RULE"),
       builtInEvaluated("PASS", 0.1, ["src/a.ts"]),
+      complexityEvaluated("PASS", 0.1, ["src/a.ts"]),
     ]);
   });
 
@@ -656,60 +718,65 @@ describe("JevGuardPlugin operational failures", () => {
 
     await dispatch(hooks, idleEvent());
 
-    expect(jevIds(jev)).toEqual([SCOPE_CREEP_ID]);
+    expect(jevIds(jev)).toEqual([SCOPE_CREEP_ID, COMPLEXITY_ID]);
     expect(lastResults(presenter)).toEqual([
       ruleUnavailable(null, null, "INVALID_RULE"),
       builtInEvaluated("PASS", 0.1, ["src/a.ts"]),
+      complexityEvaluated("PASS", 0.1, ["src/a.ts"]),
     ]);
   });
 
-  test("runs scope creep with the fixed gate when the config YAML is malformed", async () => {
+  test("runs both built-ins with the fixed gates when the config YAML is malformed", async () => {
     const { hooks, policy, presenter, jev } = harness();
     policy.result = { status: "LOADED", source: { rules: VALID_RULE, config: "a: [unclosed" } };
 
     await dispatch(hooks, idleEvent());
 
-    expect(jevIds(jev)).toEqual([SCOPE_CREEP_ID]);
+    expect(jevIds(jev)).toEqual([SCOPE_CREEP_ID, COMPLEXITY_ID]);
     expect(lastResults(presenter)).toEqual([
       ruleUnavailable("TEST-1", "error", "INVALID_CONFIG"),
       builtInEvaluated("PASS", 0.1, ["src/a.ts"]),
+      complexityEvaluated("PASS", 0.1, ["src/a.ts"]),
     ]);
   });
 
-  test("runs scope creep when the config shape does not resolve", async () => {
+  test("runs both built-ins when the config shape does not resolve", async () => {
     const { hooks, policy, presenter, jev } = harness();
     policy.result = { status: "LOADED", source: { rules: VALID_RULE, config: invalidConfigShape } };
 
     await dispatch(hooks, idleEvent());
 
-    expect(jevIds(jev)).toEqual([SCOPE_CREEP_ID]);
+    expect(jevIds(jev)).toEqual([SCOPE_CREEP_ID, COMPLEXITY_ID]);
     expect(lastResults(presenter)[0]).toEqual(ruleUnavailable("TEST-1", "error", "INVALID_CONFIG"));
     expect(lastResults(presenter)[1]).toEqual(builtInEvaluated("PASS", 0.1, ["src/a.ts"]));
+    expect(lastResults(presenter)[2]).toEqual(complexityEvaluated("PASS", 0.1, ["src/a.ts"]));
   });
 
-  test("runs scope creep when the config read fails", async () => {
+  test("runs both built-ins when the config read fails", async () => {
     const { hooks, policy, presenter, jev } = harness();
     policy.result = { status: "FAILED", reason: "CONFIG_READ_FAILURE" };
 
     await dispatch(hooks, idleEvent());
 
-    expect(jevIds(jev)).toEqual([SCOPE_CREEP_ID]);
+    expect(jevIds(jev)).toEqual([SCOPE_CREEP_ID, COMPLEXITY_ID]);
     expect(lastResults(presenter)).toEqual([
       reviewUnavailable(ASSISTANT_ID, "INVALID_CONFIG"),
       builtInEvaluated("PASS", 0.1, ["src/a.ts"]),
+      complexityEvaluated("PASS", 0.1, ["src/a.ts"]),
     ]);
   });
 
-  test("reports both the rule and scope creep as JEV_FAILURE when the port fails", async () => {
+  test("reports the rule and both built-ins as JEV_FAILURE when the port fails", async () => {
     const { hooks, presenter, jev } = harness();
     jev.fail = true;
 
     await dispatch(hooks, idleEvent());
 
-    expect(jevIds(jev)).toEqual(["TEST-1", SCOPE_CREEP_ID]);
+    expect(jevIds(jev)).toEqual(["TEST-1", SCOPE_CREEP_ID, COMPLEXITY_ID]);
     expect(lastResults(presenter)).toEqual([
       ruleUnavailable("TEST-1", "error", "JEV_FAILURE", ["src/a.ts"]),
       builtInUnavailable("JEV_FAILURE", ["src/a.ts"]),
+      complexityUnavailable("JEV_FAILURE", ["src/a.ts"]),
     ]);
   });
 });
@@ -721,7 +788,7 @@ describe("JevGuardPlugin deduplication and containment", () => {
     await dispatch(hooks, idleEvent());
     await dispatch(hooks, idleEvent());
 
-    expect(jevIds(jev)).toEqual(["TEST-1", SCOPE_CREEP_ID]);
+    expect(jevIds(jev)).toEqual(["TEST-1", SCOPE_CREEP_ID, COMPLEXITY_ID]);
     expect(presenter.reviews).toHaveLength(1);
   });
 
@@ -730,7 +797,7 @@ describe("JevGuardPlugin deduplication and containment", () => {
 
     await Promise.all([dispatch(hooks, idleEvent()), dispatch(hooks, idleEvent())]);
 
-    expect(jevIds(jev)).toEqual(["TEST-1", SCOPE_CREEP_ID]);
+    expect(jevIds(jev)).toEqual(["TEST-1", SCOPE_CREEP_ID, COMPLEXITY_ID]);
     expect(presenter.reviews).toHaveLength(1);
   });
 
@@ -740,7 +807,7 @@ describe("JevGuardPlugin deduplication and containment", () => {
 
     await expect(dispatch(hooks, idleEvent())).resolves.toBeUndefined();
 
-    expect(jevIds(jev)).toEqual(["TEST-1", SCOPE_CREEP_ID]);
+    expect(jevIds(jev)).toEqual(["TEST-1", SCOPE_CREEP_ID, COMPLEXITY_ID]);
     expect(presenter.attempts).toBe(1);
     expect(presenter.reviews).toEqual([]);
   });
@@ -752,11 +819,12 @@ describe("JevGuardPlugin deduplication and containment", () => {
     await expect(dispatch(hooks, idleEvent())).resolves.toBeUndefined();
 
     expect(policy.calls).toEqual(["load"]);
-    expect(jevIds(jev)).toEqual([SCOPE_CREEP_ID]);
+    expect(jevIds(jev)).toEqual([SCOPE_CREEP_ID, COMPLEXITY_ID]);
     expect(presenter.attempts).toBe(1);
     expect(lastResults(presenter)).toEqual([
       reviewUnavailable(ASSISTANT_ID, "INVALID_RULE"),
       builtInEvaluated("PASS", 0.1, ["src/a.ts"]),
+      complexityEvaluated("PASS", 0.1, ["src/a.ts"]),
     ]);
     expect(JSON.stringify(lastReview(presenter))).not.toContain("programming bug");
   });
@@ -772,14 +840,14 @@ describe("JevGuardPlugin deduplication and containment", () => {
     facade.failure = "none";
     await dispatch(hooks, idleEvent());
 
-    expect(jevIds(jev)).toEqual(["TEST-1", SCOPE_CREEP_ID]);
+    expect(jevIds(jev)).toEqual(["TEST-1", SCOPE_CREEP_ID, COMPLEXITY_ID]);
     expect(presenter.reviews).toHaveLength(2);
     expect(lastResults(presenter)[0]?.outcome).toBe("PASS");
   });
 });
 
-describe("JevGuardPlugin lane concurrency", () => {
-  test("keeps at most the first rule and scope creep in flight, then runs the second rule", async () => {
+describe("JevGuardPlugin concurrency", () => {
+  test("caps in-flight Jev calls at two across the rule lane and both built-ins", async () => {
     const { hooks, policy, presenter, jev } = harness();
     loadRules(
       policy,
@@ -797,24 +865,35 @@ describe("JevGuardPlugin lane concurrency", () => {
     jev.release("SRC-1");
     await jev.waitForActivations(3);
 
-    expect(jev.activations).toEqual(["SRC-1", SCOPE_CREEP_ID, "SRC-2"]);
+    expect(jev.activations).toEqual(["SRC-1", SCOPE_CREEP_ID, COMPLEXITY_ID]);
+    expect(jev.maxActive).toBe(2);
+
+    jev.release(COMPLEXITY_ID);
+    await jev.waitForActivations(4);
+
+    expect(jev.activations).toEqual(["SRC-1", SCOPE_CREEP_ID, COMPLEXITY_ID, "SRC-2"]);
     expect(jev.maxActive).toBe(2);
 
     jev.release();
     await pendingReview;
 
     expect(jev.maxActive).toBe(2);
-    expect(lastResults(presenter).map(resultIdentity)).toEqual(["SRC-1", "SRC-2", SCOPE_CREEP_ID]);
+    expect(lastResults(presenter).map(resultIdentity)).toEqual([
+      "SRC-1",
+      "SRC-2",
+      SCOPE_CREEP_ID,
+      COMPLEXITY_ID,
+    ]);
   });
 
-  test("keeps both sequential rule calls when only scope creep fails, with stable rule-then-check order", async () => {
+  test("keeps a rule failure from suppressing the sibling rule and both built-ins", async () => {
     const { hooks, policy, presenter, jev } = harness();
     loadRules(
       policy,
       [ruleText("SRC-1", "error", "src/**"), ruleText("SRC-2", "error", "src/**")].join("\n\n"),
     );
     jev.block = true;
-    jev.failingIds.add(SCOPE_CREEP_ID);
+    jev.failingIds.add(COMPLEXITY_ID);
 
     const pendingReview = dispatch(hooks, idleEvent());
 
@@ -826,24 +905,30 @@ describe("JevGuardPlugin lane concurrency", () => {
     jev.release("SRC-1");
     await jev.waitForActivations(3);
 
-    expect(jev.activations).toEqual(["SRC-1", SCOPE_CREEP_ID, "SRC-2"]);
+    expect(jev.activations).toEqual(["SRC-1", SCOPE_CREEP_ID, COMPLEXITY_ID]);
+    expect(jev.maxActive).toBe(2);
+
+    jev.release(COMPLEXITY_ID);
+    await jev.waitForActivations(4);
+
+    expect(jev.activations).toEqual(["SRC-1", SCOPE_CREEP_ID, COMPLEXITY_ID, "SRC-2"]);
     expect(jev.maxActive).toBe(2);
 
     jev.release();
     await pendingReview;
 
     expect(jev.maxActive).toBeLessThanOrEqual(2);
-    expect(jevIds(jev)).toEqual(["SRC-1", SCOPE_CREEP_ID, "SRC-2"]);
     expect(lastResults(presenter)).toEqual([
       ruleEvaluated("SRC-1", "error", "PASS", 0.1, ["src/a.ts"]),
       ruleEvaluated("SRC-2", "error", "PASS", 0.1, ["src/a.ts"]),
-      builtInUnavailable("JEV_FAILURE", ["src/a.ts"]),
+      builtInEvaluated("PASS", 0.1, ["src/a.ts"]),
+      complexityUnavailable("JEV_FAILURE", ["src/a.ts"]),
     ]);
   });
 });
 
 describe("JevGuardPlugin multi-rule end-to-end", () => {
-  test("calls Jev only for applicable rules plus scope creep in deterministic result order", async () => {
+  test("calls Jev only for applicable rules plus both built-ins in deterministic result order", async () => {
     const { hooks, facade, policy, presenter, jev } = harness();
     const rules = [
       ruleText("SRC-1", "error", "src/**"),
@@ -859,23 +944,25 @@ describe("JevGuardPlugin multi-rule end-to-end", () => {
     await dispatch(hooks, idleEvent());
 
     expect(presenter.reviews).toHaveLength(1);
-    expect(jevIds(jev)).toEqual(["SRC-1", SCOPE_CREEP_ID, "GLOBAL-3"]);
+    expect(jevIdSet(jev)).toEqual(new Set(["SRC-1", SCOPE_CREEP_ID, COMPLEXITY_ID, "GLOBAL-3"]));
     expect(lastResults(presenter).map(resultIdentity)).toEqual([
       "SRC-1",
       "TEST-2",
       "GLOBAL-3",
       SCOPE_CREEP_ID,
+      COMPLEXITY_ID,
     ]);
     expect(lastResults(presenter).map((result) => result.outcome)).toEqual([
       "PASS",
       "SKIPPED",
       "PASS",
       "PASS",
+      "PASS",
     ]);
     expect(lastReview(presenter).summary).toEqual({
       verdict: "PASS",
       hasUnavailable: false,
-      counts: { pass: 3, warn: 0, fail: 0, skipped: 1, unavailable: 0 },
+      counts: { pass: 4, warn: 0, fail: 0, skipped: 1, unavailable: 0 },
     });
   });
 
@@ -890,21 +977,22 @@ describe("JevGuardPlugin multi-rule end-to-end", () => {
 
     await dispatch(hooks, idleEvent());
 
-    expect(jevIds(jev)).toEqual(["GOOD-1", SCOPE_CREEP_ID, "GOOD-3"]);
+    expect(jevIdSet(jev)).toEqual(new Set(["GOOD-1", SCOPE_CREEP_ID, COMPLEXITY_ID, "GOOD-3"]));
     expect(lastResults(presenter)).toEqual([
       ruleEvaluated("GOOD-1", "error", "PASS", 0.1, ["src/a.ts"]),
       ruleUnavailable("BAD-2", null, "INVALID_RULE"),
       ruleEvaluated("GOOD-3", "warning", "PASS", 0.1, ["src/a.ts"]),
       builtInEvaluated("PASS", 0.1, ["src/a.ts"]),
+      complexityEvaluated("PASS", 0.1, ["src/a.ts"]),
     ]);
     expect(lastReview(presenter).summary).toEqual({
       verdict: "PASS",
       hasUnavailable: true,
-      counts: { pass: 3, warn: 0, fail: 0, skipped: 0, unavailable: 1 },
+      counts: { pass: 4, warn: 0, fail: 0, skipped: 0, unavailable: 1 },
     });
   });
 
-  test("records duplicate rule IDs as invalid and still runs scope creep", async () => {
+  test("records duplicate rule IDs as invalid and still runs both built-ins", async () => {
     const { hooks, policy, presenter, jev } = harness();
     const rules = [ruleText("DUP-1", "error", "src/**"), ruleText("DUP-1", "error", "src/**")].join(
       "\n\n",
@@ -913,15 +1001,16 @@ describe("JevGuardPlugin multi-rule end-to-end", () => {
 
     await dispatch(hooks, idleEvent());
 
-    expect(jevIds(jev)).toEqual([SCOPE_CREEP_ID]);
+    expect(jevIds(jev)).toEqual([SCOPE_CREEP_ID, COMPLEXITY_ID]);
     expect(lastResults(presenter)).toEqual([
       ruleUnavailable("DUP-1", null, "INVALID_RULE"),
       ruleUnavailable("DUP-1", null, "INVALID_RULE"),
       builtInEvaluated("PASS", 0.1, ["src/a.ts"]),
+      complexityEvaluated("PASS", 0.1, ["src/a.ts"]),
     ]);
   });
 
-  test("does not suppress later rules or scope creep after a single Jev failure", async () => {
+  test("does not suppress later rules or built-ins after a single Jev failure", async () => {
     const { hooks, policy, presenter, jev } = harness();
     const rules = [ruleText("FAIL-1", "error", "src/**"), ruleText("OK-2", "error", "src/**")].join(
       "\n\n",
@@ -931,15 +1020,31 @@ describe("JevGuardPlugin multi-rule end-to-end", () => {
 
     await dispatch(hooks, idleEvent());
 
-    expect(jevIds(jev)).toEqual(["FAIL-1", SCOPE_CREEP_ID, "OK-2"]);
+    expect(jevIdSet(jev)).toEqual(new Set(["FAIL-1", SCOPE_CREEP_ID, COMPLEXITY_ID, "OK-2"]));
     expect(lastResults(presenter)).toEqual([
       ruleUnavailable("FAIL-1", "error", "JEV_FAILURE", ["src/a.ts"]),
       ruleEvaluated("OK-2", "error", "PASS", 0.1, ["src/a.ts"]),
       builtInEvaluated("PASS", 0.1, ["src/a.ts"]),
+      complexityEvaluated("PASS", 0.1, ["src/a.ts"]),
     ]);
   });
 
-  test("keeps blocked, oversized, and clean rule evidence independent with a scope-creep result", async () => {
+  test("does not suppress scope creep when only complexity fails", async () => {
+    const { hooks, policy, presenter, jev } = harness();
+    loadRules(policy, ruleText("OK-1", "error", "src/**"));
+    jev.failingIds.add(COMPLEXITY_ID);
+
+    await dispatch(hooks, idleEvent());
+
+    expect(jevIdSet(jev)).toEqual(new Set(["OK-1", SCOPE_CREEP_ID, COMPLEXITY_ID]));
+    expect(lastResults(presenter)).toEqual([
+      ruleEvaluated("OK-1", "error", "PASS", 0.1, ["src/a.ts"]),
+      builtInEvaluated("PASS", 0.1, ["src/a.ts"]),
+      complexityUnavailable("JEV_FAILURE", ["src/a.ts"]),
+    ]);
+  });
+
+  test("keeps blocked, oversized, and clean rule evidence independent with built-in results", async () => {
     const { hooks, facade, policy, presenter, jev } = harness();
     const rules = [
       ruleText("BLOCK-1", "error", "src/**"),
@@ -962,6 +1067,7 @@ describe("JevGuardPlugin multi-rule end-to-end", () => {
       "UNAVAILABLE",
       "PASS",
       "UNAVAILABLE",
+      "UNAVAILABLE",
     ]);
     expect(lastResults(presenter)[0]).toMatchObject({
       ruleId: "BLOCK-1",
@@ -974,9 +1080,10 @@ describe("JevGuardPlugin multi-rule end-to-end", () => {
       reason: "OVERSIZED_DIFF",
     });
     expect(lastResults(presenter)[3]).toEqual(builtInUnavailable("OVERSIZED_DIFF"));
+    expect(lastResults(presenter)[4]).toEqual(complexityUnavailable("OVERSIZED_DIFF"));
   });
 
-  test("reports the invalid config once per rule and still runs scope creep", async () => {
+  test("reports the invalid config once per rule and still runs both built-ins", async () => {
     const { hooks, policy, presenter, jev } = harness();
     const rules = [ruleText("A-1", "error", "src/**"), ruleText("B-2", "warning", null)].join(
       "\n\n",
@@ -985,11 +1092,12 @@ describe("JevGuardPlugin multi-rule end-to-end", () => {
 
     await dispatch(hooks, idleEvent());
 
-    expect(jevIds(jev)).toEqual([SCOPE_CREEP_ID]);
+    expect(jevIds(jev)).toEqual([SCOPE_CREEP_ID, COMPLEXITY_ID]);
     expect(lastResults(presenter)).toEqual([
       ruleUnavailable("A-1", "error", "INVALID_CONFIG"),
       ruleUnavailable("B-2", "warning", "INVALID_CONFIG"),
       builtInEvaluated("PASS", 0.1, ["src/a.ts"]),
+      complexityEvaluated("PASS", 0.1, ["src/a.ts"]),
     ]);
   });
 
@@ -1005,7 +1113,7 @@ describe("JevGuardPlugin multi-rule end-to-end", () => {
     await dispatch(hooks, idleEvent());
     await dispatch(hooks, idleEvent());
 
-    expect(jevIds(jev)).toEqual(["SRC-1", SCOPE_CREEP_ID, "GLOBAL-2"]);
+    expect(jevIdSet(jev)).toEqual(new Set(["SRC-1", SCOPE_CREEP_ID, COMPLEXITY_ID, "GLOBAL-2"]));
     expect(presenter.reviews).toHaveLength(1);
   });
 });
@@ -1026,10 +1134,11 @@ describe("JevGuardPlugin gate propagation", () => {
       loadRules(policy, scopedRule(severity));
       jev.probability = probability;
       jev.probabilities.set(SCOPE_CREEP_ID, 0.1);
+      jev.probabilities.set(COMPLEXITY_ID, 0.1);
 
       await dispatch(hooks, idleEvent());
 
-      expect(jevIds(jev)).toEqual(["TEST-1", SCOPE_CREEP_ID]);
+      expect(jevIds(jev)).toEqual(["TEST-1", SCOPE_CREEP_ID, COMPLEXITY_ID]);
       expect(lastResults(presenter)[0]).toEqual(
         ruleEvaluated("TEST-1", severity, outcome, probability, ["src/a.ts"]),
       );
@@ -1039,21 +1148,22 @@ describe("JevGuardPlugin gate propagation", () => {
 });
 
 describe("JevGuardPlugin runtime short-circuits", () => {
-  test("skips an out-of-scope rule while still evaluating scope creep", async () => {
+  test("skips an out-of-scope rule while still evaluating both built-ins", async () => {
     const { hooks, facade, policy, presenter, jev } = harness();
     loadRules(policy, scopedRule("error"));
     facade.diffs = [{ file: "docs/readme.md", patch: DOCS_SENTINEL }];
 
     await dispatch(hooks, idleEvent());
 
-    expect(jevIds(jev)).toEqual([SCOPE_CREEP_ID]);
+    expect(jevIds(jev)).toEqual([SCOPE_CREEP_ID, COMPLEXITY_ID]);
     expect(lastResults(presenter)).toEqual([
       ruleSkipped("TEST-1", "error", "NO_SCOPE_MATCH"),
       builtInEvaluated("PASS", 0.1, ["docs/readme.md"]),
+      complexityEvaluated("PASS", 0.1, ["docs/readme.md"]),
     ]);
   });
 
-  test("reports an oversized patch as UNAVAILABLE in both lanes without a Jev call", async () => {
+  test("reports an oversized patch as UNAVAILABLE in every lane without a Jev call", async () => {
     const { hooks, facade, policy, presenter, jev } = harness();
     loadRules(policy, scopedRule("error"));
     facade.diffs = [
@@ -1066,10 +1176,11 @@ describe("JevGuardPlugin runtime short-circuits", () => {
     expect(lastResults(presenter)).toEqual([
       ruleUnavailable("TEST-1", "error", "OVERSIZED_DIFF"),
       builtInUnavailable("OVERSIZED_DIFF"),
+      complexityUnavailable("OVERSIZED_DIFF"),
     ]);
   });
 
-  test("reports a blocked file as UNAVAILABLE in both lanes without a Jev call", async () => {
+  test("reports a blocked file as UNAVAILABLE in every lane without a Jev call", async () => {
     const { hooks, facade, policy, presenter, jev } = harness();
     loadRules(policy, scopedRule("error"));
     facade.diffs = [
@@ -1083,6 +1194,7 @@ describe("JevGuardPlugin runtime short-circuits", () => {
     expect(lastResults(presenter)).toEqual([
       ruleUnavailable("TEST-1", "error", "BLOCKED_EVIDENCE"),
       builtInUnavailable("BLOCKED_EVIDENCE"),
+      complexityUnavailable("BLOCKED_EVIDENCE"),
     ]);
   });
 });
@@ -1106,6 +1218,12 @@ describe("JevGuardPlugin observe-only containment", () => {
       checkId: SCOPE_CREEP_ID,
       outcome: "FAIL",
     });
+    expect(lastResults(presenter)[2]).toMatchObject({
+      kind: "BUILT_IN",
+      checkId: COMPLEXITY_ID,
+      severity: "warning",
+      outcome: "WARN",
+    });
     expect(lastReview(presenter).summary.verdict).toBe("FAIL");
     expect(facade.forbidden).toEqual([]);
   });
@@ -1117,10 +1235,18 @@ describe("JevGuardPlugin observe-only containment", () => {
 
     await expect(dispatch(hooks, idleEvent())).resolves.toBeUndefined();
 
-    expect(jev.requests).toHaveLength(2);
+    expect(jev.requests).toHaveLength(3);
     expect(lastResults(presenter)[0]).toMatchObject({
       outcome: "UNAVAILABLE",
       reason: "JEV_FAILURE",
+    });
+    expect(lastResults(presenter)[1]).toMatchObject({
+      checkId: SCOPE_CREEP_ID,
+      outcome: "UNAVAILABLE",
+    });
+    expect(lastResults(presenter)[2]).toMatchObject({
+      checkId: COMPLEXITY_ID,
+      outcome: "UNAVAILABLE",
     });
     expect(facade.forbidden).toEqual([]);
   });
