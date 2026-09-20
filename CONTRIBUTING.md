@@ -8,7 +8,7 @@ trustworthy without pretending that incomplete evidence is safe to judge.
 Read:
 
 - [`README.md`](./README.md) for product intent;
-- local [`SPEC.md`](./SPEC.md) for scope and normative V0.1 contracts;
+- local [`SPEC.md`](./SPEC.md) for scope and the normative contracts;
 - [`AGENTS.md`](./AGENTS.md) for architecture and code standards;
 - local [`docs/adr`](./docs/adr) for decisions that should not be casually reversed.
 
@@ -45,7 +45,7 @@ manager.
 - Do not use a global git diff as fallback evidence.
 - Do not change `UNAVAILABLE` into a semantic verdict.
 - Do not add auto-remediation, blocking behavior, or agent-context injection to
-  the V0.1 observe-mode slice.
+  the observe-only slice.
 - Do not expose API keys, environment files, secrets, or rejected evidence in
   tests, fixtures, logs, or documentation.
 - Do not accept the TypeSafe API key as a CLI argument or repository setting. Local

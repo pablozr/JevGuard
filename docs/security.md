@@ -21,14 +21,19 @@ applicable files is capped at `100000` characters; a larger diff is
 `UNAVAILABLE` with reason `OVERSIZED_DIFF`.
 
 It also does not evaluate a rule from a subset of its relevant files. If any
-applicable file is rejected by the safety policy, the rule is `UNAVAILABLE` with
+applicable file is rejected by the safety policy, that rule is `UNAVAILABLE` with
 reason `BLOCKED_EVIDENCE`.
+
+Rejections are scoped to the rules they affect. Evidence is selected per rule from
+that rule's applicable files, so an oversized or blocked file makes only the rules
+whose scope matches it `UNAVAILABLE`; rules with disjoint, safe applicable files
+still run.
 
 ## File safety policy
 
-The V0.1 evidence policy is fixed in core (not yet configurable). Only common
-code and text extensions may be sent; a file without an allowlisted extension is
-rejected rather than assumed textual.
+The evidence policy is fixed in core (not configurable). Only common code and text
+extensions may be sent; a file without an allowlisted extension is rejected rather
+than assumed textual.
 
 Allowed extensions are broad and cover common source, config, docs, shell, and
 data text formats: for example `.ts`, `.tsx`, `.js`, `.jsx`, `.json`, `.md`,
@@ -98,4 +103,4 @@ If neither source provides a key, the plugin stays loaded and the evaluation is
 
 `UNAVAILABLE` is intentional when JevGuard cannot obtain complete safe evidence,
 validate policy, access Jev, or retrieve the attributed diff. It is not a policy
-pass, a warning, or a failure, and the V0.1 observe-mode plugin does not block work.
+pass, a warning, or a failure, and the observe-only plugin does not block work.

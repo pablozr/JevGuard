@@ -5,17 +5,17 @@
 ![JevGuard: semantic policy engine for coding agents](./27b864b2-3f64-4211-99dd-26764c549d03.png)
 
 JevGuard checks the code an agent just changed against the policies that matter in
-your repository. It uses Jev for a narrow semantic judgment, then applies your
-local deterministic gate to return `PASS`, `WARN`, or `FAIL`.
+your repository. It uses Jev for a narrow semantic judgment per rule, then applies
+your local deterministic gate to return `PASS`, `WARN`, or `FAIL`.
 
 ```text
 agent completes a turn
         ↓
-task + attributed diff + local rule
+task + attributed diff + local rules
         ↓
-       Jev
+   Jev per rule
         ↓
-local policy gate
+local policy gate per rule
         ↓
   PASS · WARN · FAIL
 ```
@@ -27,9 +27,9 @@ specific policy, and leaves planning, code generation, and correction with the
 coding agent.
 
 > [!WARNING]
-> JevGuard is in active development. The first release targets OpenCode `1.18.31`
-> and runs in observe mode only: it reports results but never alters the agent
-> context or blocks a task.
+> JevGuard is in active development. The current release targets OpenCode `1.18.31`,
+> evaluates every rule block declared in `.jev/rules.md`, and runs in observe mode
+> only: it reports results but never alters the agent context or blocks a task.
 
 ## Why JevGuard
 
@@ -77,14 +77,21 @@ assistant response
    ↓
 attributed patch
    ↓
-applicable rule
+applicable rules
    ↓
-one semantic judgment
+one semantic judgment per rule
 ```
 
 If complete attributed evidence is unavailable, too large, invalid, or contains a
-blocked sensitive file, JevGuard returns `UNAVAILABLE`. It never turns incomplete
-evidence into a reassuring verdict.
+blocked sensitive file, JevGuard marks the affected rule `UNAVAILABLE`. It never
+turns incomplete evidence into a reassuring verdict. Evidence problems are scoped
+to the rules they affect: a rule whose applicable files are all safe still runs
+even when another rule's evidence is blocked.
+
+Some failures happen before any policy rule is evaluated — the attributed diff
+cannot be built, the policy files cannot be read, or `.jev/rules.md` is missing.
+JevGuard reports those as a single synthetic `UNAVAILABLE` entry with no rule ID; it
+does not invent one result per declared rule.
 
 ## How a review works
 
@@ -106,9 +113,9 @@ Thresholds are locally configurable in `.jev/config.yaml`.
 
 `@jevguard/plugin` is **not published to npm**. It is `private`, and its
 `@jevguard/core` and `@jevguard/opencode-adapter` dependencies are private
-workspace packages. P1 ships the plugin as a **locally packed tarball** that
-bundles that workspace code, so a clean consumer installs one tarball and never
-resolves a workspace link or a private registry package.
+workspace packages. The artifact ships the plugin as a **locally packed tarball**
+that bundles that workspace code, so a clean consumer installs one tarball and
+never resolves a workspace link or a private registry package.
 
 Build the tarball from this repository:
 
@@ -158,7 +165,7 @@ jevguard login
 
 Known limitations:
 
-- P1 is a local, private artifact. There is no registry install and no publish
+- This is a local, private artifact. There is no registry install and no publish
   topology yet.
 - Target host is OpenCode `1.18.31`. Exact `1.18.31` runtime smoke is still
   pending; a local `1.18.28` run worked.
@@ -180,42 +187,51 @@ repository file or shell history. In CI, provide `TYPESAFE_API_KEY` through the
 platform secret manager. See the [security model](./docs/security.md) for details.
 
 ```text
-JEVGUARD REVIEW
-
-✗ ARCH-001  FAIL  93% violation probability
-Result: FAIL
+JevGuard FAIL
+pass 1 · warn 1 · fail 1 · skipped 0 · unavailable 0
 ```
 
-`PASS`, `WARN`, and `FAIL` are semantic outcomes. `SKIPPED` means there was no
-applicable change to evaluate. `UNAVAILABLE` means JevGuard could not safely or
-completely evaluate the turn.
+One toast per turn shows the aggregate outcome and the outcome counts; the
+structured log carries every rule's result, its raw violation probability or typed
+reason, and its scoped paths. The counts include every entry, including the single
+synthetic entry a review-level failure produces.
 
-## First release
+`PASS`, `WARN`, and `FAIL` are per-rule semantic outcomes. `SKIPPED` means that
+rule had no applicable change to evaluate. `UNAVAILABLE` means JevGuard could not
+safely or completely evaluate that rule.
 
-The V0.1 vertical slice proves a single end-to-end path:
+## Implemented behavior
+
+The current release implements the full local, observe-only path:
 
 - OpenCode V1 plugin loads.
 - A completed assistant response is detected.
 - The direct parent user task and assistant-attributed diff are acquired.
-- One scoped local rule is parsed from `.jev/rules.md`.
-- Jev returns one typed violation probability.
-- A local gate produces `PASS`, `WARN`, or `FAIL`.
-- OpenCode shows a TUI toast and JevGuard writes a structured log.
+- Every `## <RULE-ID>` block in `.jev/rules.md` is parsed in source order. Each
+  block is validated independently, so one invalid block does not suppress its
+  valid siblings, and every occurrence of a duplicated ID is invalid.
+- Each valid rule is processed independently. It asks Jev at most once, and only
+  when the gate config is valid, the rule is applicable, and its scoped evidence is
+  complete and safe; it produces one typed violation probability or an operational
+  outcome.
+- A failure before rule evaluation — no attributed diff, unreadable policy files, or
+  a missing `.jev/rules.md` — is reported as one synthetic `UNAVAILABLE` entry with
+  no rule ID, not one result per declared rule.
+- The local gate maps each rule to `PASS`, `WARN`, or `FAIL`; a rule with no
+  applicable scope is `SKIPPED`, and a rule that cannot be safely evaluated is
+  `UNAVAILABLE`.
+- One aggregate TUI toast and one structured log entry report the turn. The log
+  carries every entry's outcome, raw probability, or reason, and the counts include
+  the synthetic review-level entry when there is one.
 
 No feedback is injected into the agent session. No remediation is attempted. No
 task is blocked.
 
 ## Roadmap
 
-The path is deliberately layered:
+The multi-rule slice is implemented. Planned work beyond it:
 
 ```text
-V0.1  One rule, attributed turn, local gate
-  ↓
-P1    Local installable artifact (private tarball)
-  ↓
-V0.2  Multiple scoped rules and review aggregation
-  ↓
 V0.3  Built-in semantic checks: scope creep, complexity, test adequacy
   ↓
 V0.4  jev-init: evidence-based policy bootstrap
@@ -252,13 +268,13 @@ plugin → opencode-adapter → core
 
 ## Status
 
-The V0.1 vertical slice is implemented and observe-only. It loads in OpenCode,
-attributes one completed turn, parses one scoped rule from `.jev/rules.md`, asks
-Jev once per applicable rule, applies the local gate, and presents one result as a
-transient TUI toast and a structured log entry.
+The multi-rule, observe-only review is implemented. It loads in OpenCode,
+attributes one completed turn, parses every rule block in `.jev/rules.md`, asks Jev
+once per applicable rule, applies the local gate to each, and presents one
+aggregate result as a transient TUI toast and a structured log entry.
 
-P1 packages that slice as a local, private tarball (`pnpm artifact:build`,
-`pnpm artifact:pack`) that a clean consumer can install without workspace links.
+The local, private tarball (`pnpm artifact:build`, `pnpm artifact:pack`) packages
+that slice so a clean consumer can install it without workspace links.
 
 OpenCode sees only transient toasts and structured logs. JevGuard does not inject
 anything into the agent context, does not add session messages, and does not block
