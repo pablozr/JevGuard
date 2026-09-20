@@ -14,6 +14,7 @@ export function buildJevRequest(
   evidence: RuleEvidence,
 ): JevRuleRequest {
   return {
+    kind: "RULE",
     task,
     question: {
       type: "noul",

@@ -93,8 +93,8 @@ Some failures happen before any policy rule is evaluated. If the attributed diff
 cannot be built, the review is a single synthetic `UNAVAILABLE` entry with no rule
 ID, and neither lane runs. If the turn is attributed but the policy files cannot be
 read or validated, the rule lane reports one synthetic `UNAVAILABLE` entry with no
-rule ID — it does not invent one result per declared rule — while the `SCOPE-CREEP`
-built-in still runs against the turn's attributed patch.
+rule ID — it does not invent one result per declared rule — while the built-in batch
+still runs against the turn's attributed patch.
 
 ## How a review works
 
@@ -115,7 +115,9 @@ Those thresholds are per repository rule and locally configurable in
 
 JevGuard also runs two product-owned built-ins on every attributed turn,
 `SCOPE-CREEP` and `COMPLEXITY`. Both receive the turn's complete, safe attributed
-patch with no scope filtering.
+patch with no scope filtering, and both are answered by a **single** Jev request
+that carries two independent questions. Each answer is validated on its own, so a
+malformed answer fails only its own check.
 
 `SCOPE-CREEP` asks whether the change contains material functional, behavioral,
 architectural, dependency, configuration, documentation, or refactoring work the task
@@ -129,10 +131,14 @@ without a clear need, excessive configuration, premature generalization, or stru
 materially larger than the problem requires. It is advisory: it warns at `50%` and
 can never fail.
 
-The rule lane and both built-ins are launched together, and one shared FIFO
-concurrency limit keeps at most two Jev calls in flight across the turn. Results join
-the same aggregate in a fixed order: rules in source order, then `SCOPE-CREEP`, then
-`COMPLEXITY`.
+The rule lane and the built-in batch are launched together. One shared FIFO
+concurrency limit caps the plugin instance at two Jev requests in flight, counting the
+built-in batch as a single request. Results join the same aggregate in a fixed order:
+rules in source order, then `SCOPE-CREEP`, then `COMPLEXITY`.
+
+Reviews run in the background. The idle event returns as soon as the serialized
+attribution step is scheduled; policy reads, Jev calls, and presentation never sit on
+the agent's critical path.
 
 ## Install
 
@@ -281,7 +287,7 @@ The current release implements the full local, observe-only path:
 - A failure before rule evaluation — no attributed diff, unreadable policy files, or
   a missing `.jev/rules.md` — is reported by the rule lane as one synthetic
   `UNAVAILABLE` entry with no rule ID, not one result per declared rule. When the
-  turn itself is attributed, the `SCOPE-CREEP` built-in still runs.
+  turn itself is attributed, the built-in batch still runs.
 - The product-owned `SCOPE-CREEP` built-in runs on every attributed turn over the
   turn's complete, safe attributed patch, with fixed `error` thresholds
   (`0.40`/`0.70`) and no scope filtering. It can produce `PASS`, `WARN`, or `FAIL`.
@@ -289,11 +295,18 @@ The current release implements the full local, observe-only path:
   complete, safe attributed patch. It uses a fixed advisory threshold of `0.50`,
   independent of `.jev/config.yaml`, and can produce `PASS` or `WARN` but never
   `FAIL`.
-- Both built-ins run concurrently with the sequential rule lane. One shared FIFO
-  concurrency limit allows at most two Jev calls in flight across the rule lane and
-  both built-ins. With no attributed patch a built-in is `SKIPPED`; blocked or
-  oversized evidence is `UNAVAILABLE`; a rule, policy-load, or config failure never
-  suppresses either built-in, and one built-in's failure never suppresses the other.
+- Both built-ins are sent as one batch request with two independent named answers.
+  One malformed or missing answer fails only its own check; the valid sibling still
+  gates. A failed or malformed batch envelope makes both checks `UNAVAILABLE`.
+- The built-in batch runs concurrently with the sequential rule lane. One shared FIFO
+  concurrency limit allows at most two Jev requests in flight across the plugin
+  instance, counting the batch as one request. With no attributed patch a built-in is
+  `SKIPPED`; blocked or oversized evidence is `UNAVAILABLE`; a rule, policy-load, or
+  config failure never suppresses the batch, and one built-in's answer never
+  suppresses the other.
+- Reviews run in the background. The idle event resolves as soon as the serialized
+  attribution step is scheduled, so policy reads, Jev calls, and presentation do not
+  block the agent.
 - The local gate maps each rule to `PASS`, `WARN`, or `FAIL`; a rule with no
   applicable scope is `SKIPPED`, and a rule that cannot be safely evaluated is
   `UNAVAILABLE`.
@@ -349,10 +362,10 @@ plugin → opencode-adapter → core
 
 The multi-rule, multi-built-in, observe-only review is implemented. It loads in
 OpenCode, attributes one completed turn, parses every rule block in `.jev/rules.md`,
-asks Jev once per applicable rule, runs the `SCOPE-CREEP` and `COMPLEXITY` built-ins
-over the complete attributed patch behind one shared concurrency limit, applies the
-local gate to each, and presents one aggregate result as a transient TUI toast and a
-structured log entry.
+asks Jev once per applicable rule and once per built-in batch, runs the `SCOPE-CREEP`
+and `COMPLEXITY` built-ins over the complete attributed patch behind one shared
+concurrency limit, applies the local gate to each, and presents one aggregate result
+as a transient TUI toast and a structured log entry.
 
 The local, private tarball (`pnpm artifact:build`, `pnpm artifact:pack`) packages
 that slice so a clean consumer can install it without workspace links.

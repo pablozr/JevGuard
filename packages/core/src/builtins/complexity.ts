@@ -1,15 +1,5 @@
-import type {
-  BuiltInReviewContext,
-  BuiltInReviewResult,
-  GateConfig,
-  RuleEvidence,
-  Turn,
-} from "../domain/types";
-import { selectTurnEvidence } from "../evidence/select-evidence";
-import { evaluateWithPort } from "../evaluation/evaluate-with-port";
-import { evaluateGate } from "../gate/evaluate-gate";
-import type { JevBuiltInRequest } from "../ports/types";
-import type { EvaluateComplexityDependencies, EvaluateComplexityInput } from "./types";
+import type { BuiltInReviewContext, GateConfig, Turn } from "../domain/types";
+import type { JevNoulQuestion } from "../ports/types";
 
 export const COMPLEXITY_CHECK_ID = "COMPLEXITY";
 
@@ -38,75 +28,26 @@ const COMPLEXITY_ALLOWED =
   "Complexity explicitly required by the task, and necessary supporting changes, tests, validation, error handling, auxiliary changes, or following an existing codebase abstraction to avoid breaking its pattern.";
 
 /**
- * Builds the single Noul request for the complexity built-in over the turn's
- * complete attributed evidence. The check definition travels in the same criteria
- * shape as a rule so one transport serves every lane.
+ * Builds the complexity Noul for the shared built-in batch. The check definition
+ * travels in the same criteria shape as a rule so one transport serves both.
  */
-export function buildComplexityRequest(task: string, evidence: RuleEvidence): JevBuiltInRequest {
+export function buildComplexityQuestion(): JevNoulQuestion {
   return {
-    kind: "BUILT_IN",
-    task,
-    question: {
-      type: "noul",
-      instructions: COMPLEXITY_INSTRUCTIONS,
-      criteria: {
-        id: COMPLEXITY_CHECK_ID,
-        description: COMPLEXITY_DESCRIPTION,
-        violation: COMPLEXITY_VIOLATION,
-        allowed: COMPLEXITY_ALLOWED,
-      },
+    type: "noul",
+    instructions: COMPLEXITY_INSTRUCTIONS,
+    criteria: {
+      id: COMPLEXITY_CHECK_ID,
+      description: COMPLEXITY_DESCRIPTION,
+      violation: COMPLEXITY_VIOLATION,
+      allowed: COMPLEXITY_ALLOWED,
     },
-    change: { files: evidence.files, diff: evidence.diff },
   };
 }
 
-/**
- * Evaluates complexity for one turn: select the complete scope-free evidence, call
- * Jev at most once, and gate the probability through the fixed advisory thresholds.
- * Missing patch, oversized, blocked, and port failures stay operational and never
- * become a semantic verdict. The check is warning-only, so it can never produce
- * `FAIL`.
- */
-export async function evaluateComplexity(
-  input: EvaluateComplexityInput,
-  dependencies: EvaluateComplexityDependencies,
-): Promise<BuiltInReviewResult> {
-  const selection = selectTurnEvidence(input.turn, input.evidencePolicy);
-
-  if (selection.status === "SKIPPED") {
-    return {
-      ...buildComplexityContext(input.turn, []),
-      outcome: "SKIPPED",
-      reason: selection.reason,
-    };
-  }
-
-  if (selection.status === "UNAVAILABLE") {
-    return {
-      ...buildComplexityContext(input.turn, []),
-      outcome: "UNAVAILABLE",
-      reason: selection.reason,
-    };
-  }
-
-  const context = buildComplexityContext(input.turn, selection.evidence.files);
-  const request = buildComplexityRequest(input.turn.task, selection.evidence);
-  const evaluation = await evaluateWithPort(dependencies.jev, request);
-
-  if (evaluation.status === "FAILED") {
-    return { ...context, outcome: "UNAVAILABLE", reason: "JEV_FAILURE" };
-  }
-
-  const gate = evaluateGate(
-    "warning",
-    evaluation.noul.violationProbability,
-    COMPLEXITY_GATE_CONFIG,
-  );
-
-  return { ...context, ...gate };
-}
-
-function buildComplexityContext(turn: Turn, scopedPaths: readonly string[]): BuiltInReviewContext {
+export function buildComplexityContext(
+  turn: Turn,
+  scopedPaths: readonly string[],
+): BuiltInReviewContext {
   return {
     kind: "BUILT_IN",
     turnId: turn.id,

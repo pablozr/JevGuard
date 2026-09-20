@@ -3,6 +3,7 @@ import {
   type BuiltInReviewResult,
   type BuiltInUnavailableReason,
   createFifoJevPort,
+  type JevBuiltInAnswerResult,
   type JevEvaluationPort,
   type JevEvaluationResult,
   type JevRequest,
@@ -28,13 +29,17 @@ import type { Plugin } from "@opencode-ai/plugin";
 import { describe, expect, test } from "vitest";
 import { JevGuardPlugin } from "../src/index";
 import { createPluginRuntime } from "../src/runtime";
-import type { PluginHooks, PluginRuntimeDependencies } from "../src/types";
+import type { PluginRuntime, PluginRuntimeDependencies } from "../src/types";
 
 const SESSION_ID = "ses_1";
+const SECOND_SESSION_ID = "ses_2";
 const ASSISTANT_ID = "msg_assistant";
 const USER_ID = "msg_user";
+const SECOND_ASSISTANT_ID = "msg_assistant_2";
+const SECOND_USER_ID = "msg_user_2";
 const SCOPE_CREEP_ID = "SCOPE-CREEP";
 const COMPLEXITY_ID = "COMPLEXITY";
+const BUILT_IN_BATCH_LABEL = "BUILT_IN_BATCH";
 const MAX_CONCURRENT_JEV_CALLS = 2;
 
 const PATCH = ["--- a/src/a.ts", "+++ b/src/a.ts", "@@ -1 +1 @@", "-old", "+new", ""].join("\n");
@@ -106,17 +111,20 @@ function idleEvent(sessionID: string = SESSION_ID): unknown {
   return { type: "session.status", properties: { sessionID, status: { type: "idle" } } };
 }
 
-function turnRecords(): readonly OpenCodeMessageRecord[] {
+function turnRecords(
+  assistantID: string = ASSISTANT_ID,
+  userID: string = USER_ID,
+): readonly OpenCodeMessageRecord[] {
   return [
     {
-      info: { id: USER_ID, role: "user" },
+      info: { id: userID, role: "user" },
       parts: [{ type: "text", text: "Implement the thing." }],
     },
     {
       info: {
-        id: ASSISTANT_ID,
+        id: assistantID,
         role: "assistant",
-        parentID: USER_ID,
+        parentID: userID,
         time: { created: 1, completed: 2 },
       },
       parts: [],
@@ -186,19 +194,28 @@ class FakeFacade implements OpenCodeSessionFacade {
   readonly messageQueries: MessageQuery[] = [];
   readonly diffQueries: DiffQuery[] = [];
   readonly forbidden: string[] = [];
+  readonly recordsBySession = new Map<string, readonly OpenCodeMessageRecord[]>();
   records: readonly OpenCodeMessageRecord[] = turnRecords();
   diffs: readonly OpenCodeFileDiff[] = patchDiffs();
   failure: "none" | "messages" | "diff" = "none";
+  block = false;
+  private releaseMessagesGate: (() => void) | null = null;
 
   async listMessages(input: MessageQuery): Promise<readonly OpenCodeMessageRecord[]> {
     this.calls.push("listMessages");
     this.messageQueries.push({ sessionID: input.sessionID });
 
+    if (this.block) {
+      await new Promise<void>((resolve) => {
+        this.releaseMessagesGate = resolve;
+      });
+    }
+
     if (this.failure === "messages") {
       throw new Error("messages unavailable");
     }
 
-    return this.records;
+    return this.recordsBySession.get(input.sessionID) ?? this.records;
   }
 
   async fetchDiff(input: DiffQuery): Promise<readonly OpenCodeFileDiff[]> {
@@ -210,6 +227,11 @@ class FakeFacade implements OpenCodeSessionFacade {
     }
 
     return this.diffs;
+  }
+
+  releaseMessages(): void {
+    this.releaseMessagesGate?.();
+    this.releaseMessagesGate = null;
   }
 
   prompt(): void {
@@ -259,6 +281,10 @@ class FakePresenter implements ReviewPresenter {
   }
 }
 
+function requestCallLabel(request: JevRequest): string {
+  return request.kind === "RULE" ? request.question.criteria.id : BUILT_IN_BATCH_LABEL;
+}
+
 class FakeJev implements JevEvaluationPort {
   readonly requests: JevRequest[] = [];
   readonly activations: string[] = [];
@@ -269,31 +295,49 @@ class FakeJev implements JevEvaluationPort {
   probability = 0.1;
   fail = false;
   block = false;
-  private pending: Array<{ id: string; resolve: () => void }> = [];
+  private pending: Array<{ label: string; resolve: () => void }> = [];
   private readonly activationWaiters: Array<{ count: number; resolve: () => void }> = [];
 
   async evaluate(request: JevRequest): Promise<JevEvaluationResult> {
-    const id = request.question.criteria.id;
+    const label = requestCallLabel(request);
 
     this.requests.push(request);
-    this.activations.push(id);
+    this.activations.push(label);
     this.active += 1;
     this.maxActive = Math.max(this.maxActive, this.active);
     this.notifyActivations();
 
     if (this.block) {
-      await new Promise<void>((resolve) => this.pending.push({ id, resolve }));
+      await new Promise<void>((resolve) => this.pending.push({ label, resolve }));
     }
 
     this.active -= 1;
 
-    if (this.fail || this.failingIds.has(id)) {
-      return { status: "FAILED", reason: "MISSING_CREDENTIAL" };
+    if (request.kind === "RULE") {
+      const id = request.question.criteria.id;
+
+      if (this.fail || this.failingIds.has(id)) {
+        return { kind: "RULE", status: "FAILED", reason: "MISSING_CREDENTIAL" };
+      }
+
+      return {
+        kind: "RULE",
+        status: "EVALUATED",
+        noul: { violationProbability: this.probabilities.get(id) ?? this.probability },
+      };
+    }
+
+    if (this.fail) {
+      return { kind: "BUILT_IN_BATCH", status: "FAILED", reason: "MISSING_CREDENTIAL" };
     }
 
     return {
+      kind: "BUILT_IN_BATCH",
       status: "EVALUATED",
-      noul: { violationProbability: this.probabilities.get(id) ?? this.probability },
+      answers: {
+        scopeCreep: this.answer(SCOPE_CREEP_ID),
+        complexity: this.answer(COMPLEXITY_ID),
+      },
     };
   }
 
@@ -305,11 +349,11 @@ class FakeJev implements JevEvaluationPort {
     await new Promise<void>((resolve) => this.activationWaiters.push({ count, resolve }));
   }
 
-  release(id?: string): void {
-    const remaining: Array<{ id: string; resolve: () => void }> = [];
+  release(label?: string): void {
+    const remaining: Array<{ label: string; resolve: () => void }> = [];
 
     for (const entry of this.pending) {
-      if (id === undefined || entry.id === id) {
+      if (label === undefined || entry.label === label) {
         entry.resolve();
       } else {
         remaining.push(entry);
@@ -317,6 +361,17 @@ class FakeJev implements JevEvaluationPort {
     }
 
     this.pending = remaining;
+  }
+
+  private answer(id: string): JevBuiltInAnswerResult {
+    if (this.failingIds.has(id)) {
+      return { status: "FAILED", reason: "MISSING_CREDENTIAL" };
+    }
+
+    return {
+      status: "EVALUATED",
+      noul: { violationProbability: this.probabilities.get(id) ?? this.probability },
+    };
   }
 
   private notifyActivations(): void {
@@ -340,7 +395,7 @@ class FakeJev implements JevEvaluationPort {
 }
 
 interface Harness {
-  readonly hooks: PluginHooks;
+  readonly runtime: PluginRuntime;
   readonly facade: FakeFacade;
   readonly policy: FakePolicyLoader;
   readonly presenter: FakePresenter;
@@ -365,11 +420,12 @@ function harness(): Harness {
     jev: createFifoJevPort(jev, { maxConcurrency: MAX_CONCURRENT_JEV_CALLS }),
   };
 
-  return { hooks: createPluginRuntime(dependencies), facade, policy, presenter, jev };
+  return { runtime: createPluginRuntime(dependencies), facade, policy, presenter, jev };
 }
 
-async function dispatch(hooks: PluginHooks, event: unknown): Promise<void> {
-  await hooks.event({ event });
+async function dispatch(runtime: PluginRuntime, event: unknown): Promise<void> {
+  await runtime.hooks.event({ event });
+  await runtime.drain();
 }
 
 function lastReview(presenter: FakePresenter): TurnReview {
@@ -386,12 +442,22 @@ function lastResults(presenter: FakePresenter): readonly ReviewResult[] {
   return lastReview(presenter).results;
 }
 
-function jevIds(jev: FakeJev): readonly string[] {
-  return jev.requests.map((request) => request.question.criteria.id);
+function jevCalls(jev: FakeJev): readonly string[] {
+  return jev.activations;
 }
 
-function jevIdSet(jev: FakeJev): ReadonlySet<string> {
-  return new Set(jevIds(jev));
+function jevRequestedChecks(jev: FakeJev): readonly string[] {
+  return jev.requests.flatMap((request) =>
+    request.kind === "RULE" ? [request.question.criteria.id] : [SCOPE_CREEP_ID, COMPLEXITY_ID],
+  );
+}
+
+function jevCheckSet(jev: FakeJev): ReadonlySet<string> {
+  return new Set(jevRequestedChecks(jev));
+}
+
+function batchRequests(jev: FakeJev): readonly JevRequest[] {
+  return jev.requests.filter((request) => request.kind === "BUILT_IN_BATCH");
 }
 
 function loadRules(policy: FakePolicyLoader, rules: string, config: string | null = null): void {
@@ -583,14 +649,14 @@ describe("JevGuardPlugin composition", () => {
   });
 
   test("ignores events that are not an idle session status", async () => {
-    const { hooks, facade, policy, presenter, jev } = harness();
+    const { runtime, facade, policy, presenter, jev } = harness();
 
-    await dispatch(hooks, { type: "session.idle", properties: { sessionID: SESSION_ID } });
-    await dispatch(hooks, {
+    await dispatch(runtime, { type: "session.idle", properties: { sessionID: SESSION_ID } });
+    await dispatch(runtime, {
       type: "session.status",
       properties: { sessionID: SESSION_ID, status: { type: "busy" } },
     });
-    await dispatch(hooks, { type: "message.updated", properties: {} });
+    await dispatch(runtime, { type: "message.updated", properties: {} });
 
     expect(facade.calls).toEqual([]);
     expect(policy.calls).toEqual([]);
@@ -605,16 +671,17 @@ describe("JevGuardPlugin composition", () => {
   ] as const)(
     "presents one aggregate with the $outcome rule, scope creep, and complexity for probability $probability",
     async ({ probability, outcome }) => {
-      const { hooks, facade, policy, presenter, jev } = harness();
+      const { runtime, facade, policy, presenter, jev } = harness();
       jev.probability = probability;
       jev.probabilities.set(SCOPE_CREEP_ID, 0.1);
       jev.probabilities.set(COMPLEXITY_ID, 0.1);
 
-      await dispatch(hooks, idleEvent());
+      await dispatch(runtime, idleEvent());
 
       expect(facade.calls).toEqual(["listMessages", "fetchDiff"]);
       expect(policy.calls).toEqual(["load"]);
-      expect(jevIds(jev)).toEqual(["TEST-1", SCOPE_CREEP_ID, COMPLEXITY_ID]);
+      expect(jevCalls(jev)).toEqual(["TEST-1", BUILT_IN_BATCH_LABEL]);
+      expect(jevRequestedChecks(jev)).toEqual(["TEST-1", SCOPE_CREEP_ID, COMPLEXITY_ID]);
       expect(presenter.reviews).toHaveLength(1);
       expect(lastResults(presenter)).toEqual([
         ruleEvaluated("TEST-1", "error", outcome, probability, ["src/a.ts"]),
@@ -626,10 +693,10 @@ describe("JevGuardPlugin composition", () => {
   );
 
   test("skips every lane with no attributed patch and zero Jev calls", async () => {
-    const { hooks, facade, presenter, jev } = harness();
+    const { runtime, facade, presenter, jev } = harness();
     facade.diffs = [];
 
-    await dispatch(hooks, idleEvent());
+    await dispatch(runtime, idleEvent());
 
     expect(jev.requests).toHaveLength(0);
     expect(lastResults(presenter)).toEqual([
@@ -645,20 +712,58 @@ describe("JevGuardPlugin composition", () => {
   });
 
   test("never invokes message mutation or prompt APIs", async () => {
-    const { hooks, facade } = harness();
+    const { runtime, facade } = harness();
 
-    await dispatch(hooks, idleEvent());
+    await dispatch(runtime, idleEvent());
 
     expect(facade.forbidden).toEqual([]);
   });
 });
 
+describe("JevGuardPlugin event returns before background work", () => {
+  test("resolves the event hook while attribution is still blocked, then drains", async () => {
+    const { runtime, facade, presenter } = harness();
+    facade.block = true;
+
+    await runtime.hooks.event({ event: idleEvent() });
+
+    expect(presenter.reviews).toHaveLength(0);
+
+    facade.releaseMessages();
+    await runtime.drain();
+
+    expect(presenter.reviews).toHaveLength(1);
+    expect(lastResults(presenter)[0]?.outcome).toBe("PASS");
+  });
+
+  test("resolves the event hook while Jev is still blocked, then drains to results", async () => {
+    const { runtime, presenter, jev } = harness();
+    jev.block = true;
+
+    await runtime.hooks.event({ event: idleEvent() });
+    await jev.waitForActivations(2);
+
+    expect(jev.maxActive).toBe(2);
+    expect(presenter.reviews).toHaveLength(0);
+
+    jev.release();
+    await runtime.drain();
+
+    expect(presenter.reviews).toHaveLength(1);
+    expect(lastResults(presenter).map(resultIdentity)).toEqual([
+      "TEST-1",
+      SCOPE_CREEP_ID,
+      COMPLEXITY_ID,
+    ]);
+  });
+});
+
 describe("JevGuardPlugin operational failures", () => {
   test("reports a review-level MISSING_ATTRIBUTED_DIFF when the messages read fails", async () => {
-    const { hooks, facade, policy, presenter, jev } = harness();
+    const { runtime, facade, policy, presenter, jev } = harness();
     facade.failure = "messages";
 
-    await dispatch(hooks, idleEvent());
+    await dispatch(runtime, idleEvent());
 
     expect(policy.calls).toEqual([]);
     expect(jev.requests).toHaveLength(0);
@@ -668,10 +773,10 @@ describe("JevGuardPlugin operational failures", () => {
   });
 
   test("reports a review-level MISSING_ATTRIBUTED_DIFF when the diff read fails", async () => {
-    const { hooks, facade, presenter, jev } = harness();
+    const { runtime, facade, presenter, jev } = harness();
     facade.failure = "diff";
 
-    await dispatch(hooks, idleEvent());
+    await dispatch(runtime, idleEvent());
 
     expect(jev.requests).toHaveLength(0);
     expect(lastResults(presenter)).toEqual([
@@ -679,13 +784,14 @@ describe("JevGuardPlugin operational failures", () => {
     ]);
   });
 
-  test("runs both built-ins when the rules file is absent", async () => {
-    const { hooks, policy, presenter, jev } = harness();
+  test("runs the built-in batch when the rules file is absent", async () => {
+    const { runtime, policy, presenter, jev } = harness();
     policy.result = { status: "LOADED", source: { rules: null, config: null } };
 
-    await dispatch(hooks, idleEvent());
+    await dispatch(runtime, idleEvent());
 
-    expect(jevIds(jev)).toEqual([SCOPE_CREEP_ID, COMPLEXITY_ID]);
+    expect(jevCalls(jev)).toEqual([BUILT_IN_BATCH_LABEL]);
+    expect(jevRequestedChecks(jev)).toEqual([SCOPE_CREEP_ID, COMPLEXITY_ID]);
     expect(lastResults(presenter)).toEqual([
       reviewUnavailable(ASSISTANT_ID, "INVALID_RULE"),
       builtInEvaluated("PASS", 0.1, ["src/a.ts"]),
@@ -698,13 +804,13 @@ describe("JevGuardPlugin operational failures", () => {
     });
   });
 
-  test("runs both built-ins when the rules read fails", async () => {
-    const { hooks, policy, presenter, jev } = harness();
+  test("runs the built-in batch when the rules read fails", async () => {
+    const { runtime, policy, presenter, jev } = harness();
     policy.result = { status: "FAILED", reason: "RULES_READ_FAILURE" };
 
-    await dispatch(hooks, idleEvent());
+    await dispatch(runtime, idleEvent());
 
-    expect(jevIds(jev)).toEqual([SCOPE_CREEP_ID, COMPLEXITY_ID]);
+    expect(jevCalls(jev)).toEqual([BUILT_IN_BATCH_LABEL]);
     expect(lastResults(presenter)).toEqual([
       reviewUnavailable(ASSISTANT_ID, "INVALID_RULE"),
       builtInEvaluated("PASS", 0.1, ["src/a.ts"]),
@@ -713,12 +819,12 @@ describe("JevGuardPlugin operational failures", () => {
   });
 
   test("keeps a parser-level INVALID_RULE as a rule result distinct from a review-level one", async () => {
-    const { hooks, policy, presenter, jev } = harness();
+    const { runtime, policy, presenter, jev } = harness();
     policy.result = { status: "LOADED", source: { rules: "not a rule document", config: null } };
 
-    await dispatch(hooks, idleEvent());
+    await dispatch(runtime, idleEvent());
 
-    expect(jevIds(jev)).toEqual([SCOPE_CREEP_ID, COMPLEXITY_ID]);
+    expect(jevCalls(jev)).toEqual([BUILT_IN_BATCH_LABEL]);
     expect(lastResults(presenter)).toEqual([
       ruleUnavailable(null, null, "INVALID_RULE"),
       builtInEvaluated("PASS", 0.1, ["src/a.ts"]),
@@ -726,13 +832,13 @@ describe("JevGuardPlugin operational failures", () => {
     ]);
   });
 
-  test("runs both built-ins with the fixed gates when the config YAML is malformed", async () => {
-    const { hooks, policy, presenter, jev } = harness();
+  test("runs the built-in batch with the fixed gates when the config YAML is malformed", async () => {
+    const { runtime, policy, presenter, jev } = harness();
     policy.result = { status: "LOADED", source: { rules: VALID_RULE, config: "a: [unclosed" } };
 
-    await dispatch(hooks, idleEvent());
+    await dispatch(runtime, idleEvent());
 
-    expect(jevIds(jev)).toEqual([SCOPE_CREEP_ID, COMPLEXITY_ID]);
+    expect(jevCalls(jev)).toEqual([BUILT_IN_BATCH_LABEL]);
     expect(lastResults(presenter)).toEqual([
       ruleUnavailable("TEST-1", "error", "INVALID_CONFIG"),
       builtInEvaluated("PASS", 0.1, ["src/a.ts"]),
@@ -740,25 +846,25 @@ describe("JevGuardPlugin operational failures", () => {
     ]);
   });
 
-  test("runs both built-ins when the config shape does not resolve", async () => {
-    const { hooks, policy, presenter, jev } = harness();
+  test("runs the built-in batch when the config shape does not resolve", async () => {
+    const { runtime, policy, presenter, jev } = harness();
     policy.result = { status: "LOADED", source: { rules: VALID_RULE, config: invalidConfigShape } };
 
-    await dispatch(hooks, idleEvent());
+    await dispatch(runtime, idleEvent());
 
-    expect(jevIds(jev)).toEqual([SCOPE_CREEP_ID, COMPLEXITY_ID]);
+    expect(jevCalls(jev)).toEqual([BUILT_IN_BATCH_LABEL]);
     expect(lastResults(presenter)[0]).toEqual(ruleUnavailable("TEST-1", "error", "INVALID_CONFIG"));
     expect(lastResults(presenter)[1]).toEqual(builtInEvaluated("PASS", 0.1, ["src/a.ts"]));
     expect(lastResults(presenter)[2]).toEqual(complexityEvaluated("PASS", 0.1, ["src/a.ts"]));
   });
 
-  test("runs both built-ins when the config read fails", async () => {
-    const { hooks, policy, presenter, jev } = harness();
+  test("runs the built-in batch when the config read fails", async () => {
+    const { runtime, policy, presenter, jev } = harness();
     policy.result = { status: "FAILED", reason: "CONFIG_READ_FAILURE" };
 
-    await dispatch(hooks, idleEvent());
+    await dispatch(runtime, idleEvent());
 
-    expect(jevIds(jev)).toEqual([SCOPE_CREEP_ID, COMPLEXITY_ID]);
+    expect(jevCalls(jev)).toEqual([BUILT_IN_BATCH_LABEL]);
     expect(lastResults(presenter)).toEqual([
       reviewUnavailable(ASSISTANT_ID, "INVALID_CONFIG"),
       builtInEvaluated("PASS", 0.1, ["src/a.ts"]),
@@ -767,12 +873,12 @@ describe("JevGuardPlugin operational failures", () => {
   });
 
   test("reports the rule and both built-ins as JEV_FAILURE when the port fails", async () => {
-    const { hooks, presenter, jev } = harness();
+    const { runtime, presenter, jev } = harness();
     jev.fail = true;
 
-    await dispatch(hooks, idleEvent());
+    await dispatch(runtime, idleEvent());
 
-    expect(jevIds(jev)).toEqual(["TEST-1", SCOPE_CREEP_ID, COMPLEXITY_ID]);
+    expect(jevCalls(jev)).toEqual(["TEST-1", BUILT_IN_BATCH_LABEL]);
     expect(lastResults(presenter)).toEqual([
       ruleUnavailable("TEST-1", "error", "JEV_FAILURE", ["src/a.ts"]),
       builtInUnavailable("JEV_FAILURE", ["src/a.ts"]),
@@ -783,43 +889,43 @@ describe("JevGuardPlugin operational failures", () => {
 
 describe("JevGuardPlugin deduplication and containment", () => {
   test("evaluates a repeated idle only once and presents one aggregate", async () => {
-    const { hooks, presenter, jev } = harness();
+    const { runtime, presenter, jev } = harness();
 
-    await dispatch(hooks, idleEvent());
-    await dispatch(hooks, idleEvent());
+    await dispatch(runtime, idleEvent());
+    await dispatch(runtime, idleEvent());
 
-    expect(jevIds(jev)).toEqual(["TEST-1", SCOPE_CREEP_ID, COMPLEXITY_ID]);
+    expect(jevCalls(jev)).toEqual(["TEST-1", BUILT_IN_BATCH_LABEL]);
     expect(presenter.reviews).toHaveLength(1);
   });
 
   test("evaluates concurrent idle events only once", async () => {
-    const { hooks, presenter, jev } = harness();
+    const { runtime, presenter, jev } = harness();
 
-    await Promise.all([dispatch(hooks, idleEvent()), dispatch(hooks, idleEvent())]);
+    await Promise.all([dispatch(runtime, idleEvent()), dispatch(runtime, idleEvent())]);
 
-    expect(jevIds(jev)).toEqual(["TEST-1", SCOPE_CREEP_ID, COMPLEXITY_ID]);
+    expect(jevCalls(jev)).toEqual(["TEST-1", BUILT_IN_BATCH_LABEL]);
     expect(presenter.reviews).toHaveLength(1);
   });
 
   test("contains a presentation failure without retry or replacement review", async () => {
-    const { hooks, presenter, jev } = harness();
+    const { runtime, presenter, jev } = harness();
     presenter.fail = true;
 
-    await expect(dispatch(hooks, idleEvent())).resolves.toBeUndefined();
+    await expect(dispatch(runtime, idleEvent())).resolves.toBeUndefined();
 
-    expect(jevIds(jev)).toEqual(["TEST-1", SCOPE_CREEP_ID, COMPLEXITY_ID]);
+    expect(jevCalls(jev)).toEqual(["TEST-1", BUILT_IN_BATCH_LABEL]);
     expect(presenter.attempts).toBe(1);
     expect(presenter.reviews).toEqual([]);
   });
 
   test("degrades only the rule lane when the loader rejects unexpectedly", async () => {
-    const { hooks, policy, presenter, jev } = harness();
+    const { runtime, policy, presenter, jev } = harness();
     policy.failure = new Error("programming bug");
 
-    await expect(dispatch(hooks, idleEvent())).resolves.toBeUndefined();
+    await expect(dispatch(runtime, idleEvent())).resolves.toBeUndefined();
 
     expect(policy.calls).toEqual(["load"]);
-    expect(jevIds(jev)).toEqual([SCOPE_CREEP_ID, COMPLEXITY_ID]);
+    expect(jevCalls(jev)).toEqual([BUILT_IN_BATCH_LABEL]);
     expect(presenter.attempts).toBe(1);
     expect(lastResults(presenter)).toEqual([
       reviewUnavailable(ASSISTANT_ID, "INVALID_RULE"),
@@ -830,50 +936,60 @@ describe("JevGuardPlugin deduplication and containment", () => {
   });
 
   test("keeps handling later idle events after a contained failure", async () => {
-    const { hooks, facade, presenter, jev } = harness();
+    const { runtime, facade, presenter, jev } = harness();
     facade.failure = "messages";
 
-    await dispatch(hooks, idleEvent());
+    await dispatch(runtime, idleEvent());
     expect(jev.requests).toHaveLength(0);
     expect(presenter.reviews).toHaveLength(1);
 
     facade.failure = "none";
-    await dispatch(hooks, idleEvent());
+    await dispatch(runtime, idleEvent());
 
-    expect(jevIds(jev)).toEqual(["TEST-1", SCOPE_CREEP_ID, COMPLEXITY_ID]);
+    expect(jevCalls(jev)).toEqual(["TEST-1", BUILT_IN_BATCH_LABEL]);
+    expect(presenter.reviews).toHaveLength(2);
+    expect(lastResults(presenter)[0]?.outcome).toBe("PASS");
+  });
+
+  test("keeps a failed review from poisoning a later review", async () => {
+    const { runtime, facade, presenter, jev } = harness();
+    jev.fail = true;
+
+    await dispatch(runtime, idleEvent());
+    expect(lastResults(presenter)[0]?.outcome).toBe("UNAVAILABLE");
+
+    facade.records = turnRecords(SECOND_ASSISTANT_ID, SECOND_USER_ID);
+    jev.fail = false;
+    await dispatch(runtime, idleEvent());
+
     expect(presenter.reviews).toHaveLength(2);
     expect(lastResults(presenter)[0]?.outcome).toBe("PASS");
   });
 });
 
 describe("JevGuardPlugin concurrency", () => {
-  test("caps in-flight Jev calls at two across the rule lane and both built-ins", async () => {
-    const { hooks, policy, presenter, jev } = harness();
+  test("caps in-flight Jev calls at two across the rule lane and the built-in batch", async () => {
+    const { runtime, policy, presenter, jev } = harness();
     loadRules(
       policy,
       [ruleText("SRC-1", "error", "src/**"), ruleText("SRC-2", "error", "src/**")].join("\n\n"),
     );
     jev.block = true;
 
-    const pendingReview = dispatch(hooks, idleEvent());
+    const pendingReview = dispatch(runtime, idleEvent());
 
     await jev.waitForActivations(2);
 
     expect(jev.maxActive).toBe(2);
-    expect(jev.activations).toEqual(["SRC-1", SCOPE_CREEP_ID]);
+    expect(jevCalls(jev)).toEqual(["SRC-1", BUILT_IN_BATCH_LABEL]);
 
     jev.release("SRC-1");
     await jev.waitForActivations(3);
 
-    expect(jev.activations).toEqual(["SRC-1", SCOPE_CREEP_ID, COMPLEXITY_ID]);
+    expect(jevCalls(jev)).toEqual(["SRC-1", BUILT_IN_BATCH_LABEL, "SRC-2"]);
     expect(jev.maxActive).toBe(2);
 
-    jev.release(COMPLEXITY_ID);
-    await jev.waitForActivations(4);
-
-    expect(jev.activations).toEqual(["SRC-1", SCOPE_CREEP_ID, COMPLEXITY_ID, "SRC-2"]);
-    expect(jev.maxActive).toBe(2);
-
+    jev.release(BUILT_IN_BATCH_LABEL);
     jev.release();
     await pendingReview;
 
@@ -886,8 +1002,30 @@ describe("JevGuardPlugin concurrency", () => {
     ]);
   });
 
-  test("keeps a rule failure from suppressing the sibling rule and both built-ins", async () => {
-    const { hooks, policy, presenter, jev } = harness();
+  test("caps in-flight Jev calls at two across overlapping background turns", async () => {
+    const { runtime, facade, presenter, jev } = harness();
+    facade.recordsBySession.set(
+      SECOND_SESSION_ID,
+      turnRecords(SECOND_ASSISTANT_ID, SECOND_USER_ID),
+    );
+    jev.block = true;
+
+    await runtime.hooks.event({ event: idleEvent(SESSION_ID) });
+    await runtime.hooks.event({ event: idleEvent(SECOND_SESSION_ID) });
+    await jev.waitForActivations(2);
+
+    expect(jev.maxActive).toBe(2);
+
+    jev.block = false;
+    jev.release();
+    await runtime.drain();
+
+    expect(presenter.reviews).toHaveLength(2);
+    expect(batchRequests(jev)).toHaveLength(2);
+  });
+
+  test("keeps a complexity answer failure from suppressing the sibling rule and scope creep", async () => {
+    const { runtime, policy, presenter, jev } = harness();
     loadRules(
       policy,
       [ruleText("SRC-1", "error", "src/**"), ruleText("SRC-2", "error", "src/**")].join("\n\n"),
@@ -895,24 +1033,17 @@ describe("JevGuardPlugin concurrency", () => {
     jev.block = true;
     jev.failingIds.add(COMPLEXITY_ID);
 
-    const pendingReview = dispatch(hooks, idleEvent());
+    const pendingReview = dispatch(runtime, idleEvent());
 
     await jev.waitForActivations(2);
 
-    expect(jev.activations).toEqual(["SRC-1", SCOPE_CREEP_ID]);
+    expect(jevCalls(jev)).toEqual(["SRC-1", BUILT_IN_BATCH_LABEL]);
     expect(jev.maxActive).toBe(2);
 
     jev.release("SRC-1");
     await jev.waitForActivations(3);
 
-    expect(jev.activations).toEqual(["SRC-1", SCOPE_CREEP_ID, COMPLEXITY_ID]);
-    expect(jev.maxActive).toBe(2);
-
-    jev.release(COMPLEXITY_ID);
-    await jev.waitForActivations(4);
-
-    expect(jev.activations).toEqual(["SRC-1", SCOPE_CREEP_ID, COMPLEXITY_ID, "SRC-2"]);
-    expect(jev.maxActive).toBe(2);
+    expect(jevCalls(jev)).toEqual(["SRC-1", BUILT_IN_BATCH_LABEL, "SRC-2"]);
 
     jev.release();
     await pendingReview;
@@ -928,8 +1059,8 @@ describe("JevGuardPlugin concurrency", () => {
 });
 
 describe("JevGuardPlugin multi-rule end-to-end", () => {
-  test("calls Jev only for applicable rules plus both built-ins in deterministic result order", async () => {
-    const { hooks, facade, policy, presenter, jev } = harness();
+  test("calls Jev once per applicable rule plus one batch in deterministic result order", async () => {
+    const { runtime, facade, policy, presenter, jev } = harness();
     const rules = [
       ruleText("SRC-1", "error", "src/**"),
       ruleText("TEST-2", "warning", "tests/**"),
@@ -941,10 +1072,12 @@ describe("JevGuardPlugin multi-rule end-to-end", () => {
       { file: "docs/readme.md", patch: DOCS_SENTINEL },
     ];
 
-    await dispatch(hooks, idleEvent());
+    await dispatch(runtime, idleEvent());
 
     expect(presenter.reviews).toHaveLength(1);
-    expect(jevIdSet(jev)).toEqual(new Set(["SRC-1", SCOPE_CREEP_ID, COMPLEXITY_ID, "GLOBAL-3"]));
+    expect(jevCalls(jev)).toEqual(["SRC-1", BUILT_IN_BATCH_LABEL, "GLOBAL-3"]);
+    expect(jevCheckSet(jev)).toEqual(new Set(["SRC-1", SCOPE_CREEP_ID, COMPLEXITY_ID, "GLOBAL-3"]));
+    expect(batchRequests(jev)).toHaveLength(1);
     expect(lastResults(presenter).map(resultIdentity)).toEqual([
       "SRC-1",
       "TEST-2",
@@ -967,7 +1100,7 @@ describe("JevGuardPlugin multi-rule end-to-end", () => {
   });
 
   test("evaluates valid siblings when one rule block is malformed", async () => {
-    const { hooks, policy, presenter, jev } = harness();
+    const { runtime, policy, presenter, jev } = harness();
     const rules = [
       ruleText("GOOD-1", "error", "src/**"),
       missingSeverityRule("BAD-2"),
@@ -975,9 +1108,9 @@ describe("JevGuardPlugin multi-rule end-to-end", () => {
     ].join("\n\n");
     loadRules(policy, rules);
 
-    await dispatch(hooks, idleEvent());
+    await dispatch(runtime, idleEvent());
 
-    expect(jevIdSet(jev)).toEqual(new Set(["GOOD-1", SCOPE_CREEP_ID, COMPLEXITY_ID, "GOOD-3"]));
+    expect(jevCheckSet(jev)).toEqual(new Set(["GOOD-1", SCOPE_CREEP_ID, COMPLEXITY_ID, "GOOD-3"]));
     expect(lastResults(presenter)).toEqual([
       ruleEvaluated("GOOD-1", "error", "PASS", 0.1, ["src/a.ts"]),
       ruleUnavailable("BAD-2", null, "INVALID_RULE"),
@@ -992,16 +1125,16 @@ describe("JevGuardPlugin multi-rule end-to-end", () => {
     });
   });
 
-  test("records duplicate rule IDs as invalid and still runs both built-ins", async () => {
-    const { hooks, policy, presenter, jev } = harness();
+  test("records duplicate rule IDs as invalid and still runs the batch", async () => {
+    const { runtime, policy, presenter, jev } = harness();
     const rules = [ruleText("DUP-1", "error", "src/**"), ruleText("DUP-1", "error", "src/**")].join(
       "\n\n",
     );
     loadRules(policy, rules);
 
-    await dispatch(hooks, idleEvent());
+    await dispatch(runtime, idleEvent());
 
-    expect(jevIds(jev)).toEqual([SCOPE_CREEP_ID, COMPLEXITY_ID]);
+    expect(jevCalls(jev)).toEqual([BUILT_IN_BATCH_LABEL]);
     expect(lastResults(presenter)).toEqual([
       ruleUnavailable("DUP-1", null, "INVALID_RULE"),
       ruleUnavailable("DUP-1", null, "INVALID_RULE"),
@@ -1010,17 +1143,17 @@ describe("JevGuardPlugin multi-rule end-to-end", () => {
     ]);
   });
 
-  test("does not suppress later rules or built-ins after a single Jev failure", async () => {
-    const { hooks, policy, presenter, jev } = harness();
+  test("does not suppress later rules or the batch after a single Jev failure", async () => {
+    const { runtime, policy, presenter, jev } = harness();
     const rules = [ruleText("FAIL-1", "error", "src/**"), ruleText("OK-2", "error", "src/**")].join(
       "\n\n",
     );
     loadRules(policy, rules);
     jev.failingIds.add("FAIL-1");
 
-    await dispatch(hooks, idleEvent());
+    await dispatch(runtime, idleEvent());
 
-    expect(jevIdSet(jev)).toEqual(new Set(["FAIL-1", SCOPE_CREEP_ID, COMPLEXITY_ID, "OK-2"]));
+    expect(jevCheckSet(jev)).toEqual(new Set(["FAIL-1", SCOPE_CREEP_ID, COMPLEXITY_ID, "OK-2"]));
     expect(lastResults(presenter)).toEqual([
       ruleUnavailable("FAIL-1", "error", "JEV_FAILURE", ["src/a.ts"]),
       ruleEvaluated("OK-2", "error", "PASS", 0.1, ["src/a.ts"]),
@@ -1030,13 +1163,13 @@ describe("JevGuardPlugin multi-rule end-to-end", () => {
   });
 
   test("does not suppress scope creep when only complexity fails", async () => {
-    const { hooks, policy, presenter, jev } = harness();
+    const { runtime, policy, presenter, jev } = harness();
     loadRules(policy, ruleText("OK-1", "error", "src/**"));
     jev.failingIds.add(COMPLEXITY_ID);
 
-    await dispatch(hooks, idleEvent());
+    await dispatch(runtime, idleEvent());
 
-    expect(jevIdSet(jev)).toEqual(new Set(["OK-1", SCOPE_CREEP_ID, COMPLEXITY_ID]));
+    expect(jevCheckSet(jev)).toEqual(new Set(["OK-1", SCOPE_CREEP_ID, COMPLEXITY_ID]));
     expect(lastResults(presenter)).toEqual([
       ruleEvaluated("OK-1", "error", "PASS", 0.1, ["src/a.ts"]),
       builtInEvaluated("PASS", 0.1, ["src/a.ts"]),
@@ -1045,7 +1178,7 @@ describe("JevGuardPlugin multi-rule end-to-end", () => {
   });
 
   test("keeps blocked, oversized, and clean rule evidence independent with built-in results", async () => {
-    const { hooks, facade, policy, presenter, jev } = harness();
+    const { runtime, facade, policy, presenter, jev } = harness();
     const rules = [
       ruleText("BLOCK-1", "error", "src/**"),
       ruleText("BIG-2", "error", "big/**"),
@@ -1059,9 +1192,9 @@ describe("JevGuardPlugin multi-rule end-to-end", () => {
       { file: "clean/a.ts", patch: PATCH },
     ];
 
-    await dispatch(hooks, idleEvent());
+    await dispatch(runtime, idleEvent());
 
-    expect(jevIds(jev)).toEqual(["CLEAN-3"]);
+    expect(jevCalls(jev)).toEqual(["CLEAN-3"]);
     expect(lastResults(presenter).map((result) => result.outcome)).toEqual([
       "UNAVAILABLE",
       "UNAVAILABLE",
@@ -1083,16 +1216,16 @@ describe("JevGuardPlugin multi-rule end-to-end", () => {
     expect(lastResults(presenter)[4]).toEqual(complexityUnavailable("OVERSIZED_DIFF"));
   });
 
-  test("reports the invalid config once per rule and still runs both built-ins", async () => {
-    const { hooks, policy, presenter, jev } = harness();
+  test("reports the invalid config once per rule and still runs the batch", async () => {
+    const { runtime, policy, presenter, jev } = harness();
     const rules = [ruleText("A-1", "error", "src/**"), ruleText("B-2", "warning", null)].join(
       "\n\n",
     );
     loadRules(policy, rules, invalidConfigShape);
 
-    await dispatch(hooks, idleEvent());
+    await dispatch(runtime, idleEvent());
 
-    expect(jevIds(jev)).toEqual([SCOPE_CREEP_ID, COMPLEXITY_ID]);
+    expect(jevCalls(jev)).toEqual([BUILT_IN_BATCH_LABEL]);
     expect(lastResults(presenter)).toEqual([
       ruleUnavailable("A-1", "error", "INVALID_CONFIG"),
       ruleUnavailable("B-2", "warning", "INVALID_CONFIG"),
@@ -1102,7 +1235,7 @@ describe("JevGuardPlugin multi-rule end-to-end", () => {
   });
 
   test("deduplicates repeated idles to one aggregate", async () => {
-    const { hooks, facade, policy, presenter, jev } = harness();
+    const { runtime, facade, policy, presenter, jev } = harness();
     const rules = [
       ruleText("SRC-1", "error", "src/**"),
       ruleText("GLOBAL-2", "warning", null),
@@ -1110,10 +1243,10 @@ describe("JevGuardPlugin multi-rule end-to-end", () => {
     loadRules(policy, rules);
     facade.diffs = [{ file: "src/a.ts", patch: PATCH }];
 
-    await dispatch(hooks, idleEvent());
-    await dispatch(hooks, idleEvent());
+    await dispatch(runtime, idleEvent());
+    await dispatch(runtime, idleEvent());
 
-    expect(jevIdSet(jev)).toEqual(new Set(["SRC-1", SCOPE_CREEP_ID, COMPLEXITY_ID, "GLOBAL-2"]));
+    expect(jevCheckSet(jev)).toEqual(new Set(["SRC-1", SCOPE_CREEP_ID, COMPLEXITY_ID, "GLOBAL-2"]));
     expect(presenter.reviews).toHaveLength(1);
   });
 });
@@ -1130,15 +1263,15 @@ describe("JevGuardPlugin gate propagation", () => {
   ] as const)(
     "propagates $severity probability $probability as $outcome into the aggregate",
     async ({ severity, probability, outcome }) => {
-      const { hooks, policy, presenter, jev } = harness();
+      const { runtime, policy, presenter, jev } = harness();
       loadRules(policy, scopedRule(severity));
       jev.probability = probability;
       jev.probabilities.set(SCOPE_CREEP_ID, 0.1);
       jev.probabilities.set(COMPLEXITY_ID, 0.1);
 
-      await dispatch(hooks, idleEvent());
+      await dispatch(runtime, idleEvent());
 
-      expect(jevIds(jev)).toEqual(["TEST-1", SCOPE_CREEP_ID, COMPLEXITY_ID]);
+      expect(jevCalls(jev)).toEqual(["TEST-1", BUILT_IN_BATCH_LABEL]);
       expect(lastResults(presenter)[0]).toEqual(
         ruleEvaluated("TEST-1", severity, outcome, probability, ["src/a.ts"]),
       );
@@ -1148,14 +1281,14 @@ describe("JevGuardPlugin gate propagation", () => {
 });
 
 describe("JevGuardPlugin runtime short-circuits", () => {
-  test("skips an out-of-scope rule while still evaluating both built-ins", async () => {
-    const { hooks, facade, policy, presenter, jev } = harness();
+  test("skips an out-of-scope rule while still evaluating the batch", async () => {
+    const { runtime, facade, policy, presenter, jev } = harness();
     loadRules(policy, scopedRule("error"));
     facade.diffs = [{ file: "docs/readme.md", patch: DOCS_SENTINEL }];
 
-    await dispatch(hooks, idleEvent());
+    await dispatch(runtime, idleEvent());
 
-    expect(jevIds(jev)).toEqual([SCOPE_CREEP_ID, COMPLEXITY_ID]);
+    expect(jevCalls(jev)).toEqual([BUILT_IN_BATCH_LABEL]);
     expect(lastResults(presenter)).toEqual([
       ruleSkipped("TEST-1", "error", "NO_SCOPE_MATCH"),
       builtInEvaluated("PASS", 0.1, ["docs/readme.md"]),
@@ -1164,13 +1297,13 @@ describe("JevGuardPlugin runtime short-circuits", () => {
   });
 
   test("reports an oversized patch as UNAVAILABLE in every lane without a Jev call", async () => {
-    const { hooks, facade, policy, presenter, jev } = harness();
+    const { runtime, facade, policy, presenter, jev } = harness();
     loadRules(policy, scopedRule("error"));
     facade.diffs = [
       { file: "src/a.ts", patch: "x".repeat(DEFAULT_EVIDENCE_POLICY.maxDiffLength + 1) },
     ];
 
-    await dispatch(hooks, idleEvent());
+    await dispatch(runtime, idleEvent());
 
     expect(jev.requests).toHaveLength(0);
     expect(lastResults(presenter)).toEqual([
@@ -1181,14 +1314,14 @@ describe("JevGuardPlugin runtime short-circuits", () => {
   });
 
   test("reports a blocked file as UNAVAILABLE in every lane without a Jev call", async () => {
-    const { hooks, facade, policy, presenter, jev } = harness();
+    const { runtime, facade, policy, presenter, jev } = harness();
     loadRules(policy, scopedRule("error"));
     facade.diffs = [
       { file: "src/a.ts", patch: PATCH },
       { file: "src/.env", patch: "SECRET=1" },
     ];
 
-    await dispatch(hooks, idleEvent());
+    await dispatch(runtime, idleEvent());
 
     expect(jev.requests).toHaveLength(0);
     expect(lastResults(presenter)).toEqual([
@@ -1201,13 +1334,13 @@ describe("JevGuardPlugin runtime short-circuits", () => {
 
 describe("JevGuardPlugin observe-only containment", () => {
   test("resolves the FAIL flow without mutating agent messages", async () => {
-    const { hooks, facade, policy, presenter, jev } = harness();
+    const { runtime, facade, policy, presenter, jev } = harness();
     loadRules(policy, scopedRule("error"));
     facade.records = distractorRecords();
     facade.diffs = mixedDiffs();
     jev.probability = 0.8;
 
-    await expect(dispatch(hooks, idleEvent())).resolves.toBeUndefined();
+    await expect(dispatch(runtime, idleEvent())).resolves.toBeUndefined();
 
     expect(lastResults(presenter)[0]).toMatchObject({
       outcome: "FAIL",
@@ -1229,13 +1362,13 @@ describe("JevGuardPlugin observe-only containment", () => {
   });
 
   test("resolves the UNAVAILABLE flow without mutating agent messages", async () => {
-    const { hooks, facade, policy, presenter, jev } = harness();
+    const { runtime, facade, policy, presenter, jev } = harness();
     loadRules(policy, scopedRule("error"));
     jev.fail = true;
 
-    await expect(dispatch(hooks, idleEvent())).resolves.toBeUndefined();
+    await expect(dispatch(runtime, idleEvent())).resolves.toBeUndefined();
 
-    expect(jev.requests).toHaveLength(3);
+    expect(jevCalls(jev)).toEqual(["TEST-1", BUILT_IN_BATCH_LABEL]);
     expect(lastResults(presenter)[0]).toMatchObject({
       outcome: "UNAVAILABLE",
       reason: "JEV_FAILURE",

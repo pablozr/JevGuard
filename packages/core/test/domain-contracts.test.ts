@@ -119,6 +119,7 @@ describe("core domain contracts", () => {
 
   test("builds one Noul request per rule with allowed inside the same criteria", () => {
     const request: JevRequest = {
+      kind: "RULE",
       task: turn.task,
       question: {
         type: "noul",

@@ -8,14 +8,16 @@ export { JEV_MODEL } from "./types";
 export type {
   JevTransport,
   JevTransportChange,
-  JevTransportCheck,
+  JevTransportChecks,
   JevTransportCriterion,
   JevTransportDependencies,
   JevTransportRule,
   JevTransportState,
+  TypeSafeBuiltInQuestions,
   TypeSafeClientConfiguration,
   TypeSafeNoulQuestion,
   TypeSafeQuestions,
+  TypeSafeRuleQuestions,
   TypeSafeSystemOneClient,
   TypeSafeSystemOneRequest,
 } from "./types";

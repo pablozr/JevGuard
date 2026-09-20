@@ -12,9 +12,10 @@ For an applicable rule, JevGuard sends:
 - the full attributed textual diff for changed files within the rule scope;
 - the relevant file paths.
 
-For each built-in (`SCOPE-CREEP` and `COMPLEXITY`), JevGuard sends the same task, the
-built-in's own check definition, the complete attributed textual diff for every
-changed file with a nonempty patch, and those paths. It sends no rule-scoped subset.
+For the built-in batch (`SCOPE-CREEP` and `COMPLEXITY`), JevGuard sends the same task,
+both checks' own definitions, the complete attributed textual diff for every changed
+file with a nonempty patch, and those paths. It sends no rule-scoped subset. The batch
+is a single request with two independent answers; the same complete evidence feeds both.
 
 It does not send repository-wide diffs as a fallback.
 
@@ -120,7 +121,7 @@ If neither source provides a key, the plugin stays loaded and the evaluation is
 validate policy, access Jev, or retrieve the attributed diff. It is not a policy
 pass, a warning, or a failure, and the observe-only plugin does not block work.
 
-A policy-load or config failure does not suppress a built-in: when the turn is
+A policy-load or config failure does not suppress the built-in batch: when the turn is
 attributed, both built-ins still evaluate the complete safe patch with their fixed
 thresholds. `SCOPE-CREEP` can fail; `COMPLEXITY` is advisory and can only pass or
-warn.
+warn. One malformed answer fails only its own check.

@@ -33,7 +33,7 @@ class SequencedJevPort implements JevEvaluationPort {
     }
 
     if (outcome === undefined) {
-      return Promise.resolve({ status: "FAILED", reason: "API_ERROR" });
+      return Promise.resolve({ kind: "RULE", status: "FAILED", reason: "API_ERROR" });
     }
 
     return Promise.resolve(outcome);
@@ -70,7 +70,7 @@ function parsed(overrides: Partial<ParsedRule> = {}): RuleCandidateResult {
 }
 
 function evaluated(probability: number): JevEvaluationResult {
-  return { status: "EVALUATED", noul: { violationProbability: probability } };
+  return { kind: "RULE", status: "EVALUATED", noul: { violationProbability: probability } };
 }
 
 const validConfig: GateConfigResult = { status: "VALID", config: DEFAULT_GATE_CONFIG };
@@ -279,7 +279,7 @@ describe("evaluateRules", () => {
   test("continues after a typed Jev failure", async () => {
     const rules: readonly RuleCandidateResult[] = [parsed({ id: "R-1" }), parsed({ id: "R-2" })];
     const port = new SequencedJevPort([
-      { status: "FAILED", reason: "MISSING_CREDENTIAL" },
+      { kind: "RULE", status: "FAILED", reason: "MISSING_CREDENTIAL" },
       evaluated(0.1),
     ]);
 

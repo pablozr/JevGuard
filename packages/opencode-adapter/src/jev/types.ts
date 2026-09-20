@@ -1,4 +1,5 @@
 import type { CredentialProvider, JevEvaluationPort } from "@jevguard/core";
+import { COMPLEXITY_ANSWER, SCOPE_CREEP_ANSWER } from "@jevguard/core";
 
 /** Model name pinned for the V0.1 Jev judgment. */
 export const JEV_MODEL = "jev-latest";
@@ -23,7 +24,10 @@ export type JevTransportCriterion = {
 
 export type JevTransportRule = JevTransportCriterion;
 
-export type JevTransportCheck = JevTransportCriterion;
+export type JevTransportChecks = {
+  readonly scopeCreep: JevTransportCriterion;
+  readonly complexity: JevTransportCriterion;
+};
 
 export type JevTransportChange = {
   readonly files: string[];
@@ -31,9 +35,9 @@ export type JevTransportChange = {
 };
 
 /**
- * State sent to Jev for the single Noul of one judgment. A rule request carries
- * `rule`; a built-in request carries `check`. Declared as type aliases so each
- * carries an implicit index signature for the SDK's JSON-compatible state.
+ * State sent to Jev. A rule request carries `rule`; the built-in batch carries a
+ * `checks` object. Declared as type aliases so each carries an implicit index
+ * signature for the SDK's JSON-compatible state.
  */
 export type JevTransportState =
   | {
@@ -43,7 +47,7 @@ export type JevTransportState =
     }
   | {
       readonly task: string;
-      readonly check: JevTransportCheck;
+      readonly checks: JevTransportChecks;
       readonly change: JevTransportChange;
     };
 
@@ -56,9 +60,16 @@ export interface TypeSafeNoulQuestion {
   };
 }
 
-export type TypeSafeQuestions = {
+export type TypeSafeRuleQuestions = {
   readonly violation: TypeSafeNoulQuestion;
 };
+
+export type TypeSafeBuiltInQuestions = {
+  readonly [SCOPE_CREEP_ANSWER]: TypeSafeNoulQuestion;
+  readonly [COMPLEXITY_ANSWER]: TypeSafeNoulQuestion;
+};
+
+export type TypeSafeQuestions = TypeSafeRuleQuestions | TypeSafeBuiltInQuestions;
 
 export interface TypeSafeSystemOneRequest {
   readonly state: JevTransportState;

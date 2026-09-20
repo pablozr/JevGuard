@@ -130,18 +130,24 @@ materially larger than the problem requires. It always uses a fixed advisory thr
 — warn at `0.50` — and can never fail, so `.jev/config.yaml` cannot change its outcome
 or turn it into a failure.
 
-The rule lane and both built-ins run concurrently. A single shared FIFO concurrency
-limit caps in-flight Jev calls at two across the rule lane and both built-ins, so
-completion timing never changes the result order. Results are always the rules in
-source order, then `SCOPE-CREEP`, then `COMPLEXITY`.
+The rule lane and the built-in batch run concurrently. The batch selects the turn's
+complete, safe attributed patch once and sends `SCOPE-CREEP` and `COMPLEXITY` as two
+independent named answers in **one** Jev request. A single shared FIFO concurrency
+limit caps in-flight Jev requests at two across the plugin instance, counting the
+batch as one request, so completion timing never changes the result order. Results are
+always the rules in source order, then `SCOPE-CREEP`, then `COMPLEXITY`.
 
-A built-in has no rule scope. No attributed patch makes it `SKIPPED`
-(`NO_ATTRIBUTED_PATCH`), and blocked or oversized evidence makes it `UNAVAILABLE`
+Each batch answer is validated on its own. A malformed, missing, or out-of-range
+answer makes only that check `UNAVAILABLE`; the valid sibling still gates. A request
+that fails at the envelope level makes both checks `UNAVAILABLE` (`JEV_FAILURE`).
+
+A built-in has no rule scope. No attributed patch makes both `SKIPPED`
+(`NO_ATTRIBUTED_PATCH`), and blocked or oversized evidence makes both `UNAVAILABLE`
 (`BLOCKED_EVIDENCE` or `OVERSIZED_DIFF`). A rule, policy-load, or config failure never
-suppresses a built-in: when `.jev/rules.md` is missing or `.jev/config.yaml` is
-invalid, the rule lane degrades while both built-ins still run. One built-in's
-failure never suppresses the other. Built-ins are observe-only; their verdicts affect
-the aggregate outcome but never block a turn.
+suppresses the batch: when `.jev/rules.md` is missing or `.jev/config.yaml` is
+invalid, the rule lane degrades while the batch still runs. One built-in's answer never
+suppresses the other. Built-ins are observe-only; their verdicts affect the aggregate
+outcome but never block a turn.
 
 ## `config.yaml`
 
@@ -228,7 +234,9 @@ results. The aggregate counts include every entry.
 ## Presentation
 
 Each turn produces exactly one transient TUI toast and one structured log entry for
-the whole review:
+the whole review. Review runs in the background: the idle event returns as soon as the
+serialized attribution step is scheduled, so policy reads, Jev requests, and
+presentation are never on the agent's critical path.
 
 - Toast: `JevGuard <OUTCOME>` where `<OUTCOME>` is the aggregate display outcome.
   The display precedence is `FAIL > UNAVAILABLE > WARN > PASS > SKIPPED`: any

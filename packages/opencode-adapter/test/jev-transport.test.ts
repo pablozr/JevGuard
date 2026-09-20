@@ -1,9 +1,9 @@
 import type {
   CredentialProvider,
   CredentialResolution,
-  JevBuiltInRequest,
+  JevBuiltInBatchRequest,
   JevEvaluationResult,
-  JevRequest,
+  JevRuleRequest,
 } from "@jevguard/core";
 import { describe, expect, test } from "vitest";
 import { buildTypeSafeClientConfig, createJevTransport } from "../src/index";
@@ -67,8 +67,9 @@ function harness(): Harness {
   return { provider, client, keys, port };
 }
 
-function request(overrides: Partial<JevRequest> = {}): JevRequest {
+function request(overrides: Partial<JevRuleRequest> = {}): JevRuleRequest {
   return {
+    kind: "RULE",
     task: TASK,
     question: {
       type: "noul",
@@ -84,18 +85,30 @@ function request(overrides: Partial<JevRequest> = {}): JevRequest {
   };
 }
 
-function builtInRequest(overrides: Partial<JevBuiltInRequest> = {}): JevBuiltInRequest {
+function batchRequest(overrides: Partial<JevBuiltInBatchRequest> = {}): JevBuiltInBatchRequest {
   return {
-    kind: "BUILT_IN",
+    kind: "BUILT_IN_BATCH",
     task: TASK,
-    question: {
-      type: "noul",
-      instructions: "Answer true when the change contains scope creep.",
-      criteria: {
-        id: "SCOPE-CREEP",
-        description: "The change introduces work the task did not request.",
-        violation: "The change adds unrequested work.",
-        allowed: "Supporting, testing, and documentation changes.",
+    questions: {
+      scopeCreep: {
+        type: "noul",
+        instructions: "Answer true when the change contains scope creep.",
+        criteria: {
+          id: "SCOPE-CREEP",
+          description: "The change introduces work the task did not request.",
+          violation: "The change adds unrequested work.",
+          allowed: "Supporting, testing, and documentation changes.",
+        },
+      },
+      complexity: {
+        type: "noul",
+        instructions: "Does this attributed change introduce material complexity?",
+        criteria: {
+          id: "COMPLEXITY",
+          description: "Material complexity disproportionate to the problem.",
+          violation: "The change adds unnecessary abstractions.",
+          allowed: "Complexity explicitly required by the task.",
+        },
       },
     },
     change: { files: ["src/health.ts"], diff: DIFF },
@@ -105,6 +118,14 @@ function builtInRequest(overrides: Partial<JevBuiltInRequest> = {}): JevBuiltInR
 
 function semanticResponse(noul: number): unknown {
   return { answers: { violation: { type: "noul", noul } } };
+}
+
+function noulAnswer(noul: number): unknown {
+  return { type: "noul", noul };
+}
+
+function batchResponse(scopeCreep: unknown, complexity: unknown): unknown {
+  return { answers: { scopeCreep, complexity } };
 }
 
 describe("TypeSafe client configuration", () => {
@@ -133,6 +154,19 @@ describe("Jev transport credential handling", () => {
     h.provider.resolution = { status: "UNAVAILABLE", reason: "MISSING_CREDENTIAL" };
 
     expect(await h.port.evaluate(request())).toEqual({
+      kind: "RULE",
+      status: "FAILED",
+      reason: "MISSING_CREDENTIAL",
+    });
+    expect(h.client.requests).toEqual([]);
+  });
+
+  test("maps a missing credential to a failed batch without a client call", async () => {
+    const h = harness();
+    h.provider.resolution = { status: "UNAVAILABLE", reason: "MISSING_CREDENTIAL" };
+
+    expect(await h.port.evaluate(batchRequest())).toEqual({
+      kind: "BUILT_IN_BATCH",
       status: "FAILED",
       reason: "MISSING_CREDENTIAL",
     });
@@ -143,14 +177,22 @@ describe("Jev transport credential handling", () => {
     const h = harness();
     h.provider.resolution = { status: "UNAVAILABLE", reason: "STORE_READ_FAILURE" };
 
-    expect(await h.port.evaluate(request())).toEqual({ status: "FAILED", reason: "API_ERROR" });
+    expect(await h.port.evaluate(request())).toEqual({
+      kind: "RULE",
+      status: "FAILED",
+      reason: "API_ERROR",
+    });
   });
 
   test("maps a rejected credential resolution to API_ERROR", async () => {
     const h = harness();
     h.provider.reject = new Error("credential backend down");
 
-    expect(await h.port.evaluate(request())).toEqual({ status: "FAILED", reason: "API_ERROR" });
+    expect(await h.port.evaluate(request())).toEqual({
+      kind: "RULE",
+      status: "FAILED",
+      reason: "API_ERROR",
+    });
   });
 
   test("maps a throwing client factory to API_ERROR without leaking the key or message", async () => {
@@ -165,7 +207,7 @@ describe("Jev transport credential handling", () => {
     const result = await port.evaluate(request());
     const serialized = JSON.stringify(result);
 
-    expect(result).toEqual({ status: "FAILED", reason: "API_ERROR" });
+    expect(result).toEqual({ kind: "RULE", status: "FAILED", reason: "API_ERROR" });
     expect(serialized).not.toContain(API_KEY);
     expect(serialized).not.toContain(TASK);
     expect(serialized).not.toContain(DIFF);
@@ -173,7 +215,7 @@ describe("Jev transport credential handling", () => {
   });
 });
 
-describe("Jev transport request payload", () => {
+describe("Jev transport rule payload", () => {
   test("sends one Noul with task, rule, change, and jev-latest", async () => {
     const h = harness();
 
@@ -223,7 +265,7 @@ describe("Jev transport request payload", () => {
 
     const sent = h.client.requests[0];
 
-    if (sent === undefined || !("rule" in sent.state)) {
+    if (sent === undefined || !("rule" in sent.state) || !("violation" in sent.questions)) {
       throw new Error("expected a rule state");
     }
 
@@ -235,26 +277,36 @@ describe("Jev transport request payload", () => {
     });
     expect(sent.questions.violation.criteria.false).toBe("Validation and HTTP mapping.");
   });
+});
 
-  test("maps a built-in request to a check state with the check Noul criteria", async () => {
+describe("Jev transport built-in batch payload", () => {
+  test("maps the batch to one request with two named questions and a checks state", async () => {
     const h = harness();
 
-    await h.port.evaluate(builtInRequest());
+    await h.port.evaluate(batchRequest());
 
     expect(h.client.requests).toHaveLength(1);
     expect(h.client.requests[0]).toEqual({
       state: {
         task: TASK,
-        check: {
-          id: "SCOPE-CREEP",
-          description: "The change introduces work the task did not request.",
-          violation: "The change adds unrequested work.",
-          allowed: "Supporting, testing, and documentation changes.",
+        checks: {
+          scopeCreep: {
+            id: "SCOPE-CREEP",
+            description: "The change introduces work the task did not request.",
+            violation: "The change adds unrequested work.",
+            allowed: "Supporting, testing, and documentation changes.",
+          },
+          complexity: {
+            id: "COMPLEXITY",
+            description: "Material complexity disproportionate to the problem.",
+            violation: "The change adds unnecessary abstractions.",
+            allowed: "Complexity explicitly required by the task.",
+          },
         },
         change: { files: ["src/health.ts"], diff: DIFF },
       },
       questions: {
-        violation: {
+        scopeCreep: {
           type: "noul",
           instructions: "Answer true when the change contains scope creep.",
           criteria: {
@@ -262,55 +314,36 @@ describe("Jev transport request payload", () => {
             false: "Supporting, testing, and documentation changes.",
           },
         },
+        complexity: {
+          type: "noul",
+          instructions: "Does this attributed change introduce material complexity?",
+          criteria: {
+            true: "The change adds unnecessary abstractions.",
+            false: "Complexity explicitly required by the task.",
+          },
+        },
       },
       model: "jev-latest",
     });
   });
 
-  test("never sends the request kind or a rule field on a built-in state", async () => {
+  test("never sends the request kind or a rule field on a batch state", async () => {
     const h = harness();
 
-    await h.port.evaluate(builtInRequest());
+    await h.port.evaluate(batchRequest());
 
     const state = h.client.requests[0]?.state;
 
     expect(state).toBeDefined();
     expect(state === undefined ? {} : Object.keys(state).sort()).toEqual([
       "change",
-      "check",
-      "task",
-    ]);
-  });
-
-  test("maps a complexity built-in request to its own check identity without a rule field", async () => {
-    const h = harness();
-    const complexity = builtInRequest({
-      question: {
-        type: "noul",
-        instructions: "Does this attributed change introduce material complexity?",
-        criteria: {
-          id: "COMPLEXITY",
-          description: "Material complexity disproportionate to the problem.",
-          violation: "The change adds unnecessary abstractions.",
-          allowed: "Complexity explicitly required by the task.",
-        },
-      },
-    });
-
-    await h.port.evaluate(complexity);
-
-    const state = h.client.requests[0]?.state;
-
-    expect(state === undefined || !("check" in state) ? {} : state.check.id).toBe("COMPLEXITY");
-    expect(state === undefined ? {} : Object.keys(state).sort()).toEqual([
-      "change",
-      "check",
+      "checks",
       "task",
     ]);
   });
 });
 
-describe("Jev transport response validation", () => {
+describe("Jev transport rule response validation", () => {
   test.each<[string, number]>([
     ["lower bound", 0],
     ["midpoint", 0.5],
@@ -320,6 +353,7 @@ describe("Jev transport response validation", () => {
     h.client.response = semanticResponse(noul);
 
     expect(await h.port.evaluate(request())).toEqual({
+      kind: "RULE",
       status: "EVALUATED",
       noul: { violationProbability: noul },
     });
@@ -343,6 +377,7 @@ describe("Jev transport response validation", () => {
     h.client.response = response;
 
     expect(await h.port.evaluate(request())).toEqual({
+      kind: "RULE",
       status: "FAILED",
       reason: "INVALID_RESPONSE",
     });
@@ -352,7 +387,91 @@ describe("Jev transport response validation", () => {
     const h = harness();
     h.client.reject = new Error("network failure");
 
-    expect(await h.port.evaluate(request())).toEqual({ status: "FAILED", reason: "API_ERROR" });
+    expect(await h.port.evaluate(request())).toEqual({
+      kind: "RULE",
+      status: "FAILED",
+      reason: "API_ERROR",
+    });
+  });
+});
+
+describe("Jev transport built-in batch response validation", () => {
+  test("accepts both named answers independently", async () => {
+    const h = harness();
+    h.client.response = batchResponse(noulAnswer(0.2), noulAnswer(0.8));
+
+    expect(await h.port.evaluate(batchRequest())).toEqual({
+      kind: "BUILT_IN_BATCH",
+      status: "EVALUATED",
+      answers: {
+        scopeCreep: { status: "EVALUATED", noul: { violationProbability: 0.2 } },
+        complexity: { status: "EVALUATED", noul: { violationProbability: 0.8 } },
+      },
+    });
+  });
+
+  test.each<[string, unknown]>([
+    ["null response", null],
+    ["text response", "not-json"],
+    ["empty object", {}],
+    ["missing answers", { model: "jev-latest" }],
+    ["answers not an object", { answers: [] }],
+  ])("rejects the %s as a failed batch envelope", async (_label, response) => {
+    const h = harness();
+    h.client.response = response;
+
+    expect(await h.port.evaluate(batchRequest())).toEqual({
+      kind: "BUILT_IN_BATCH",
+      status: "FAILED",
+      reason: "INVALID_RESPONSE",
+    });
+  });
+
+  test.each<[string, unknown]>([
+    ["missing answer", undefined],
+    ["wrong answer type", { type: "choice", noul: 0.5 }],
+    ["non-numeric noul", { type: "noul", noul: "0.5" }],
+    ["NaN noul", { type: "noul", noul: Number.NaN }],
+    ["infinite noul", { type: "noul", noul: Number.POSITIVE_INFINITY }],
+    ["negative noul", { type: "noul", noul: -0.1 }],
+    ["noul above one", { type: "noul", noul: 1.1 }],
+  ])("fails only the malformed scope-creep answer for %s", async (_label, scopeCreep) => {
+    const h = harness();
+    h.client.response = batchResponse(scopeCreep, noulAnswer(0.8));
+
+    expect(await h.port.evaluate(batchRequest())).toEqual({
+      kind: "BUILT_IN_BATCH",
+      status: "EVALUATED",
+      answers: {
+        scopeCreep: { status: "FAILED", reason: "INVALID_RESPONSE" },
+        complexity: { status: "EVALUATED", noul: { violationProbability: 0.8 } },
+      },
+    });
+  });
+
+  test("fails only the malformed complexity answer while scope creep stays valid", async () => {
+    const h = harness();
+    h.client.response = batchResponse(noulAnswer(0.2), { type: "noul", noul: 2 });
+
+    expect(await h.port.evaluate(batchRequest())).toEqual({
+      kind: "BUILT_IN_BATCH",
+      status: "EVALUATED",
+      answers: {
+        scopeCreep: { status: "EVALUATED", noul: { violationProbability: 0.2 } },
+        complexity: { status: "FAILED", reason: "INVALID_RESPONSE" },
+      },
+    });
+  });
+
+  test("maps a rejected batch request to API_ERROR", async () => {
+    const h = harness();
+    h.client.reject = new Error("network failure");
+
+    expect(await h.port.evaluate(batchRequest())).toEqual({
+      kind: "BUILT_IN_BATCH",
+      status: "FAILED",
+      reason: "API_ERROR",
+    });
   });
 });
 
@@ -362,6 +481,19 @@ describe("Jev transport secrecy", () => {
     h.client.reject = new Error(`failed with ${API_KEY} while reviewing ${TASK} ${DIFF}`);
 
     const result: JevEvaluationResult = await h.port.evaluate(request());
+    const serialized = JSON.stringify(result);
+
+    expect(serialized).not.toContain(API_KEY);
+    expect(serialized).not.toContain(TASK);
+    expect(serialized).not.toContain(DIFF);
+    expect(serialized).not.toContain("failed with");
+  });
+
+  test("never returns the key, task, diff, or external error for a batch", async () => {
+    const h = harness();
+    h.client.reject = new Error(`failed with ${API_KEY} while reviewing ${TASK} ${DIFF}`);
+
+    const result: JevEvaluationResult = await h.port.evaluate(batchRequest());
     const serialized = JSON.stringify(result);
 
     expect(serialized).not.toContain(API_KEY);

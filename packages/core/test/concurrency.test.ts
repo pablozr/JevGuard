@@ -1,10 +1,17 @@
 import { describe, expect, test } from "vitest";
 import { createFifoJevPort } from "../src/index";
-import type { JevEvaluationPort, JevEvaluationResult, JevRequest } from "../src/index";
+import type {
+  JevBuiltInBatchRequest,
+  JevEvaluationPort,
+  JevEvaluationResult,
+  JevRequest,
+  JevRuleRequest,
+} from "../src/index";
 import { evaluateWithPort } from "../src/evaluation/evaluate-with-port";
 
-function request(id: string): JevRequest {
+function request(id: string): JevRuleRequest {
   return {
+    kind: "RULE",
     task: "Add a health endpoint.",
     question: {
       type: "noul",
@@ -15,8 +22,30 @@ function request(id: string): JevRequest {
   };
 }
 
+function batchRequest(): JevBuiltInBatchRequest {
+  const criteria = { id: "CHECK", description: "Description.", violation: "Violation." };
+
+  return {
+    kind: "BUILT_IN_BATCH",
+    task: "Add a health endpoint.",
+    questions: {
+      scopeCreep: {
+        type: "noul",
+        instructions: "Scope creep?",
+        criteria: { ...criteria, id: "SCOPE-CREEP" },
+      },
+      complexity: {
+        type: "noul",
+        instructions: "Complexity?",
+        criteria: { ...criteria, id: "COMPLEXITY" },
+      },
+    },
+    change: { files: ["src/health.ts"], diff: "+ return ok" },
+  };
+}
+
 function evaluated(probability: number): JevEvaluationResult {
-  return { status: "EVALUATED", noul: { violationProbability: probability } };
+  return { kind: "RULE", status: "EVALUATED", noul: { violationProbability: probability } };
 }
 
 class ControlledPort implements JevEvaluationPort {
@@ -28,7 +57,7 @@ class ControlledPort implements JevEvaluationPort {
   private readonly completions = new Map<string, () => void>();
 
   evaluate(input: JevRequest): Promise<JevEvaluationResult> {
-    const id = input.question.criteria.id;
+    const id = input.kind === "RULE" ? input.question.criteria.id : "BATCH";
 
     this.started.push(id);
     this.active += 1;
@@ -87,6 +116,37 @@ describe("createFifoJevPort", () => {
       evaluated(0.3),
     ]);
     expect(underlying.maxActive).toBe(2);
+  });
+
+  test("counts the built-in batch as one slot among queued rule calls", async () => {
+    const underlying = new ControlledPort();
+    const port = createFifoJevPort(underlying, { maxConcurrency: 2 });
+
+    const first = port.evaluate(request("A"));
+    const batch = port.evaluate(batchRequest());
+    const third = port.evaluate(request("C"));
+
+    await tick();
+
+    expect(underlying.started).toEqual(["A", "BATCH"]);
+    expect(underlying.maxActive).toBe(2);
+
+    underlying.resolve("A", evaluated(0.1));
+    await tick();
+
+    expect(underlying.started).toEqual(["A", "BATCH", "C"]);
+    expect(underlying.maxActive).toBe(2);
+
+    underlying.resolve("BATCH", { kind: "BUILT_IN_BATCH", status: "FAILED", reason: "API_ERROR" });
+    underlying.resolve("C", evaluated(0.3));
+
+    await expect(batch).resolves.toEqual({
+      kind: "BUILT_IN_BATCH",
+      status: "FAILED",
+      reason: "API_ERROR",
+    });
+    await expect(first).resolves.toEqual(evaluated(0.1));
+    await expect(third).resolves.toEqual(evaluated(0.3));
   });
 
   test("starts queued evaluations in FIFO submission order as slots free", async () => {
@@ -149,7 +209,11 @@ describe("createFifoJevPort", () => {
     await tick();
     underlying.reject("A", new Error("transport down"));
 
-    await expect(evaluation).resolves.toEqual({ status: "FAILED", reason: "API_ERROR" });
+    await expect(evaluation).resolves.toEqual({
+      kind: "RULE",
+      status: "FAILED",
+      reason: "API_ERROR",
+    });
   });
 
   test.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(

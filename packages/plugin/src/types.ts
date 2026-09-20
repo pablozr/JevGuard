@@ -19,6 +19,16 @@ export interface PluginHooks {
   event(input: PluginEventInput): Promise<void>;
 }
 
+/**
+ * Internal runtime handle. `hooks` is the only surface the host receives; `drain`
+ * lets tests await detached background work that the event hook deliberately does
+ * not wait for.
+ */
+export interface PluginRuntime {
+  readonly hooks: PluginHooks;
+  readonly drain: () => Promise<void>;
+}
+
 export interface ReviewDependencies {
   readonly policy: PolicyLoader;
   readonly presenter: ReviewPresenter;

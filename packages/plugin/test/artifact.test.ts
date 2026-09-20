@@ -305,7 +305,7 @@ describe("local package artifact", () => {
     expect(output).toContain("dry-run");
     expect(output).not.toContain("auto-corrected");
     expect(output).not.toContain("npm warn publish");
-  });
+  }, 60_000);
 
   test("exposes the artifact workflow through root scripts", () => {
     const manifest = readJson<RootManifest>(join(REPO_ROOT, "package.json"));

@@ -1,9 +1,8 @@
 import {
   DEFAULT_EVIDENCE_POLICY,
   aggregateReview,
-  evaluateComplexity,
+  evaluateBuiltIns,
   evaluateRules,
-  evaluateScopeCreep,
   type GateConfigResult,
   parseRules,
   resolveGateConfig,
@@ -26,28 +25,31 @@ type ConfigValue =
 
 /**
  * Reviews one attributed turn: read the fixed policy paths once, then run the local
- * rule lane, scope creep, and complexity concurrently and present exactly one
+ * rule lane and the single built-in batch concurrently and present exactly one
  * aggregate. A rejected loader or rule/config failure degrades only the rule lane to a
- * review-level `UNAVAILABLE` and never suppresses either built-in. Rules stay
- * sequential inside their lane, so a turn submits at most one rule plus both built-ins
- * to the shared Jev port, whose concurrency wrapper caps in-flight calls. The final
- * results are rules in source order, then scope creep, then complexity, regardless of
- * completion timing.
+ * review-level `UNAVAILABLE` and never suppresses the built-in batch. Rules stay
+ * sequential inside their lane, so a turn submits one request per rule plus one batch
+ * request to the shared Jev port, whose concurrency wrapper caps in-flight calls. The
+ * final results are rules in source order, then scope creep, then complexity,
+ * regardless of completion timing.
  */
 export async function reviewAttributedTurn(
   turn: Turn,
   dependencies: ReviewDependencies,
 ): Promise<void> {
   const loaded = await loadPolicy(dependencies.policy);
-  const builtInContext = { turn, evidencePolicy: DEFAULT_EVIDENCE_POLICY };
+  const builtInInput = { turn, evidencePolicy: DEFAULT_EVIDENCE_POLICY };
 
-  const [ruleResults, scopeCreepResult, complexityResult] = await Promise.all([
+  const [ruleResults, builtIns] = await Promise.all([
     evaluateRuleLane(turn, loaded, dependencies),
-    evaluateScopeCreep(builtInContext, { jev: dependencies.jev }),
-    evaluateComplexity(builtInContext, { jev: dependencies.jev }),
+    evaluateBuiltIns(builtInInput, { jev: dependencies.jev }),
   ]);
 
-  const review = aggregateReview(turn.id, [...ruleResults, scopeCreepResult, complexityResult]);
+  const review = aggregateReview(turn.id, [
+    ...ruleResults,
+    builtIns.scopeCreep,
+    builtIns.complexity,
+  ]);
 
   await presentReview(dependencies.presenter, review);
 }

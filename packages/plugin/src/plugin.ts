@@ -22,9 +22,10 @@ const DEFAULT_JEV_MAX_CONCURRENCY = 2;
 /**
  * OpenCode V1.18.31 plugin entrypoint. It composes the adapter infrastructure at
  * the composition root, wraps the concrete Jev transport in one shared FIFO
- * concurrency limit for every rule, built-in, and turn of this plugin instance, and
+ * concurrency limit for every rule and built-in batch of this plugin instance, and
  * is observe-only: it never mutates agent context, blocks a turn, asks for
- * permissions, or performs remediation.
+ * permissions, or performs remediation. The host receives only the runtime hooks;
+ * reviews run detached from the event so they never sit on the agent's critical path.
  */
 export const JevGuardPlugin: Plugin = async (input) => {
   const presentationClient = createOpenCodePresentationClient(input.client);
@@ -51,5 +52,5 @@ export const JevGuardPlugin: Plugin = async (input) => {
     ),
   };
 
-  return createPluginRuntime(dependencies);
+  return createPluginRuntime(dependencies).hooks;
 };

@@ -5,6 +5,7 @@ import type {
   JevEvaluationPort,
   JevEvaluationResult,
   JevRequest,
+  JevRuleRequest,
   ParsedRule,
   Turn,
   TurnFile,
@@ -63,14 +64,14 @@ function makeInput(overrides: Partial<EvaluateRuleInput> = {}): EvaluateRuleInpu
 }
 
 function evaluated(probability: number): JevEvaluationResult {
-  return { status: "EVALUATED", noul: { violationProbability: probability } };
+  return { kind: "RULE", status: "EVALUATED", noul: { violationProbability: probability } };
 }
 
-function firstRequest(port: FakeJevPort): JevRequest {
+function firstRequest(port: FakeJevPort): JevRuleRequest {
   const [request] = port.requests;
 
-  if (request === undefined) {
-    throw new Error("expected the port to receive a request");
+  if (request === undefined || request.kind !== "RULE") {
+    throw new Error("expected the port to receive a rule request");
   }
 
   return request;
@@ -233,7 +234,7 @@ describe("evaluateRule short-circuits", () => {
 
 describe("evaluateRule port failures", () => {
   test("converts a typed failure into UNAVAILABLE without a gate outcome", async () => {
-    const port = new FakeJevPort({ status: "FAILED", reason: "MISSING_CREDENTIAL" });
+    const port = new FakeJevPort({ kind: "RULE", status: "FAILED", reason: "MISSING_CREDENTIAL" });
 
     const result = await evaluateRule(makeInput(), { jev: port });
 

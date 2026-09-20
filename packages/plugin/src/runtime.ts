@@ -3,64 +3,90 @@ import { idleSessionID } from "./idle-event";
 import { presentReview } from "./present";
 import { reviewAttributedTurn } from "./review";
 import { unavailableReview } from "./review-result";
-import type { PluginEventInput, PluginHooks, PluginRuntimeDependencies } from "./types";
+import type { PluginEventInput, PluginRuntime, PluginRuntimeDependencies } from "./types";
 
 /**
- * Builds the plugin hooks for one initialization. Idle handling is serialized
- * through a promise queue so the attribution check and mark never overlap, and
- * every host-visible failure is contained so the event hook always resolves.
+ * Builds the plugin runtime for one initialization. The event hook resolves
+ * immediately after scheduling: attribution and the dedupe mark stay serialized in
+ * one FIFO queue, while the attributed review runs detached so policy, Jev, and
+ * presentation never sit on the agent's critical path. `drain` awaits all detached
+ * work and is the test-only handle the host never receives.
  */
-export function createPluginRuntime(dependencies: PluginRuntimeDependencies): PluginHooks {
-  let tail: Promise<void> = Promise.resolve();
+export function createPluginRuntime(dependencies: PluginRuntimeDependencies): PluginRuntime {
+  let attributionTail: Promise<void> = Promise.resolve();
+  const backgroundJobs = new Set<Promise<void>>();
 
-  function enqueue(task: () => Promise<void>): Promise<void> {
-    const run = tail.then(task, task);
+  function track(work: Promise<void>): void {
+    const contained = work.then(ignore, ignore);
 
-    tail = run.then(ignore, ignore);
-
-    return tail;
+    backgroundJobs.add(contained);
+    void contained.then(() => {
+      backgroundJobs.delete(contained);
+    });
   }
 
-  return {
-    event: async (input: PluginEventInput): Promise<void> => {
-      const sessionID = idleSessionID(input.event);
+  function enqueueAttribution(sessionID: string): void {
+    const run = attributionTail.then(() => processIdle(sessionID));
 
-      if (sessionID === null) {
+    attributionTail = run.then(ignore, ignore);
+  }
+
+  async function processIdle(sessionID: string): Promise<void> {
+    try {
+      const attribution = await attributeTurn(sessionID, {
+        facade: dependencies.facade,
+        deduplicator: dependencies.deduplicator,
+      });
+
+      switch (attribution.status) {
+        case "NONE":
+        case "ALREADY_PROCESSED":
+          return;
+        case "UNAVAILABLE":
+          track(
+            presentReview(
+              dependencies.presenter,
+              unavailableReview(sessionID, "MISSING_ATTRIBUTED_DIFF"),
+            ),
+          );
+          return;
+        case "ATTRIBUTED":
+          track(reviewAttributedTurn(attribution.turn, dependencies));
+          return;
+      }
+    } catch {
+      return;
+    }
+  }
+
+  async function drain(): Promise<void> {
+    while (true) {
+      await attributionTail;
+
+      if (backgroundJobs.size === 0) {
         return;
       }
 
-      await enqueue(() => processIdle(sessionID, dependencies));
-    },
-  };
-}
-
-async function processIdle(
-  sessionID: string,
-  dependencies: PluginRuntimeDependencies,
-): Promise<void> {
-  try {
-    const attribution = await attributeTurn(sessionID, {
-      facade: dependencies.facade,
-      deduplicator: dependencies.deduplicator,
-    });
-
-    switch (attribution.status) {
-      case "NONE":
-      case "ALREADY_PROCESSED":
-        return;
-      case "UNAVAILABLE":
-        await presentReview(
-          dependencies.presenter,
-          unavailableReview(sessionID, "MISSING_ATTRIBUTED_DIFF"),
-        );
-        return;
-      case "ATTRIBUTED":
-        await reviewAttributedTurn(attribution.turn, dependencies);
-        return;
+      await Promise.all([...backgroundJobs]);
     }
-  } catch {
-    return;
   }
+
+  return {
+    hooks: {
+      event: (input: PluginEventInput): Promise<void> => {
+        const sessionID = idleSessionID(input.event);
+
+        if (sessionID === null) {
+          return Promise.resolve();
+        }
+
+        enqueueAttribution(sessionID);
+
+        return Promise.resolve();
+      },
+    },
+    drain,
+  };
 }
 
 function ignore(): void {

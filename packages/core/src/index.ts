@@ -29,7 +29,9 @@ export type {
   WarningThresholds,
 } from "./domain/types";
 export type {
-  JevBuiltInRequest,
+  JevBuiltInAnswerResult,
+  JevBuiltInBatchRequest,
+  JevBuiltInBatchResult,
   JevChange,
   JevEvaluationPort,
   JevEvaluationResult,
@@ -38,10 +40,12 @@ export type {
   JevNoulQuestion,
   JevRequest,
   JevRuleCriteria,
+  JevRuleEvaluationResult,
   JevRuleRequest,
   PolicySource,
   PolicySourcePort,
 } from "./ports/types";
+export { COMPLEXITY_ANSWER, SCOPE_CREEP_ANSWER } from "./ports/types";
 export type {
   CredentialProvider,
   CredentialResolution,
@@ -84,24 +88,13 @@ export { checkFilePath } from "./evidence/safety";
 export { matchesScope } from "./evidence/scope";
 export { selectRuleEvidence, selectTurnEvidence } from "./evidence/select-evidence";
 export type {
-  EvaluateBuiltInDependencies,
-  EvaluateBuiltInInput,
-  EvaluateComplexityDependencies,
-  EvaluateComplexityInput,
-  EvaluateScopeCreepDependencies,
-  EvaluateScopeCreepInput,
+  BuiltInBatchReview,
+  EvaluateBuiltInsDependencies,
+  EvaluateBuiltInsInput,
 } from "./builtins/types";
-export {
-  buildScopeCreepRequest,
-  evaluateScopeCreep,
-  SCOPE_CREEP_CHECK_ID,
-} from "./builtins/scope-creep";
-export {
-  buildComplexityRequest,
-  COMPLEXITY_CHECK_ID,
-  COMPLEXITY_GATE_CONFIG,
-  evaluateComplexity,
-} from "./builtins/complexity";
+export { buildBuiltInBatchRequest, evaluateBuiltIns } from "./builtins/evaluate-builtins";
+export { SCOPE_CREEP_CHECK_ID } from "./builtins/scope-creep";
+export { COMPLEXITY_CHECK_ID, COMPLEXITY_GATE_CONFIG } from "./builtins/complexity";
 export type { FifoJevPortConfig } from "./concurrency/types";
 export { createFifoJevPort } from "./concurrency/fifo-port";
 export type { GateConfigResult, GateEvaluation, GateUnavailable } from "./gate/types";

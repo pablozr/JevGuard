@@ -3,19 +3,27 @@ import type {
   CredentialProvider,
   CredentialResolution,
   CredentialUnavailableReason,
-  JevBuiltInRequest,
+  JevBuiltInAnswerResult,
+  JevBuiltInBatchRequest,
+  JevBuiltInBatchResult,
+  JevChange,
   JevEvaluationPort,
   JevEvaluationResult,
   JevFailureReason,
   JevRequest,
   JevRuleCriteria,
+  JevRuleEvaluationResult,
+  JevRuleRequest,
 } from "@jevguard/core";
+import { COMPLEXITY_ANSWER, SCOPE_CREEP_ANSWER } from "@jevguard/core";
 import {
   JEV_MODEL,
+  type JevTransportChange,
+  type JevTransportChecks,
   type JevTransportCriterion,
   type JevTransportDependencies,
-  type JevTransportState,
   type TypeSafeClientConfiguration,
+  type TypeSafeNoulQuestion,
   type TypeSafeSystemOneClient,
   type TypeSafeSystemOneRequest,
 } from "./types";
@@ -28,7 +36,7 @@ export function buildTypeSafeClientConfig(apiKey: string): TypeSafeClientConfigu
 }
 
 /**
- * Concrete TypeSafe transport for one Jev judgment. The credential is resolved on
+ * Concrete TypeSafe transport for Jev judgments. The credential is resolved on
  * every `evaluate`; a request rejection or an invalid external response is typed
  * and never thrown, and no error, response body, task, diff, or key is exposed.
  */
@@ -38,7 +46,7 @@ export function createJevTransport(dependencies: JevTransportDependencies): JevE
       const credential = await resolveCredential(dependencies.credentials);
 
       if (credential.status === "UNAVAILABLE") {
-        return failed(toFailureReason(credential.reason));
+        return failedFor(request, toFailureReason(credential.reason));
       }
 
       let client: TypeSafeSystemOneClient;
@@ -46,7 +54,7 @@ export function createJevTransport(dependencies: JevTransportDependencies): JevE
       try {
         client = dependencies.createClient(credential.apiKey);
       } catch {
-        return failed("API_ERROR");
+        return failedFor(request, "API_ERROR");
       }
 
       return evaluateWithClient(client, request);
@@ -83,58 +91,102 @@ async function evaluateWithClient(
   client: TypeSafeSystemOneClient,
   request: JevRequest,
 ): Promise<JevEvaluationResult> {
+  switch (request.kind) {
+    case "RULE":
+      return evaluateRuleWithClient(client, request);
+    case "BUILT_IN_BATCH":
+      return evaluateBatchWithClient(client, request);
+  }
+}
+
+async function evaluateRuleWithClient(
+  client: TypeSafeSystemOneClient,
+  request: JevRuleRequest,
+): Promise<JevRuleEvaluationResult> {
   let response: unknown;
 
   try {
-    response = await client.systemOne(toSystemOneRequest(request));
+    response = await client.systemOne(toRuleSystemOneRequest(request));
   } catch {
-    return failed("API_ERROR");
+    return ruleFailed("API_ERROR");
   }
 
   const violationProbability = readViolationProbability(response);
 
   if (violationProbability === null) {
-    return failed("INVALID_RESPONSE");
+    return ruleFailed("INVALID_RESPONSE");
   }
 
-  return { status: "EVALUATED", noul: { violationProbability } };
+  return { kind: "RULE", status: "EVALUATED", noul: { violationProbability } };
 }
 
-function toSystemOneRequest(request: JevRequest): TypeSafeSystemOneRequest {
-  const criteria = request.question.criteria;
+async function evaluateBatchWithClient(
+  client: TypeSafeSystemOneClient,
+  request: JevBuiltInBatchRequest,
+): Promise<JevBuiltInBatchResult> {
+  let response: unknown;
 
+  try {
+    response = await client.systemOne(toBatchSystemOneRequest(request));
+  } catch {
+    return batchFailed("API_ERROR");
+  }
+
+  return readBatchAnswers(response);
+}
+
+function toRuleSystemOneRequest(request: JevRuleRequest): TypeSafeSystemOneRequest {
   return {
-    state: toState(request),
+    state: {
+      task: request.task,
+      rule: toCriterion(request.question.criteria),
+      change: toChange(request.change),
+    },
     questions: {
-      violation: {
-        type: "noul",
-        instructions: request.question.instructions,
-        criteria: {
-          true: criteria.violation,
-          false: criteria.allowed ?? DEFAULT_ALLOWED_CRITERION,
-        },
-      },
+      violation: toTypeSafeQuestion(request.question.instructions, request.question.criteria),
     },
     model: JEV_MODEL,
   };
 }
 
-function toState(request: JevRequest): JevTransportState {
-  const criterion = toCriterion(request.question.criteria);
-  const change = {
-    files: [...request.change.files],
-    diff: request.change.diff,
+function toBatchSystemOneRequest(request: JevBuiltInBatchRequest): TypeSafeSystemOneRequest {
+  const scopeCreep = request.questions.scopeCreep;
+  const complexity = request.questions.complexity;
+
+  return {
+    state: {
+      task: request.task,
+      checks: toChecks(scopeCreep.criteria, complexity.criteria),
+      change: toChange(request.change),
+    },
+    questions: {
+      [SCOPE_CREEP_ANSWER]: toTypeSafeQuestion(scopeCreep.instructions, scopeCreep.criteria),
+      [COMPLEXITY_ANSWER]: toTypeSafeQuestion(complexity.instructions, complexity.criteria),
+    },
+    model: JEV_MODEL,
   };
-
-  if (isBuiltInRequest(request)) {
-    return { task: request.task, check: criterion, change };
-  }
-
-  return { task: request.task, rule: criterion, change };
 }
 
-function isBuiltInRequest(request: JevRequest): request is JevBuiltInRequest {
-  return "kind" in request && request.kind === "BUILT_IN";
+function toChecks(scopeCreep: JevRuleCriteria, complexity: JevRuleCriteria): JevTransportChecks {
+  return {
+    scopeCreep: toCriterion(scopeCreep),
+    complexity: toCriterion(complexity),
+  };
+}
+
+function toChange(change: JevChange): JevTransportChange {
+  return { files: [...change.files], diff: change.diff };
+}
+
+function toTypeSafeQuestion(instructions: string, criteria: JevRuleCriteria): TypeSafeNoulQuestion {
+  return {
+    type: "noul",
+    instructions,
+    criteria: {
+      true: criteria.violation,
+      false: criteria.allowed ?? DEFAULT_ALLOWED_CRITERION,
+    },
+  };
 }
 
 function toCriterion(criteria: JevRuleCriteria): JevTransportCriterion {
@@ -165,17 +217,66 @@ function readViolationProbability(response: unknown): number | null {
 
   const noul = violation.noul;
 
-  if (typeof noul !== "number" || !Number.isFinite(noul) || noul < 0 || noul > 1) {
-    return null;
+  return isProbability(noul) ? noul : null;
+}
+
+/**
+ * A usable batch envelope is an object with an `answers` object; each expected named
+ * answer is then validated on its own, so one bad sibling fails alone.
+ */
+function readBatchAnswers(response: unknown): JevBuiltInBatchResult {
+  if (!isRecord(response)) {
+    return batchFailed("INVALID_RESPONSE");
   }
 
-  return noul;
+  const answers = response.answers;
+
+  if (!isRecord(answers)) {
+    return batchFailed("INVALID_RESPONSE");
+  }
+
+  return {
+    kind: "BUILT_IN_BATCH",
+    status: "EVALUATED",
+    answers: {
+      [SCOPE_CREEP_ANSWER]: readAnswer(answers, SCOPE_CREEP_ANSWER),
+      [COMPLEXITY_ANSWER]: readAnswer(answers, COMPLEXITY_ANSWER),
+    },
+  };
+}
+
+function readAnswer(answers: Record<string, unknown>, key: string): JevBuiltInAnswerResult {
+  const answer = answers[key];
+
+  if (!isRecord(answer) || answer.type !== "noul") {
+    return { status: "FAILED", reason: "INVALID_RESPONSE" };
+  }
+
+  const noul = answer.noul;
+
+  if (!isProbability(noul)) {
+    return { status: "FAILED", reason: "INVALID_RESPONSE" };
+  }
+
+  return { status: "EVALUATED", noul: { violationProbability: noul } };
+}
+
+function isProbability(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function failed(reason: JevFailureReason): JevEvaluationResult {
-  return { status: "FAILED", reason };
+function ruleFailed(reason: JevFailureReason): JevRuleEvaluationResult {
+  return { kind: "RULE", status: "FAILED", reason };
+}
+
+function batchFailed(reason: JevFailureReason): JevBuiltInBatchResult {
+  return { kind: "BUILT_IN_BATCH", status: "FAILED", reason };
+}
+
+function failedFor(request: JevRequest, reason: JevFailureReason): JevEvaluationResult {
+  return request.kind === "RULE" ? ruleFailed(reason) : batchFailed(reason);
 }
