@@ -256,7 +256,7 @@ describe("operating points and sweep", () => {
     const scopePoints = buildOperatingPoints("scopeCreep", []);
     const complexityPoints = buildOperatingPoints("complexity", []);
 
-    expect(scopePoints.map((point) => point.threshold)).toEqual([0.4, 0.7]);
+    expect(scopePoints.map((point) => point.threshold)).toEqual([0.65, 0.9]);
     expect(complexityPoints.map((point) => point.threshold)).toEqual([0.5]);
   });
 
@@ -346,10 +346,10 @@ describe("operational counts and repeats", () => {
 
 describe("runtime gate boundaries via the real built-in batch", () => {
   test.each([
-    [0.399, "PASS"],
-    [0.4, "WARN"],
-    [0.699, "WARN"],
-    [0.7, "FAIL"],
+    [0.649, "PASS"],
+    [0.65, "WARN"],
+    [0.899, "WARN"],
+    [0.9, "FAIL"],
   ] as const)("maps scope probability %s to %s", async (probability, outcome) => {
     const [scopeOutcome] = await gateOutcomes(probability, 0.1);
 

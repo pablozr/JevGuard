@@ -1339,6 +1339,7 @@ describe("JevGuardPlugin observe-only containment", () => {
     facade.records = distractorRecords();
     facade.diffs = mixedDiffs();
     jev.probability = 0.8;
+    jev.probabilities.set(SCOPE_CREEP_ID, 0.9);
 
     await expect(dispatch(runtime, idleEvent())).resolves.toBeUndefined();
 

@@ -93,7 +93,7 @@ export type {
   EvaluateBuiltInsInput,
 } from "./builtins/types";
 export { buildBuiltInBatchRequest, evaluateBuiltIns } from "./builtins/evaluate-builtins";
-export { SCOPE_CREEP_CHECK_ID } from "./builtins/scope-creep";
+export { SCOPE_CREEP_CHECK_ID, SCOPE_CREEP_GATE_CONFIG } from "./builtins/scope-creep";
 export { COMPLEXITY_CHECK_ID, COMPLEXITY_GATE_CONFIG } from "./builtins/complexity";
 export type { FifoJevPortConfig } from "./concurrency/types";
 export { createFifoJevPort } from "./concurrency/fifo-port";

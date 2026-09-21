@@ -119,7 +119,7 @@ turn's complete, safe attributed patch with no scope filtering.
 `SCOPE-CREEP` asks whether the attributed change contains material functional,
 behavioral, architectural, dependency, configuration, documentation, or refactoring
 work the task did not request and that is not reasonably necessary to complete it. It
-always uses fixed `error` thresholds — warn at `0.40`, fail at `0.70` — so
+always uses fixed `error` thresholds — warn at `0.65`, fail at `0.90` — so
 `.jev/config.yaml` cannot change its outcome.
 
 `COMPLEXITY` asks whether the attributed change introduces material complexity that is
@@ -187,7 +187,7 @@ Defaults: `error` warns at `0.40` and fails at `0.70`; `warning` warns at `0.60`
 and never fails.
 
 These thresholds apply to repository rules only. The `SCOPE-CREEP` built-in always
-uses its fixed `error` thresholds (`0.40`/`0.70`), and `COMPLEXITY` always uses its
+uses its fixed `error` thresholds (`0.65`/`0.90`), and `COMPLEXITY` always uses its
 fixed `warning` threshold (`0.50`) and never fails, even when the configuration is
 absent or invalid.
 

@@ -290,7 +290,7 @@ The current release implements the full local, observe-only path:
   turn itself is attributed, the built-in batch still runs.
 - The product-owned `SCOPE-CREEP` built-in runs on every attributed turn over the
   turn's complete, safe attributed patch, with fixed `error` thresholds
-  (`0.40`/`0.70`) and no scope filtering. It can produce `PASS`, `WARN`, or `FAIL`.
+  (`0.65`/`0.90`) and no scope filtering. It can produce `PASS`, `WARN`, or `FAIL`.
 - The product-owned `COMPLEXITY` built-in runs on every attributed turn over the same
   complete, safe attributed patch. It uses a fixed advisory threshold of `0.50`,
   independent of `.jev/config.yaml`, and can produce `PASS` or `WARN` but never

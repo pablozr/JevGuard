@@ -26,10 +26,10 @@ export interface OperatingPointDefinition {
   readonly label: string;
 }
 
-/** Scope Creep keeps binary author labels but reports both fixed error-gate points. */
+/** Scope Creep keeps binary author labels but reports both fixed production error-gate points. */
 export const SCOPE_OPERATING_POINTS: readonly OperatingPointDefinition[] = [
-  { threshold: 0.4, label: "warn-or-fail" },
-  { threshold: 0.7, label: "fail" },
+  { threshold: 0.65, label: "warn-or-fail" },
+  { threshold: 0.9, label: "fail" },
 ];
 
 /** Complexity is advisory: its only operating point is the fixed warning gate. */

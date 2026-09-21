@@ -80,7 +80,7 @@ in `plugin` or `core`.
 5. The local rule lane and the built-in batch run concurrently. Rules stay sequential
    in source order inside their lane; the batch selects the turn's complete, safe,
    attributed patch once and sends both built-ins as one request with two independent
-   named answers. `SCOPE-CREEP` uses fixed `0.40`/`0.70` error thresholds; `COMPLEXITY`
+   named answers. `SCOPE-CREEP` uses fixed `0.65`/`0.90` error thresholds; `COMPLEXITY`
    uses a fixed `0.50` advisory threshold and never fails. One malformed answer fails
    only its own check.
 6. The concrete transport is wrapped by one shared FIFO concurrency limit
@@ -150,7 +150,7 @@ flowchart TD
   - `packages/core/src/builtins/evaluate-builtins.ts` — one evidence selection, one
     batch request, and the fixed gates for both checks.
   - `packages/core/src/builtins/scope-creep.ts` — `SCOPE-CREEP` question and fixed
-    `0.40`/`0.70` error gate.
+    `0.65`/`0.90` error gate.
   - `packages/core/src/builtins/complexity.ts` — `COMPLEXITY` question and fixed
     `0.50` advisory gate that never fails.
   - `packages/core/src/concurrency/fifo-port.ts` — shared FIFO Jev concurrency limit.
@@ -192,7 +192,7 @@ V0.1 evaluates the rule blocks declared in `.jev/rules.md` plus two built-in che
 `SCOPE-CREEP` and `COMPLEXITY`. Both run as one batch request with two independent
 named answers alongside the sequential rule lane over the turn's complete, safe
 attributed patch. One malformed answer fails only its own check. `SCOPE-CREEP` uses
-fixed `0.40`/`0.70` error thresholds; `COMPLEXITY` uses a fixed `0.50` advisory
+fixed `0.65`/`0.90` error thresholds; `COMPLEXITY` uses a fixed `0.50` advisory
 threshold and never fails. Neither reads the configured rule gate. The concrete
 transport is wrapped by one shared FIFO concurrency limit (`createFifoJevPort`,
 default `2`) so at most two Jev requests are in flight, counting the batch as one

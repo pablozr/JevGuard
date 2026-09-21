@@ -76,7 +76,7 @@ export function buildCheckReport(
   samples: readonly CheckScoreSample[],
 ): CheckReport {
   const points = operatingPointsFor(check);
-  const primaryThreshold = points[0]?.threshold ?? 0.4;
+  const primaryThreshold = points[0]?.threshold ?? 0.65;
   const unavailable: OperationalFailure[] = samples
     .filter((sample) => sample.probability === null)
     .map((sample) => ({

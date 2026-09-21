@@ -172,10 +172,10 @@ describe("built-in batch evaluation", () => {
 
   test.each([
     [0, "PASS"],
-    [0.399, "PASS"],
-    [0.4, "WARN"],
-    [0.699, "WARN"],
-    [0.7, "FAIL"],
+    [0.649, "PASS"],
+    [0.65, "WARN"],
+    [0.899, "WARN"],
+    [0.9, "FAIL"],
     [1, "FAIL"],
   ] as const)(
     "maps a scope-creep answer of %s to %s on the fixed error gate",

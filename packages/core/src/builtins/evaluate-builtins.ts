@@ -1,7 +1,6 @@
 import type { BuiltInReviewContext, BuiltInReviewResult, RuleEvidence } from "../domain/types";
 import { evaluateBuiltInBatchWithPort } from "../evaluation/evaluate-with-port";
 import { selectTurnEvidence } from "../evidence/select-evidence";
-import { DEFAULT_GATE_CONFIG } from "../gate/defaults";
 import { evaluateGate } from "../gate/evaluate-gate";
 import type { JevBuiltInAnswerResult, JevBuiltInBatchRequest } from "../ports/types";
 import { COMPLEXITY_ANSWER, SCOPE_CREEP_ANSWER } from "../ports/types";
@@ -10,7 +9,11 @@ import {
   buildComplexityQuestion,
   COMPLEXITY_GATE_CONFIG,
 } from "./complexity";
-import { buildScopeCreepContext, buildScopeCreepQuestion } from "./scope-creep";
+import {
+  buildScopeCreepContext,
+  buildScopeCreepQuestion,
+  SCOPE_CREEP_GATE_CONFIG,
+} from "./scope-creep";
 import type {
   BuiltInBatchReview,
   EvaluateBuiltInsDependencies,
@@ -111,7 +114,7 @@ function gateScopeCreep(
 
   return {
     ...context,
-    ...evaluateGate("error", answer.noul.violationProbability, DEFAULT_GATE_CONFIG),
+    ...evaluateGate("error", answer.noul.violationProbability, SCOPE_CREEP_GATE_CONFIG),
   };
 }
 
