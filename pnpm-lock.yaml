@@ -11,6 +11,12 @@ importers:
       '@biomejs/biome':
         specifier: ^2.0.0
         version: 2.5.14
+      '@jevguard/core':
+        specifier: workspace:*
+        version: link:packages/core
+      '@jevguard/opencode-adapter':
+        specifier: workspace:*
+        version: link:packages/opencode-adapter
       '@types/node':
         specifier: ^22.20.4
         version: 22.20.4

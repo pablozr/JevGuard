@@ -16,10 +16,14 @@
     "artifact:build": "bun packages/plugin/scripts/build-artifact.ts",
     "artifact:pack": "bun packages/plugin/scripts/pack-artifact.ts",
     "artifact:publish:check": "bun packages/plugin/scripts/build-artifact.ts && npm publish --dry-run ./packages/plugin/dist --access public",
+    "calibration:generate": "bun tools/calibration/main.ts generate",
+    "calibration:run": "bun tools/calibration/main.ts run",
     "check": "pnpm format && pnpm lint && pnpm typecheck && pnpm test"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.0.0",
+    "@jevguard/core": "workspace:*",
+    "@jevguard/opencode-adapter": "workspace:*",
     "@types/node": "^22.20.4",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
