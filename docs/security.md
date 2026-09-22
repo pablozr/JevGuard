@@ -97,18 +97,18 @@ secret files.
 For normal local use, run the login command with the published package:
 
 ```sh
-bunx --package @jevguard/plugin jevguard login
+bunx --package @pablozrrrr/jevguard jevguard login
 ```
 
 Or install it globally so `jevguard` is on `PATH`:
 
 ```sh
-bun install --global @jevguard/plugin
+bun install --global @pablozrrrr/jevguard
 jevguard login
 ```
 
 Adding the plugin to `opencode.json` does not put `jevguard` on `PATH`.
-`@jevguard/plugin` is not published yet; until then, install the packed local
+`@pablozrrrr/jevguard` is not published yet; until then, install the packed local
 tarball globally and run `jevguard login`.
 
 The CLI reads the key using a masked terminal prompt and stores it in the native

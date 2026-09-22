@@ -1,5 +1,5 @@
 {
-  "name": "@jevguard/plugin",
+  "name": "@pablozrrrr/jevguard",
   "version": "0.1.0",
   "private": true,
   "description": "OpenCode plugin that reviews a completed agent turn against a repository semantic rule using Jev.",

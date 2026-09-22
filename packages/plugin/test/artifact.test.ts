@@ -23,7 +23,7 @@ const PACK_SCRIPT = join(PLUGIN_DIR, "scripts", "pack-artifact.ts");
 const BUILD_SENTINEL_VARIABLE = "JEVGUARD_ARTIFACT_BUILD_SENTINEL";
 const BUILD_SENTINEL_VALUE = "JEVGUARD_ARTIFACT_BUILD_SENTINEL_7f3c9d2a";
 
-const PLUGIN_PACKAGE_NAME = "@jevguard/plugin";
+const PLUGIN_PACKAGE_NAME = "@pablozrrrr/jevguard";
 const PLUGIN_VERSION = "0.1.0";
 const SKILL_PACKED_PREFIX = "skills/jevguard-rules";
 const EXPECTED_DIST_FILES = [
@@ -66,7 +66,7 @@ const EXPECTED_BUGS = { url: "https://github.com/pablozr/JevGuard/issues" };
 const EXPECTED_ENGINES = { bun: ">=1.1.0", opencode: ">=1.18.31 <2" };
 const EXPECTED_PUBLISH_CONFIG = { access: "public", registry: "https://registry.npmjs.org" };
 
-const LOCAL_SHIM = 'export { JevGuardPlugin } from "@jevguard/plugin";\n';
+const LOCAL_SHIM = 'export { JevGuardPlugin } from "@pablozrrrr/jevguard";\n';
 const SHIM_IMPORT_CHECK = [
   'import * as module from "./jevguard";',
   "const names = Object.keys(module).sort();",

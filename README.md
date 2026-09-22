@@ -142,11 +142,11 @@ the agent's critical path.
 
 ## Install
 
-Once `@jevguard/plugin` is published to npm, the intended install is one line in
+Once `@pablozrrrr/jevguard` is published to npm, the intended install is one line in
 `opencode.json`:
 
 ```json
-{ "plugin": ["@jevguard/plugin"] }
+{ "plugin": ["@pablozrrrr/jevguard"] }
 ```
 
 OpenCode then resolves the package from the npm registry or its cache and loads it
@@ -155,7 +155,7 @@ on the next start. Adding the entry only loads the plugin; it does **not** put t
 OpenCode after changing the plugin list.
 
 > [!IMPORTANT]
-> `@jevguard/plugin` is **not published to npm yet**. The one-line entry above is
+> `@pablozrrrr/jevguard` is **not published to npm yet**. The one-line entry above is
 > future behavior and will not resolve until the package is released. Before
 > publication, load the plugin as a local artifact plugin instead.
 
@@ -176,7 +176,7 @@ pnpm artifact:build
 pnpm artifact:pack
 ```
 
-`pnpm artifact:pack` writes `artifacts/jevguard-plugin-<version>.tgz`. Both
+`pnpm artifact:pack` writes `artifacts/pablozrrrr-jevguard-<version>.tgz`. Both
 `packages/plugin/dist/` and `artifacts/` are build output and are not committed.
 
 The packed manifest depends only on public runtime packages
@@ -193,17 +193,17 @@ through a local plugin shim:
 
 ```sh
 cd /path/to/consumer/.opencode
-bun add /path/to/jevguard-plugin-<version>.tgz
+bun add /path/to/pablozrrrr-jevguard-<version>.tgz
 ```
 
 ```ts
 // .opencode/plugins/jevguard.ts
-export { JevGuardPlugin } from "@jevguard/plugin";
+export { JevGuardPlugin } from "@pablozrrrr/jevguard";
 ```
 
 OpenCode loads `.opencode/plugins/` with its bundled Bun runtime. The shim runs as
-a local plugin module and resolves `@jevguard/plugin` from
-`.opencode/node_modules`. Do **not** add `@jevguard/plugin` to the `opencode.json`
+a local plugin module and resolves `@pablozrrrr/jevguard` from
+`.opencode/node_modules`. Do **not** add `@pablozrrrr/jevguard` to the `opencode.json`
 `plugin` list before publication; that bare entry does not resolve locally.
 
 ### Author rules with the bundled skill
@@ -227,26 +227,26 @@ Loading the plugin does not expose the `jevguard` binary on `PATH`. Once the
 package is published, run the login command without a global install:
 
 ```sh
-bunx --package @jevguard/plugin jevguard login
+bunx --package @pablozrrrr/jevguard jevguard login
 ```
 
 Or install the package globally so `jevguard` is on `PATH`:
 
 ```sh
-bun install --global @jevguard/plugin
+bun install --global @pablozrrrr/jevguard
 jevguard login
 ```
 
 Until the package is published, install the local tarball globally instead:
 
 ```sh
-bun install --global /path/to/jevguard-plugin-<version>.tgz
+bun install --global /path/to/pablozrrrr-jevguard-<version>.tgz
 jevguard login
 ```
 
 Known limitations:
 
-- `@jevguard/plugin` has no registry release yet, so the one-line `opencode.json`
+- `@pablozrrrr/jevguard` has no registry release yet, so the one-line `opencode.json`
   plugin entry does not resolve until the package is published.
 - Target host is OpenCode `1.18.31`. Exact `1.18.31` runtime smoke is still
   pending; a local `1.18.28` run worked.
@@ -265,7 +265,7 @@ Loading the plugin does not put `jevguard` on `PATH`. If it is not installed
 globally, run the one-line login instead:
 
 ```sh
-bunx --package @jevguard/plugin jevguard login
+bunx --package @pablozrrrr/jevguard jevguard login
 ```
 
 JevGuard stores the key in your operating system's credential store instead of a

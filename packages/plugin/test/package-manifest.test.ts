@@ -38,7 +38,7 @@ describe("plugin development manifest", () => {
   test("keeps the released version and metadata consistent with the artifact", () => {
     const manifest = readManifest();
 
-    expect(manifest.name).toBe("@jevguard/plugin");
+    expect(manifest.name).toBe("@pablozrrrr/jevguard");
     expect(manifest.version).toBe("0.1.0");
     expect(manifest.license).toBe("MIT");
     expect(manifest.description).toBeDefined();
