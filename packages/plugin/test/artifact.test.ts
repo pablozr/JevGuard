@@ -25,9 +25,25 @@ const BUILD_SENTINEL_VALUE = "JEVGUARD_ARTIFACT_BUILD_SENTINEL_7f3c9d2a";
 
 const PLUGIN_PACKAGE_NAME = "@jevguard/plugin";
 const PLUGIN_VERSION = "0.1.0";
-const EXPECTED_DIST_FILES = ["LICENSE", "README.md", "cli/main.js", "index.js", "package.json"];
+const SKILL_PACKED_PREFIX = "skills/jevguard-rules";
+const EXPECTED_DIST_FILES = [
+  "LICENSE",
+  "README.md",
+  "cli/main.js",
+  "index.js",
+  "package.json",
+  `${SKILL_PACKED_PREFIX}/SKILL.md`,
+  `${SKILL_PACKED_PREFIX}/validate-rules.js`,
+];
 const EXPECTED_ARCHIVE_FILES = EXPECTED_DIST_FILES.map((file) => `package/${file}`).sort();
-const EXPECTED_PACKED_FILES = ["index.js", "cli/main.js", "README.md", "LICENSE"];
+const EXPECTED_PACKED_FILES = [
+  "index.js",
+  "cli/main.js",
+  "README.md",
+  "LICENSE",
+  `${SKILL_PACKED_PREFIX}/SKILL.md`,
+  `${SKILL_PACKED_PREFIX}/validate-rules.js`,
+];
 const EXPECTED_RUNTIME_DEPENDENCIES = {
   "@inquirer/password": "^5.2.2",
   "@napi-rs/keyring": "2.1.0",
@@ -55,6 +71,44 @@ const SHIM_IMPORT_CHECK = [
   'import * as module from "./jevguard";',
   "const names = Object.keys(module).sort();",
   "console.log(JSON.stringify({ names, type: typeof module.JevGuardPlugin }));",
+  "",
+].join("\n");
+
+const CONFIG_HOOK_CHECK = [
+  'import { JevGuardPlugin } from "./jevguard";',
+  "const hooks = await JevGuardPlugin({ client: {}, worktree: process.cwd() });",
+  "const config = {};",
+  "await hooks.config(config);",
+  "console.log(JSON.stringify(config));",
+  "",
+].join("\n");
+
+const VALID_SKILL_DOCUMENT = [
+  "## ARCH-100",
+  "",
+  "severity: warning",
+  "scope: src/**",
+  "",
+  "### Rule",
+  "",
+  "Keep changes under src readable.",
+  "",
+  "### Violation",
+  "",
+  "The change adds unnecessary complexity.",
+  "",
+].join("\n");
+
+const INVALID_SKILL_DOCUMENT = [
+  "## BROKEN-100",
+  "",
+  "### Rule",
+  "",
+  "Missing severity metadata.",
+  "",
+  "### Violation",
+  "",
+  "The change violates the rule.",
   "",
 ].join("\n");
 
@@ -169,6 +223,24 @@ function npmCommand(args: readonly string[]): [string, readonly string[]] {
   return ["npm", [...args]];
 }
 
+function toPosix(path: string): string {
+  return path.replaceAll("\\", "/");
+}
+
+function packedValidatorPath(): string {
+  return join(extractedDir, "package", "skills", "jevguard-rules", "validate-rules.js");
+}
+
+function runPackedValidator(rulesText: string, name: string): { status: number; stdout: string } {
+  const rulesPath = join(tempRoot, name);
+
+  writeFileSync(rulesPath, rulesText, "utf8");
+
+  const result = spawnSync("bun", [packedValidatorPath(), rulesPath], { encoding: "utf8" });
+
+  return { status: result.status ?? -1, stdout: result.stdout ?? "" };
+}
+
 beforeAll(() => {
   tempRoot = mkdtempSync(join(tmpdir(), "jevguard-artifact-"));
 
@@ -195,6 +267,56 @@ describe("local package artifact", () => {
       .sort();
 
     expect(listed).toEqual(EXPECTED_ARCHIVE_FILES);
+  });
+
+  test("packs no TypeScript sources or source maps", () => {
+    const listed = execFileSync("tar", ["-tzf", tarballPath], { encoding: "utf8" })
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line !== "");
+
+    expect(listed.some((entry) => entry.endsWith(".ts"))).toBe(false);
+    expect(listed.some((entry) => entry.endsWith(".map"))).toBe(false);
+  });
+
+  test("ships a validator that reports valid and invalid candidates without policy content", () => {
+    const valid = runPackedValidator(VALID_SKILL_DOCUMENT, "skill-valid.md");
+
+    expect(valid.status).toBe(0);
+    expect(JSON.parse(valid.stdout)).toMatchObject({ status: "valid", ruleIds: ["ARCH-100"] });
+
+    const invalid = runPackedValidator(INVALID_SKILL_DOCUMENT, "skill-invalid.md");
+
+    expect(invalid.status).toBe(1);
+    expect(JSON.parse(invalid.stdout)).toMatchObject({
+      status: "invalid",
+      errorCodes: ["MISSING_SEVERITY"],
+    });
+    expect(invalid.stdout).not.toContain("Missing severity metadata");
+  });
+
+  test("registers the installed skill directory on the live OpenCode config", () => {
+    const checkPath = join(pluginsDir, "config-check.ts");
+
+    writeFileSync(checkPath, CONFIG_HOOK_CHECK);
+
+    const output = execFileSync("bun", [checkPath], {
+      cwd: pluginsDir,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const config = JSON.parse(output) as {
+      readonly skills?: { readonly paths?: readonly string[] };
+    };
+    const expected = join(
+      opencodeDir,
+      "node_modules",
+      PLUGIN_PACKAGE_NAME,
+      "skills",
+      "jevguard-rules",
+    );
+
+    expect(config.skills?.paths?.map(toPosix)).toEqual([toPosix(expected)]);
   });
 
   test("publishes the exact public manifest with only runtime dependencies", () => {

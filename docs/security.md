@@ -71,6 +71,27 @@ Structured logs may record a rejected path and reason. They must never record th
 rejected file contents, and a rejected file is never replaced by the repository
 diff or by another file's patch.
 
+## Rule authoring skill
+
+The package ships a `jevguard-rules` OpenCode skill with a private rule validator.
+On startup the plugin's `config` hook appends the installed skill directory to the
+host's `skills.paths` and leaves every other config key untouched; it reads no
+credential and performs no evaluation.
+
+The skill authors `.jev/rules.md` only. It reads the current policy, interviews for
+missing rule facts, writes a candidate to a temp sibling, validates that exact
+candidate with the same parser JevGuard uses, and replaces the real file only after
+the candidate is valid and the user explicitly confirms the final content. It never
+edits `.jev/config.yaml`, never runs the public `jevguard` CLI, and never calls
+Jev/TypeSafe inference.
+
+The validator is a private helper, not a public CLI. It prints only a JSON summary:
+parse status, rule counts, rule IDs, and parser error codes. It never prints rule
+text, document contents, file contents, or credentials, and it rejects a missing
+path, a directory, an oversized document, and a read failure with a typed error code.
+Like the rest of JevGuard, the skill must never read or reproduce secret values or
+secret files.
+
 ## Credentials
 
 For normal local use, run the login command with the published package:

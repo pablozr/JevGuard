@@ -11,6 +11,13 @@ JevGuard reads repository policy from `.jev/`:
 Both files are read once per attributed turn. A missing `.jev/rules.md` is not a
 pass: the review becomes `UNAVAILABLE`.
 
+Editing policy content needs no restart: the next attributed turn reads the current
+files. Discovery of the plugin and its bundled `jevguard-rules` skill, by contrast,
+happens at OpenCode startup; restart OpenCode after installing or updating the
+package. The skill's bundled validator reads only the candidate `.jev/rules.md`,
+reports safe counts, rule IDs, and parser error codes, and never edits
+`.jev/config.yaml`.
+
 ## `rules.md`
 
 Rules are Markdown so they can be authored, reviewed, and versioned alongside the

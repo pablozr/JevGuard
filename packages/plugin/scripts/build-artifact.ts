@@ -7,6 +7,24 @@ const PACKAGE_DIR = resolve(SCRIPT_DIR, "..");
 const REPO_ROOT = resolve(PACKAGE_DIR, "..", "..");
 const SOURCE_DIR = join(PACKAGE_DIR, "src");
 const DIST_DIR = join(PACKAGE_DIR, "dist");
+const SKILL_NAME = "jevguard-rules";
+const SKILL_SOURCE_DIR = join(PACKAGE_DIR, "skills", SKILL_NAME);
+const SKILL_DIST_DIR = join(DIST_DIR, "skills", SKILL_NAME);
+const SKILL_DIST_PREFIX = `skills/${SKILL_NAME}`;
+
+/**
+ * The packed allowlist is explicit so the artifact never ships sources, maps, or
+ * tests. The bundled validator under `skills/` is the private parser helper the
+ * shipped `jevguard-rules` skill invokes.
+ */
+const ARTIFACT_FILES: readonly string[] = [
+  "index.js",
+  "cli/main.js",
+  "README.md",
+  "LICENSE",
+  `${SKILL_DIST_PREFIX}/SKILL.md`,
+  `${SKILL_DIST_PREFIX}/validate-rules.js`,
+];
 
 /**
  * Runtime dependencies stay external so the consumer installs public packages.
@@ -45,7 +63,11 @@ async function readSourceManifest(): Promise<SourceManifest> {
 
 async function bundleEntries(): Promise<void> {
   const result = await Bun.build({
-    entrypoints: [join(SOURCE_DIR, "index.ts"), join(SOURCE_DIR, "cli/main.ts")],
+    entrypoints: [
+      join(SOURCE_DIR, "index.ts"),
+      join(SOURCE_DIR, "cli/main.ts"),
+      join(SOURCE_DIR, "skills", SKILL_NAME, "validate-rules.ts"),
+    ],
     outdir: DIST_DIR,
     root: SOURCE_DIR,
     target: "bun",
@@ -77,7 +99,7 @@ async function writeArtifactManifest(source: SourceManifest): Promise<void> {
     main: "./index.js",
     exports: { ".": "./index.js" },
     bin: { jevguard: "cli/main.js" },
-    files: ["index.js", "cli/main.js", "README.md", "LICENSE"],
+    files: [...ARTIFACT_FILES],
     engines: source.engines,
     repository: source.repository,
     homepage: source.homepage,
@@ -95,6 +117,11 @@ async function copyDocs(): Promise<void> {
   await cp(join(REPO_ROOT, "LICENSE"), join(DIST_DIR, "LICENSE"));
 }
 
+async function copySkill(): Promise<void> {
+  await mkdir(SKILL_DIST_DIR, { recursive: true });
+  await cp(join(SKILL_SOURCE_DIR, "SKILL.md"), join(SKILL_DIST_DIR, "SKILL.md"));
+}
+
 async function main(): Promise<void> {
   await rm(DIST_DIR, { recursive: true, force: true });
   await mkdir(DIST_DIR, { recursive: true });
@@ -104,6 +131,7 @@ async function main(): Promise<void> {
   await bundleEntries();
   await writeArtifactManifest(source);
   await copyDocs();
+  await copySkill();
 
   console.log(`artifact built at ${DIST_DIR}`);
 }

@@ -15,6 +15,8 @@ import {
 } from "@jevguard/opencode-adapter";
 import type { Plugin } from "@opencode-ai/plugin";
 import { createPluginRuntime } from "./runtime";
+import { createConfigHook } from "./skills/config-hook";
+import { resolveInstalledSkillDirectory } from "./skills/skill-directory";
 import type { PluginRuntimeDependencies } from "./types";
 
 const DEFAULT_JEV_MAX_CONCURRENCY = 2;
@@ -24,8 +26,10 @@ const DEFAULT_JEV_MAX_CONCURRENCY = 2;
  * the composition root, wraps the concrete Jev transport in one shared FIFO
  * concurrency limit for every rule and built-in batch of this plugin instance, and
  * is observe-only: it never mutates agent context, blocks a turn, asks for
- * permissions, or performs remediation. The host receives only the runtime hooks;
- * reviews run detached from the event so they never sit on the agent's critical path.
+ * permissions, or performs remediation. The host receives the runtime event hook
+ * plus a `config` hook that registers the bundled `jevguard-rules` skill directory
+ * on the live config; reviews run detached from the event so they never sit on the
+ * agent's critical path.
  */
 export const JevGuardPlugin: Plugin = async (input) => {
   const presentationClient = createOpenCodePresentationClient(input.client);
@@ -52,5 +56,8 @@ export const JevGuardPlugin: Plugin = async (input) => {
     ),
   };
 
-  return createPluginRuntime(dependencies).hooks;
+  return {
+    ...createPluginRuntime(dependencies).hooks,
+    config: createConfigHook({ skillDirectory: resolveInstalledSkillDirectory(import.meta.url) }),
+  };
 };

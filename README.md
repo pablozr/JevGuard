@@ -164,7 +164,8 @@ OpenCode after changing the plugin list.
 The artifact ships the plugin as a **locally packed tarball** that bundles the
 private `@jevguard/core` and `@jevguard/opencode-adapter` workspace code, so a
 clean consumer installs one tarball and never resolves a workspace link or a
-private registry package.
+private registry package. It also packages the `jevguard-rules` skill and its
+private rule validator under `skills/jevguard-rules/`.
 
 Build the tarball from this repository:
 
@@ -204,6 +205,21 @@ OpenCode loads `.opencode/plugins/` with its bundled Bun runtime. The shim runs 
 a local plugin module and resolves `@jevguard/plugin` from
 `.opencode/node_modules`. Do **not** add `@jevguard/plugin` to the `opencode.json`
 `plugin` list before publication; that bare entry does not resolve locally.
+
+### Author rules with the bundled skill
+
+The package ships a `jevguard-rules` OpenCode skill beside the plugin. On startup
+the plugin's `config` hook appends the installed skill directory to the host's
+`skills.paths`, so the skill is discovered without a manual `opencode.json` entry.
+Skill discovery is read at OpenCode startup: restart OpenCode after installing or
+updating the package so the skill appears.
+
+Policy content is different. `.jev/rules.md` and `.jev/config.yaml` are read once
+per attributed turn, so editing rule text takes effect on the next reviewed turn
+without restarting OpenCode. The skill validates a candidate with the same parser
+JevGuard uses, requires explicit final confirmation, and replaces `.jev/rules.md`
+only after the candidate passes; it never edits `.jev/config.yaml` and never calls
+Jev.
 
 ### Install the CLI
 
