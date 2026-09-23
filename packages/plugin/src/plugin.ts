@@ -3,8 +3,10 @@ import {
   createCredentialProvider,
   createKeyringCredentialStore,
   createNodePolicyFileSystem,
+  createOpenCodeCommandClient,
   createOpenCodeLogSink,
   createOpenCodePresentationClient,
+  createOpenCodeReviewBridge,
   createOpenCodeSessionFacade,
   createOpenCodeToastSink,
   createPolicyFileLoader,
@@ -24,12 +26,12 @@ const DEFAULT_JEV_MAX_CONCURRENCY = 2;
 /**
  * OpenCode V1.18.31 plugin entrypoint. It composes the adapter infrastructure at
  * the composition root, wraps the concrete Jev transport in one shared FIFO
- * concurrency limit for every rule and built-in batch of this plugin instance, and
- * is observe-only: it never mutates agent context, blocks a turn, asks for
- * permissions, or performs remediation. The host receives the runtime event hook
- * plus a `config` hook that registers the bundled `jevguard-rules` skill directory
- * on the live config; reviews run detached from the event so they never sit on the
- * agent's critical path.
+ * concurrency limit for every rule and built-in batch of this plugin instance. Its
+ * review stays detached, nonblocking, and never mutates agent context. A local
+ * `error` rule that fails may emit a bounded bridge command for the separate TUI
+ * target; only that target can begin the approval-gated remediation workflow. The
+ * host also receives a `config` hook that registers the bundled `jevguard-rules`
+ * skill directory on the live config.
  */
 export const JevGuardPlugin: Plugin = async (input) => {
   const presentationClient = createOpenCodePresentationClient(input.client);
@@ -45,6 +47,7 @@ export const JevGuardPlugin: Plugin = async (input) => {
       log: createOpenCodeLogSink(presentationClient),
       toast: createOpenCodeToastSink(presentationClient),
     }),
+    bridge: createOpenCodeReviewBridge(createOpenCodeCommandClient(input.client)),
     jev: createFifoJevPort(
       createTypeSafeJevTransport(
         createCredentialProvider({

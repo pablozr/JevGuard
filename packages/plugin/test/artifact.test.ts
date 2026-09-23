@@ -34,16 +34,19 @@ const EXPECTED_DIST_FILES = [
   "package.json",
   `${SKILL_PACKED_PREFIX}/SKILL.md`,
   `${SKILL_PACKED_PREFIX}/validate-rules.js`,
+  "tui/index.js",
 ];
 const EXPECTED_ARCHIVE_FILES = EXPECTED_DIST_FILES.map((file) => `package/${file}`).sort();
 const EXPECTED_PACKED_FILES = [
   "index.js",
+  "tui/index.js",
   "cli/main.js",
   "README.md",
   "LICENSE",
   `${SKILL_PACKED_PREFIX}/SKILL.md`,
   `${SKILL_PACKED_PREFIX}/validate-rules.js`,
 ];
+const EXPECTED_EXPORTS = { ".": "./index.js", "./tui": "./tui/index.js" };
 const EXPECTED_RUNTIME_DEPENDENCIES = {
   "@inquirer/password": "^5.2.2",
   "@napi-rs/keyring": "2.1.0",
@@ -67,10 +70,17 @@ const EXPECTED_ENGINES = { bun: ">=1.1.0", opencode: ">=1.18.31 <2" };
 const EXPECTED_PUBLISH_CONFIG = { access: "public", registry: "https://registry.npmjs.org" };
 
 const LOCAL_SHIM = 'export { JevGuardPlugin } from "@pablozrrrr/jevguard";\n';
+const LOCAL_TUI_SHIM = 'export { default } from "@pablozrrrr/jevguard/tui";\n';
 const SHIM_IMPORT_CHECK = [
   'import * as module from "./jevguard";',
   "const names = Object.keys(module).sort();",
   "console.log(JSON.stringify({ names, type: typeof module.JevGuardPlugin }));",
+  "",
+].join("\n");
+
+const TUI_SHIM_IMPORT_CHECK = [
+  'import plugin from "./jevguard-tui";',
+  "console.log(JSON.stringify({ id: plugin.id, type: typeof plugin.tui, server: plugin.server ?? null }));",
   "",
 ].join("\n");
 
@@ -211,6 +221,7 @@ function installLocalArtifact(): void {
   });
 
   writeFileSync(join(pluginsDir, "jevguard.ts"), LOCAL_SHIM);
+  writeFileSync(join(pluginsDir, "jevguard-tui.ts"), LOCAL_TUI_SHIM);
 }
 
 function npmCommand(args: readonly string[]): [string, readonly string[]] {
@@ -330,7 +341,7 @@ describe("local package artifact", () => {
     expect(manifest.description).toBe(source.description);
     expect(manifest.license).toBe("MIT");
     expect(manifest.main).toBe("./index.js");
-    expect(manifest.exports).toEqual({ ".": "./index.js" });
+    expect(manifest.exports).toEqual(EXPECTED_EXPORTS);
     expect(manifest.bin).toEqual({ jevguard: "cli/main.js" });
     expect(manifest.files).toEqual(EXPECTED_PACKED_FILES);
     expect(manifest.engines).toEqual(EXPECTED_ENGINES);
@@ -402,6 +413,25 @@ describe("local package artifact", () => {
 
     expect(result.names).toEqual(["JevGuardPlugin"]);
     expect(result.type).toBe("function");
+  });
+
+  test("loads the packaged TUI target from its default export", () => {
+    const checkPath = join(pluginsDir, "tui-import-check.ts");
+
+    writeFileSync(checkPath, TUI_SHIM_IMPORT_CHECK);
+
+    const output = execFileSync("bun", [checkPath], {
+      cwd: pluginsDir,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const result = JSON.parse(output) as {
+      readonly id: string;
+      readonly type: string;
+      readonly server: null;
+    };
+
+    expect(result).toEqual({ id: "jevguard", type: "function", server: null });
   });
 
   test("runs the installed CLI through the Bun bin mapping from .opencode", () => {

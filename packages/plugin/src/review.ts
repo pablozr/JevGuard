@@ -5,8 +5,9 @@ import {
   evaluateRules,
   type GateConfigResult,
   parseRules,
-  resolveGateConfig,
   type ReviewResult,
+  resolveGateConfig,
+  type RuleParseResults,
   type Turn,
   type UnavailableReason,
 } from "@jevguard/core";
@@ -15,6 +16,7 @@ import {
   type PolicyLoadResult,
   type PolicyLoader,
 } from "@jevguard/opencode-adapter";
+import { dispatchReviewBridge } from "./bridge";
 import { presentReview } from "./present";
 import { reviewLevelUnavailable } from "./review-result";
 import type { ReviewDependencies } from "./types";
@@ -22,6 +24,12 @@ import type { ReviewDependencies } from "./types";
 type ConfigValue =
   | { readonly status: "VALUE"; readonly value: unknown }
   | { readonly status: "INVALID" };
+
+/** Rule-lane results plus the parsed rule provenance the review result omits. */
+interface RuleLaneReview {
+  readonly results: readonly ReviewResult[];
+  readonly rules: RuleParseResults;
+}
 
 /**
  * Reviews one attributed turn: read the fixed policy paths once, then run the local
@@ -31,49 +39,60 @@ type ConfigValue =
  * sequential inside their lane, so a turn submits one request per rule plus one batch
  * request to the shared Jev port, whose concurrency wrapper caps in-flight calls. The
  * final results are rules in source order, then scope creep, then complexity,
- * regardless of completion timing.
+ * regardless of completion timing. After presentation, each local `error` rule that
+ * reached `FAIL` dispatches one detached review bridge command.
  */
 export async function reviewAttributedTurn(
   turn: Turn,
+  sessionID: string,
   dependencies: ReviewDependencies,
 ): Promise<void> {
   const loaded = await loadPolicy(dependencies.policy);
   const builtInInput = { turn, evidencePolicy: DEFAULT_EVIDENCE_POLICY };
 
-  const [ruleResults, builtIns] = await Promise.all([
+  const [ruleLane, builtIns] = await Promise.all([
     evaluateRuleLane(turn, loaded, dependencies),
     evaluateBuiltIns(builtInInput, { jev: dependencies.jev }),
   ]);
 
   const review = aggregateReview(turn.id, [
-    ...ruleResults,
+    ...ruleLane.results,
     builtIns.scopeCreep,
     builtIns.complexity,
   ]);
 
   await presentReview(dependencies.presenter, review);
+  await dispatchReviewBridge(
+    {
+      sessionID,
+      messageID: turn.id,
+      rules: ruleLane.rules,
+      results: review.results,
+    },
+    dependencies.bridge,
+  );
 }
 
 async function evaluateRuleLane(
   turn: Turn,
   loaded: PolicyLoadResult | null,
   dependencies: Pick<ReviewDependencies, "jev">,
-): Promise<readonly ReviewResult[]> {
+): Promise<RuleLaneReview> {
   if (loaded === null) {
-    return [reviewLevelUnavailable(turn.id, "INVALID_RULE")];
+    return ruleLaneUnavailable(turn.id, "INVALID_RULE");
   }
 
   if (loaded.status === "FAILED") {
     const reason: UnavailableReason =
       loaded.reason === "CONFIG_READ_FAILURE" ? "INVALID_CONFIG" : "INVALID_RULE";
 
-    return [reviewLevelUnavailable(turn.id, reason)];
+    return ruleLaneUnavailable(turn.id, reason);
   }
 
   const rules = loaded.source.rules;
 
   if (rules === null) {
-    return [reviewLevelUnavailable(turn.id, "INVALID_RULE")];
+    return ruleLaneUnavailable(turn.id, "INVALID_RULE");
   }
 
   const parsedRules = parseRules(rules);
@@ -89,7 +108,11 @@ async function evaluateRuleLane(
     { jev: dependencies.jev },
   );
 
-  return review.results;
+  return { results: review.results, rules: parsedRules };
+}
+
+function ruleLaneUnavailable(turnId: string, reason: UnavailableReason): RuleLaneReview {
+  return { results: [reviewLevelUnavailable(turnId, reason)], rules: [] };
 }
 
 /**

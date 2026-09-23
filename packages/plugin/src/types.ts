@@ -2,6 +2,7 @@ import type { JevEvaluationPort } from "@jevguard/core";
 import type {
   OpenCodeSessionFacade,
   PolicyLoader,
+  ReviewBridgePort,
   ReviewPresenter,
   TurnDeduplicator,
 } from "@jevguard/opencode-adapter";
@@ -33,6 +34,7 @@ export interface ReviewDependencies {
   readonly policy: PolicyLoader;
   readonly presenter: ReviewPresenter;
   readonly jev: JevEvaluationPort;
+  readonly bridge: ReviewBridgePort;
 }
 
 export interface PluginRuntimeDependencies extends ReviewDependencies {

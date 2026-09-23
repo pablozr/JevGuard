@@ -56,7 +56,10 @@ describe("plugin development manifest", () => {
   });
 
   test("keeps TypeScript entrypoints for workspace development", () => {
-    expect(readManifest().exports?.["."]).toBe("./src/index.ts");
+    const exports = readManifest().exports;
+
+    expect(exports?.["."]).toBe("./src/index.ts");
+    expect(exports?.["./tui"]).toBe("./src/tui/index.ts");
   });
 
   test("does not present the source tree as packaged output", () => {

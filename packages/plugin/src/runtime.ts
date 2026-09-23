@@ -8,9 +8,10 @@ import type { PluginEventInput, PluginRuntime, PluginRuntimeDependencies } from 
 /**
  * Builds the plugin runtime for one initialization. The event hook resolves
  * immediately after scheduling: attribution and the dedupe mark stay serialized in
- * one FIFO queue, while the attributed review runs detached so policy, Jev, and
- * presentation never sit on the agent's critical path. `drain` awaits all detached
- * work and is the test-only handle the host never receives.
+ * one FIFO queue, while the attributed review runs detached so policy, Jev,
+ * presentation, and review-bridge dispatch never sit on the agent's critical path.
+ * `drain` awaits all detached work and is the test-only handle the host never
+ * receives.
  */
 export function createPluginRuntime(dependencies: PluginRuntimeDependencies): PluginRuntime {
   let attributionTail: Promise<void> = Promise.resolve();
@@ -51,7 +52,7 @@ export function createPluginRuntime(dependencies: PluginRuntimeDependencies): Pl
           );
           return;
         case "ATTRIBUTED":
-          track(reviewAttributedTurn(attribution.turn, dependencies));
+          track(reviewAttributedTurn(attribution.turn, sessionID, dependencies));
           return;
       }
     } catch {

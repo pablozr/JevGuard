@@ -7,6 +7,8 @@ import {
   type JevEvaluationPort,
   type JevEvaluationResult,
   type JevRequest,
+  type ReviewBridgePayload,
+  REVIEW_BRIDGE_COMMAND_PREFIX,
   type ReviewLevelResult,
   type ReviewResult,
   type RuleReviewResult,
@@ -16,6 +18,7 @@ import {
   type UnavailableReason,
 } from "@jevguard/core";
 import {
+  type BridgeCommandDelivery,
   InMemoryTurnDeduplicator,
   type OpenCodeFileDiff,
   type OpenCodeMessageRecord,
@@ -23,6 +26,7 @@ import {
   type PolicyLoader,
   type PolicyLoadResult,
   type PresentationDelivery,
+  type ReviewBridgePort,
   type ReviewPresenter,
 } from "@jevguard/opencode-adapter";
 import type { Plugin } from "@opencode-ai/plugin";
@@ -281,6 +285,24 @@ class FakePresenter implements ReviewPresenter {
   }
 }
 
+class FakeBridge implements ReviewBridgePort {
+  readonly commands: string[] = [];
+  attempts = 0;
+  fail = false;
+
+  async execute(command: string): Promise<BridgeCommandDelivery> {
+    this.attempts += 1;
+
+    if (this.fail) {
+      throw new Error("bridge unavailable");
+    }
+
+    this.commands.push(command);
+
+    return "DELIVERED";
+  }
+}
+
 function requestCallLabel(request: JevRequest): string {
   return request.kind === "RULE" ? request.question.criteria.id : BUILT_IN_BATCH_LABEL;
 }
@@ -400,6 +422,7 @@ interface Harness {
   readonly policy: FakePolicyLoader;
   readonly presenter: FakePresenter;
   readonly jev: FakeJev;
+  readonly bridge: FakeBridge;
 }
 
 /**
@@ -411,6 +434,7 @@ function harness(): Harness {
   const policy = new FakePolicyLoader();
   const presenter = new FakePresenter();
   const jev = new FakeJev();
+  const bridge = new FakeBridge();
 
   const dependencies: PluginRuntimeDependencies = {
     facade,
@@ -418,9 +442,10 @@ function harness(): Harness {
     policy,
     presenter,
     jev: createFifoJevPort(jev, { maxConcurrency: MAX_CONCURRENT_JEV_CALLS }),
+    bridge,
   };
 
-  return { runtime: createPluginRuntime(dependencies), facade, policy, presenter, jev };
+  return { runtime: createPluginRuntime(dependencies), facade, policy, presenter, jev, bridge };
 }
 
 async function dispatch(runtime: PluginRuntime, event: unknown): Promise<void> {
@@ -1383,5 +1408,227 @@ describe("JevGuardPlugin observe-only containment", () => {
       outcome: "UNAVAILABLE",
     });
     expect(facade.forbidden).toEqual([]);
+  });
+});
+
+function decodeBridgeCommand(command: string): ReviewBridgePayload {
+  if (!command.startsWith(REVIEW_BRIDGE_COMMAND_PREFIX)) {
+    throw new Error(`unexpected bridge command prefix: ${command}`);
+  }
+
+  const encoded = command.slice(REVIEW_BRIDGE_COMMAND_PREFIX.length);
+
+  return JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")) as ReviewBridgePayload;
+}
+
+function oversizedRule(id: string): string {
+  return [
+    `## ${id}`,
+    "",
+    "severity: error",
+    "",
+    "### Rule",
+    "",
+    "d".repeat(1024),
+    "",
+    "### Violation",
+    "",
+    "v".repeat(1024),
+    "",
+    "### Allowed",
+    "",
+    "a".repeat(1024),
+  ].join("\n");
+}
+
+function errorFailSetup(harnessValues: Harness): void {
+  loadRules(harnessValues.policy, scopedRule("error"));
+  harnessValues.facade.diffs = [{ file: "src/a.ts", patch: PATCH }];
+  harnessValues.jev.probability = 0.8;
+  harnessValues.jev.probabilities.set(SCOPE_CREEP_ID, 0.1);
+  harnessValues.jev.probabilities.set(COMPLEXITY_ID, 0.1);
+}
+
+describe("JevGuardPlugin review bridge", () => {
+  test("dispatches exactly one command with the exact snapshot for a local error FAIL", async () => {
+    const values = harness();
+    errorFailSetup(values);
+
+    await dispatch(values.runtime, idleEvent());
+
+    expect(values.bridge.attempts).toBe(1);
+    expect(values.bridge.commands).toHaveLength(1);
+
+    const command = values.bridge.commands[0] ?? "";
+    const encoded = command.slice(REVIEW_BRIDGE_COMMAND_PREFIX.length);
+
+    expect(command.startsWith(REVIEW_BRIDGE_COMMAND_PREFIX)).toBe(true);
+    expect(encoded).toMatch(/^[A-Za-z0-9_-]+$/);
+    expect(decodeBridgeCommand(command)).toEqual({
+      version: 1,
+      evaluationId: `${ASSISTANT_ID}:TEST-1`,
+      sessionID: SESSION_ID,
+      messageID: ASSISTANT_ID,
+      rule: {
+        id: "TEST-1",
+        description: "Module description.",
+        violation: "The change violates the rule.",
+        allowed: ALLOWED_EXCEPTION,
+      },
+      probability: 0.8,
+    });
+  });
+
+  test.each([
+    { probability: 0.1, outcome: "PASS" },
+    { probability: 0.5, outcome: "WARN" },
+  ] as const)("emits no command for a local error $outcome", async ({ probability, outcome }) => {
+    const values = harness();
+    loadRules(values.policy, scopedRule("error"));
+    values.facade.diffs = [{ file: "src/a.ts", patch: PATCH }];
+    values.jev.probability = probability;
+    values.jev.probabilities.set(SCOPE_CREEP_ID, 0.1);
+    values.jev.probabilities.set(COMPLEXITY_ID, 0.1);
+
+    await dispatch(values.runtime, idleEvent());
+
+    expect(lastReview(values.presenter).summary.verdict).toBe(outcome);
+    expect(values.bridge.attempts).toBe(0);
+    expect(values.bridge.commands).toEqual([]);
+  });
+
+  test("emits no command for a warning rule, which never fails", async () => {
+    const values = harness();
+    loadRules(values.policy, scopedRule("warning"));
+    values.facade.diffs = [{ file: "src/a.ts", patch: PATCH }];
+    values.jev.probability = 1;
+    values.jev.probabilities.set(SCOPE_CREEP_ID, 0.1);
+    values.jev.probabilities.set(COMPLEXITY_ID, 0.1);
+
+    await dispatch(values.runtime, idleEvent());
+
+    expect(lastResults(values.presenter)[0]).toMatchObject({ outcome: "WARN" });
+    expect(values.bridge.attempts).toBe(0);
+  });
+
+  test("never bridges a built-in scope-creep FAIL", async () => {
+    const values = harness();
+    loadRules(values.policy, scopedRule("error"));
+    values.facade.diffs = [{ file: "src/a.ts", patch: PATCH }];
+    values.jev.probability = 0.1;
+    values.jev.probabilities.set(SCOPE_CREEP_ID, 0.95);
+    values.jev.probabilities.set(COMPLEXITY_ID, 0.1);
+
+    await dispatch(values.runtime, idleEvent());
+
+    expect(lastResults(values.presenter)[1]).toMatchObject({
+      kind: "BUILT_IN",
+      checkId: SCOPE_CREEP_ID,
+      outcome: "FAIL",
+    });
+    expect(values.bridge.commands).toEqual([]);
+  });
+
+  test("bridges only the local rule when the built-in also fails", async () => {
+    const values = harness();
+    errorFailSetup(values);
+    values.jev.probabilities.set(SCOPE_CREEP_ID, 0.95);
+
+    await dispatch(values.runtime, idleEvent());
+
+    expect(values.bridge.commands).toHaveLength(1);
+    expect(decodeBridgeCommand(values.bridge.commands[0] ?? "").rule.id).toBe("TEST-1");
+  });
+
+  test("emits no command when the rule is unavailable", async () => {
+    const values = harness();
+    loadRules(values.policy, scopedRule("error"));
+    values.jev.fail = true;
+
+    await dispatch(values.runtime, idleEvent());
+
+    expect(lastResults(values.presenter)[0]).toMatchObject({ outcome: "UNAVAILABLE" });
+    expect(values.bridge.attempts).toBe(0);
+  });
+
+  test("emits no command when the turn is skipped", async () => {
+    const values = harness();
+    loadRules(values.policy, scopedRule("error"));
+    values.facade.diffs = [];
+
+    await dispatch(values.runtime, idleEvent());
+
+    expect(lastResults(values.presenter)[0]).toMatchObject({ outcome: "SKIPPED" });
+    expect(values.bridge.attempts).toBe(0);
+  });
+
+  test("emits no command for a malformed policy", async () => {
+    const values = harness();
+    loadRules(values.policy, "not a rule document");
+
+    await dispatch(values.runtime, idleEvent());
+
+    expect(lastResults(values.presenter)[0]).toMatchObject({ outcome: "UNAVAILABLE" });
+    expect(values.bridge.attempts).toBe(0);
+  });
+
+  test("rejects an oversized snapshot without dispatching and never truncates", async () => {
+    const values = harness();
+    const sessionID = "s".repeat(256);
+    const messageID = "m".repeat(256);
+    loadRules(values.policy, oversizedRule("R".repeat(128)));
+    values.facade.records = turnRecords(messageID, USER_ID);
+    values.facade.diffs = [{ file: "src/a.ts", patch: PATCH }];
+    values.jev.probability = 0.8;
+    values.jev.probabilities.set(SCOPE_CREEP_ID, 0.1);
+    values.jev.probabilities.set(COMPLEXITY_ID, 0.1);
+
+    await dispatch(values.runtime, idleEvent(sessionID));
+
+    expect(lastResults(values.presenter)[0]).toMatchObject({ outcome: "FAIL" });
+    expect(values.bridge.attempts).toBe(0);
+    expect(values.bridge.commands).toEqual([]);
+  });
+
+  test("bridges each failing local error rule with its own snapshot", async () => {
+    const values = harness();
+    loadRules(
+      values.policy,
+      [ruleText("SRC-1", "error", "src/**"), ruleText("SRC-2", "error", "src/**")].join("\n\n"),
+    );
+    values.facade.diffs = [{ file: "src/a.ts", patch: PATCH }];
+    values.jev.probability = 0.8;
+    values.jev.probabilities.set(SCOPE_CREEP_ID, 0.1);
+    values.jev.probabilities.set(COMPLEXITY_ID, 0.1);
+
+    await dispatch(values.runtime, idleEvent());
+
+    expect(values.bridge.commands).toHaveLength(2);
+    expect(values.bridge.commands.map((command) => decodeBridgeCommand(command).rule.id)).toEqual([
+      "SRC-1",
+      "SRC-2",
+    ]);
+    expect(
+      values.bridge.commands.map((command) => decodeBridgeCommand(command).rule.allowed),
+    ).toEqual(["", ""]);
+  });
+
+  test("contains a bridge failure without affecting the review, presentation, or later turns", async () => {
+    const values = harness();
+    errorFailSetup(values);
+    values.bridge.fail = true;
+
+    await expect(dispatch(values.runtime, idleEvent())).resolves.toBeUndefined();
+
+    expect(values.presenter.reviews).toHaveLength(1);
+    expect(lastReview(values.presenter).summary.verdict).toBe("FAIL");
+    expect(values.bridge.attempts).toBe(1);
+
+    values.facade.records = turnRecords(SECOND_ASSISTANT_ID, SECOND_USER_ID);
+
+    await expect(dispatch(values.runtime, idleEvent())).resolves.toBeUndefined();
+
+    expect(values.presenter.reviews).toHaveLength(2);
+    expect(values.bridge.attempts).toBe(2);
   });
 });
