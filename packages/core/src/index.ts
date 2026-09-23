@@ -101,3 +101,19 @@ export type { GateConfigResult, GateEvaluation, GateUnavailable } from "./gate/t
 export { DEFAULT_GATE_CONFIG } from "./gate/defaults";
 export { resolveGateConfig } from "./gate/config";
 export { evaluateGate } from "./gate/evaluate-gate";
+export type {
+  BridgeRuleSnapshot,
+  ReviewBridgeEncodeResult,
+  ReviewBridgeInput,
+  ReviewBridgePayload,
+  ReviewBridgeRejectionReason,
+} from "./bridge/types";
+export {
+  REVIEW_BRIDGE_COMMAND_PREFIX,
+  REVIEW_BRIDGE_MAX_JSON_BYTES,
+  REVIEW_BRIDGE_PAYLOAD_KEYS,
+  REVIEW_BRIDGE_RULE_KEYS,
+  REVIEW_BRIDGE_STRING_LIMITS,
+  REVIEW_BRIDGE_VERSION,
+} from "./bridge/types";
+export { encodeReviewBridge } from "./bridge/encode";
