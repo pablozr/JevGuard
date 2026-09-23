@@ -6,12 +6,38 @@ export function findCompletedAssistant(
   for (let index = records.length - 1; index >= 0; index -= 1) {
     const record = records[index];
 
-    if (record !== undefined && isCompletedAssistant(record.info)) {
+    if (record !== undefined && isCompletedAssistantMessage(record.info)) {
       return record.info;
     }
   }
 
   return null;
+}
+
+/**
+ * Whether one message info is a finished assistant turn: assistant role, a parent
+ * user message, no error, not a summary, and a finite completion time. Callers that
+ * locate a specific assistant message by ID share this invariant with idle
+ * attribution so an incomplete turn is never treated as evidence.
+ */
+export function isCompletedAssistantMessage(info: OpenCodeMessageInfo): boolean {
+  if (info.role !== "assistant") {
+    return false;
+  }
+
+  if (typeof info.parentID !== "string" || info.parentID === "") {
+    return false;
+  }
+
+  if (info.error !== undefined && info.error !== null) {
+    return false;
+  }
+
+  if (info.summary === true) {
+    return false;
+  }
+
+  return Number.isFinite(info.time?.completed);
 }
 
 /**
@@ -35,24 +61,4 @@ export function findDirectParentRecord(
   }
 
   return record;
-}
-
-function isCompletedAssistant(info: OpenCodeMessageInfo): boolean {
-  if (info.role !== "assistant") {
-    return false;
-  }
-
-  if (typeof info.parentID !== "string" || info.parentID === "") {
-    return false;
-  }
-
-  if (info.error !== undefined && info.error !== null) {
-    return false;
-  }
-
-  if (info.summary === true) {
-    return false;
-  }
-
-  return Number.isFinite(info.time?.completed);
 }

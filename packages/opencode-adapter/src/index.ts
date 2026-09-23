@@ -5,6 +5,7 @@ export {
   findCompletedAssistant,
   findDirectParentRecord,
   InMemoryTurnDeduplicator,
+  isCompletedAssistantMessage,
   normalizeFileDiff,
 } from "./attribution";
 export type {
@@ -109,3 +110,11 @@ export type {
   ToastSink,
   ToastVariant,
 } from "./presentation";
+export { createOpenCodeCommandClient, createOpenCodeReviewBridge } from "./remediation";
+export type {
+  BridgeCommandDelivery,
+  OpenCodeCommandClient,
+  OpenCodeExecuteCommandInput,
+  OpenCodeExecuteCommandResult,
+  ReviewBridgePort,
+} from "./remediation";
