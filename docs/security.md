@@ -1,7 +1,8 @@
 # Security Model
 
-JevGuard sends code-change evidence to Jev. Evidence safety is therefore a product
-boundary, not a best-effort feature.
+JevGuard sends code-change evidence to Jev, and — only in the opt-in remediation
+path, and only after explicit user approval — to the current OpenCode session model.
+Evidence safety is therefore a product boundary, not a best-effort feature.
 
 ## What is sent
 
@@ -18,6 +19,29 @@ file with a nonempty patch, and those paths. It sends no rule-scoped subset. The
 is a single request with two independent answers; the same complete evidence feeds both.
 
 It does not send repository-wide diffs as a fallback.
+
+## What the remediation path sends to the coding model
+
+User-approved remediation is separate from Jev evaluation. Its internal bridge
+command (`jevguard.review.v1:<base64url JSON>`) carries only a bounded rule snapshot,
+the evaluation identity, and the raw probability. It never carries the task or diff,
+and it is not logged.
+
+The task and attributed patch are recovered locally from the session API under the
+same evidence policy as the review: the named assistant message must be a completed
+turn, the task comes from its direct parent user message, and the patch is fetched
+for that parent user message. The extension allowlist, sensitive-path denylist, and
+`100000`-character cap apply, and partial evidence is refused. There is no
+repository or global diff fallback.
+
+Only after safe, complete attributed evidence is recovered does the TUI send the
+task, rule, and diff to the current OpenCode session model — first for a proposal
+with every advertised tool disabled, producing a strategy only (no patch), and then,
+only after explicit user approval, for a distinct apply prompt. Both prompts instruct
+the model to treat that content as data and to require a separate explicit user
+confirmation before changing tests, configuration, or dependencies. No secret crosses
+the bridge, and no payload, diff, or secret is logged; failures surface only as safe
+status messages.
 
 ## Evidence must be complete
 
@@ -140,7 +164,9 @@ If neither source provides a key, the plugin stays loaded and the evaluation is
 
 `UNAVAILABLE` is intentional when JevGuard cannot obtain complete safe evidence,
 validate policy, access Jev, or retrieve the attributed diff. It is not a policy
-pass, a warning, or a failure, and the observe-only plugin does not block work.
+pass, a warning, or a failure, and the review does not block work. Remediation is a
+separate, opt-in action that runs only after explicit user approval and is bounded as
+described above.
 
 A policy-load or config failure does not suppress the built-in batch: when the turn is
 attributed, both built-ins still evaluate the complete safe patch with their fixed

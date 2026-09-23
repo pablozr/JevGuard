@@ -99,6 +99,10 @@ in `plugin` or `core`.
     `reviewAttributedTurn` presents exactly one aggregate to the structured log and
     the TUI toast. Results are the rules in source order, then `SCOPE-CREEP`, then
     `COMPLEXITY`, regardless of completion timing.
+11. After presentation, `dispatchReviewBridge` emits at most one detached bridge
+    command per local `error` rule that reached `FAIL`. Built-ins, `warning` rules,
+    and every other outcome emit nothing, and a delivery failure never affects the
+    review or later turns.
 
 ```mermaid
 flowchart TD
@@ -124,7 +128,30 @@ flowchart TD
     S --> K
     X --> K
     K --> L["One structured log + TUI toast, rules then SCOPE-CREEP then COMPLEXITY"]
+    L --> M{"Any local error-severity rule FAIL?"}
+    M -->|no| Z["No bridge command emitted"]
+    M -->|yes, one per rule| P["Bridge command to TUI (opt-in, approval-gated)"]
 ```
+
+### User-approved remediation (separate TUI target)
+
+Remediation is not part of the review lane. It is a separate, opt-in OpenCode TUI
+entrypoint (`@pablozrrrr/jevguard/tui`, source in `packages/plugin/src/tui/`) that is
+loaded only when the user registers it. It consumes the internal bridge command,
+re-validates it, and recovers the task and attributed patch from the session API with
+the same attribution and evidence policy as the review — there is no repository or
+global diff fallback. Any missing, incomplete, oversized, or blocked evidence
+surfaces a safe status and stops; no proposal is sent.
+
+Only after safe, complete evidence is recovered does it prompt the current session
+model for a proposal with **every advertised tool disabled** (`disabledToolMap`), so
+the interaction returns a strategy and cannot modify files. A confirmation dialog
+(`DialogConfirm`) shows the rule ID and strategy; a cancel or a dialog close performs
+no work. Approval starts a second, distinct prompt that applies the approved strategy
+with normal editing tools. The workflow makes at most one proposal and one apply per
+evaluation identity (`messageID:ruleId`), ignores duplicates, and never triggers a
+retry or a re-evaluation. The apply is an ordinary completed turn, so the review lane
+verifies it through the normal server idle evaluation — there is no separate verifier.
 
 ### Key files by bug category
 
@@ -167,6 +194,14 @@ flowchart TD
   - `packages/opencode-adapter/src/presentation/opencode.ts` — SDK log/toast sinks.
   - `.../presentation/display.ts`, `.../presentation/log.ts`, `.../presentation/toast.ts`
     — outcome precedence and safe aggregate messages.
+- Remediation
+  - `packages/core/src/bridge/` — bridge payload types, bounds, and encoding.
+  - `packages/opencode-adapter/src/remediation/opencode.ts` — bridge transport over the
+    TUI command channel.
+  - `packages/plugin/src/bridge.ts` — one detached bridge command per local `error`
+    `FAIL`.
+  - `packages/plugin/src/tui/` — separate TUI entrypoint: decode, evidence recovery,
+    proposal, confirm, and apply.
 - Composition and artifact
   - `packages/plugin/src/plugin.ts` — composition root.
   - `packages/plugin/src/review.ts` — policy load + evaluate + present.
@@ -181,7 +216,11 @@ flowchart TD
 - One applicable rule maps to exactly one Jev Noul. `Allowed` stays inside that
   Noul's criteria; never add a second decision.
 - No patch or no scope match is `SKIPPED` without calling Jev.
-- V0.1 is observe-only: do not inject agent context, block a turn, or remediate.
+- Keep the review background and observe-only: never inject agent context, block a
+  turn, or edit code from the review. User-approved remediation is a separate,
+  approval-gated workflow (`SPEC.md` §8) that acts only on a local `error`-severity
+  `FAIL`, only after explicit confirmation; never widen it to unattended retries,
+  re-evaluation, built-ins, or `warning` rules.
 - Never expose the API key in config, arguments, logs, errors, toasts, fixtures, or
   agent context. Accept the key only through the OS credential store or the
   CI/automation environment override.
@@ -230,8 +269,9 @@ orchestration in `core`.
 - Add or update tests for behavior changes and regressions.
 - Do not use a global git diff as fallback evidence.
 - Do not change `UNAVAILABLE` into a semantic verdict.
-- Do not add auto-remediation, blocking behavior, or agent-context injection to
-  the observe-only slice.
+- Keep the review observe-only. Do not add unattended or automatic remediation,
+  blocking behavior, or agent-context injection to the review. The approval-gated
+  remediation workflow must stay explicit, bounded, and separate.
 - Do not expose API keys, environment files, secrets, or rejected evidence in
   tests, fixtures, logs, or documentation.
 - Do not accept the TypeSafe API key as a CLI argument or repository setting. Local

@@ -27,10 +27,12 @@ specific policy, and leaves planning, code generation, and correction with the
 coding agent.
 
 > [!WARNING]
-> JevGuard is in active development. The current release targets OpenCode `1.18.31`,
-> evaluates every rule block declared in `.jev/rules.md` plus the `SCOPE-CREEP` and
-> `COMPLEXITY` built-ins, and runs in observe mode only: it reports results but never
-> alters the agent context or blocks a task.
+> JevGuard is in active development. The current release targets OpenCode `1.18.31`
+> and evaluates every rule block declared in `.jev/rules.md` plus the `SCOPE-CREEP`
+> and `COMPLEXITY` built-ins. Reviews are background and observe-only: they report
+> results but never alter the agent context or block a task. A separate, opt-in
+> remediation workflow can act on a local `error`-severity `FAIL` only after you
+> explicitly approve it.
 
 ## Why JevGuard
 
@@ -140,6 +142,43 @@ Reviews run in the background. The idle event returns as soon as the serialized
 attribution step is scheduled; policy reads, Jev calls, and presentation never sit on
 the agent's critical path.
 
+## User-approved remediation
+
+Reviews are observe-only by default: a review never injects feedback into the agent
+context, adds a session message, blocks a turn, or changes your code. A separate,
+opt-in path can act on one review result — a local `error`-severity repository rule
+that reached `FAIL`.
+
+- After presentation, the server plugin emits at most one internal bridge command per
+  affected `error` rule. Built-ins (`SCOPE-CREEP`, `COMPLEXITY`), `warning` rules, and
+  every other outcome emit nothing. JevGuard never autocorrects a built-in or a
+  warning.
+- The bridge command (`jevguard.review.v1:<base64url JSON>`) is bounded and carries
+  only the rule snapshot, the evaluation identity (`messageID:ruleId`), the session
+  and message IDs, and the raw probability. It never carries the task or diff, and
+  nothing is logged.
+- A separately loaded TUI entrypoint (`@pablozrrrr/jevguard/tui`) consumes the
+  command, re-validates it, and recovers the task and attributed patch from the
+  session API with the same attribution and evidence policy as the review. There is no
+  repository or global diff fallback: missing, incomplete, oversized, or blocked
+  evidence stops the flow with a safe status and no proposal.
+- Only then does it ask the current session model for a proposal. That interaction
+  disables every advertised tool and asks for a strategy only — no file changes and no
+  patch.
+- A confirmation dialog shows the rule ID and the strategy. Nothing is applied unless
+  you confirm; a cancel or a dialog close performs no work. Approval starts a second,
+  distinct interaction that applies the approved strategy and leaves normal editing
+  tools available.
+- The workflow allows at most one proposal and one apply per evaluation identity;
+  duplicate commands are ignored, and it never retries or re-evaluates on its own.
+- The apply produces an ordinary completed assistant turn, so the server plugin
+  verifies the result by reviewing that turn normally on the next idle — exactly like
+  any other turn.
+
+Both interactions instruct the model to treat the rule, task, and diff as data, and to
+require a separate explicit confirmation before changing tests, configuration, or
+dependencies. No secret crosses the bridge, and no payload, diff, or secret is logged.
+
 ## Install
 
 Once `@pablozrrrr/jevguard` is published to npm, the intended install is one line in
@@ -205,6 +244,17 @@ OpenCode loads `.opencode/plugins/` with its bundled Bun runtime. The shim runs 
 a local plugin module and resolves `@pablozrrrr/jevguard` from
 `.opencode/node_modules`. Do **not** add `@pablozrrrr/jevguard` to the `opencode.json`
 `plugin` list before publication; that bare entry does not resolve locally.
+
+Remediation needs a second local TUI entry. Add its shim beside the server shim:
+
+```ts
+// .opencode/plugins/jevguard-tui.ts
+export { default } from "@pablozrrrr/jevguard/tui";
+```
+
+The server plugin reviews and reports turns whether or not the TUI entry is loaded.
+Without it, a local `error` `FAIL` still emits its bridge command, but nothing consumes
+it, so no proposal appears.
 
 ### Author rules with the bundled skill
 
@@ -288,7 +338,7 @@ safely or completely evaluate that rule.
 
 ## Implemented behavior
 
-The current release implements the full local, observe-only path:
+The current release implements the full local review path:
 
 - OpenCode V1 plugin loads.
 - A completed assistant response is detected.
@@ -330,9 +380,14 @@ The current release implements the full local, observe-only path:
   carries every entry's outcome, raw probability, or reason, including the built-in
   results and the synthetic review-level entry when there is one. The fixed result
   order is rules in source order, then `SCOPE-CREEP`, then `COMPLEXITY`.
+- After presentation, at most one detached bridge command is emitted per local
+  `error`-severity rule that reached `FAIL`. Built-ins, `warning` rules, and every
+  other outcome emit nothing, and a transport failure never affects the review,
+  presentation, or later turns.
 
-No feedback is injected into the agent session. No remediation is attempted. No
-task is blocked.
+The review itself injects no feedback into the agent session and blocks no task. A
+local `error` `FAIL` also emits the opt-in bridge command above; nothing is applied
+without explicit user approval.
 
 ## Roadmap
 
@@ -357,6 +412,9 @@ V0.9  Local feedback and calibration
 V1    Claude Code and Codex adapters
 ```
 
+The approval-gated remediation described above is the human-gated variant recorded in
+`SPEC.md` §8. The `V0.6` entry remains the future, unattended corrective loop.
+
 CI and pull-request policy review come after V1, using the same versioned rules.
 
 ## Architecture
@@ -376,9 +434,10 @@ plugin → opencode-adapter → core
 
 ## Status
 
-The multi-rule, multi-built-in, observe-only review is implemented. It loads in
-OpenCode, attributes one completed turn, parses every rule block in `.jev/rules.md`,
-asks Jev once per applicable rule and once per built-in batch, runs the `SCOPE-CREEP`
+The multi-rule, multi-built-in, background and observe-only review is implemented. It
+loads in OpenCode, attributes one completed turn, parses every rule block in
+`.jev/rules.md`, asks Jev once per applicable rule and once per built-in batch, runs
+the `SCOPE-CREEP`
 and `COMPLEXITY` built-ins over the complete attributed patch behind one shared
 concurrency limit, applies the local gate to each, and presents one aggregate result
 as a transient TUI toast and a structured log entry.
@@ -386,9 +445,12 @@ as a transient TUI toast and a structured log entry.
 The local, private tarball (`pnpm artifact:build`, `pnpm artifact:pack`) packages
 that slice so a clean consumer can install it without workspace links.
 
-OpenCode sees only transient toasts and structured logs. JevGuard does not inject
-anything into the agent context, does not add session messages, and does not block
-a task. Real-host validation against exact OpenCode `1.18.31` is still pending.
+OpenCode sees only transient toasts, structured logs, and — for a local `error`
+`FAIL` — the internal bridge command a separately loaded TUI entrypoint can consume.
+The review does not inject anything into the agent context, add session messages, or
+block a task. Remediation is a separate, approval-gated workflow and never runs
+without your explicit confirmation. Real-host validation against exact OpenCode
+`1.18.31` is still pending.
 
 ## Development
 

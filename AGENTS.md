@@ -29,11 +29,13 @@ testkit ───────────────────┘
 ```
 
 - `core` owns domain types, rules/config validation, scope filtering, evidence
-  policy, Jev ports, use cases, and gates. Do not import OpenCode, Bun, Node
-  filesystem/environment APIs, HTTP clients, or TUI APIs here.
+  policy, Jev ports, use cases, gates, and the review-bridge encoding. Do not import
+  OpenCode, Bun, Node filesystem/environment APIs, HTTP clients, or TUI APIs here.
 - `opencode-adapter` owns OpenCode event handling, task/diff attribution, concrete
-  infrastructure implementations, structured logging, and TUI toasts.
-- `plugin` is composition and the public OpenCode plugin entrypoint only.
+  infrastructure implementations, structured logging, TUI toasts, and the
+  review-bridge transport.
+- `plugin` is composition plus the two public OpenCode plugin entrypoints: the server
+  plugin and the separate remediation TUI.
 - `testkit` provides fixtures and fakes; never make production packages depend on it.
 
 The credential CLI and OS credential-store integration are adapter/infrastructure
@@ -52,8 +54,12 @@ the current repository diff when host attribution fails.
 - Do not emit semantic results from partial evidence. Oversized, missing, blocked,
   invalid, or otherwise incomplete evidence is `UNAVAILABLE`.
 - No patch or no scope match is `SKIPPED` without calling Jev.
-- V0.1 is observe-only: do not alter agent context, block a turn, or implement
-  remediation.
+- The default review is background and observe-only: it never alters agent context,
+  blocks a turn, or edits code. A separate, explicitly user-approved remediation
+  workflow (see `SPEC.md` §8) acts only on a local `error`-severity repository rule
+  that reached `FAIL`; built-ins and `warning` rules are never remediated. Do not
+  broaden it: no unattended retry or re-evaluation, and no repository or global diff
+  fallback.
 - For local use, API credentials come from `jevguard login` and the OS credential
   store. `TYPESAFE_API_KEY` is a CI/automation-only process override. Never expose
   a key in repository configuration, arguments, logs, errors, toasts, fixtures, or
@@ -82,6 +88,8 @@ the current repository diff when host attribution fails.
 - Unit-test core parsing, invalid rules, scope behavior, evidence safety, gates,
   and orchestration with fakes.
 - Contract-test OpenCode attribution and presentation behavior in the adapter.
+- Unit-test review-bridge encoding bounds in `core`; contract-test the
+  approval-gated TUI remediation workflow in `plugin` with fakes.
 - Test threshold boundaries exactly.
 - Add regression coverage for every corrected defect.
 

@@ -268,6 +268,49 @@ generic count summary does not mean every rule was evaluated: an `UNAVAILABLE`
 result is a missing judgment, and it does not erase a known `FAIL` elsewhere in the
 turn.
 
-OpenCode sees only these transient toasts and logs. JevGuard does not inject
-messages into the agent context, does not modify the session, and does not block a
-turn.
+By default, OpenCode sees only these transient toasts and logs. The review itself
+does not inject messages into the agent context, does not modify the session, and
+does not block a turn. A separate, opt-in workflow can act on a local `FAIL` only
+after the user explicitly approves it, as described below.
+
+## User-approved remediation
+
+The review remains observe-only unless the user approves a remediation. After a
+review, the server plugin emits at most one internal bridge command per local
+`error`-severity repository rule that reached `FAIL`. Built-ins (`SCOPE-CREEP`,
+`COMPLEXITY`), `warning` rules, and every other outcome emit nothing.
+
+The command is `jevguard.review.v1:<base64url JSON>` and travels over the host TUI
+command channel. Its payload is a bounded snapshot of the exact rule that produced
+the judgment, the deterministic evaluation identity (`messageID:ruleId`), the
+session and message IDs, and the raw probability. The serialized payload is capped
+at `4096` UTF-8 bytes with per-field caps; an invalid or oversized snapshot is
+rejected, never truncated. The diff and task are not carried in the command.
+
+A separate TUI entrypoint (`@pablozrrrr/jevguard/tui`) consumes that command,
+re-validates it, and recovers the task and attributed patch from the session API
+using the same attribution as the review: the named assistant message must be a
+completed turn, the task comes from its direct parent user message, and the patch is
+fetched for that parent user message. There is no repository or global diff
+fallback. Missing, incomplete, oversized, or blocked evidence stops the flow with a
+safe status message; no proposal is sent.
+
+Only after safe, complete attributed evidence is recovered are the task, rule
+snapshot, and diff sent to the current OpenCode session model. The proposal
+interaction disables every advertised tool and asks for a concise, ordered strategy
+only; it must not modify files and must not produce code or a patch. The proposal is
+a strategy, not a byte patch. A confirmation dialog then shows the rule ID and the
+strategy, and nothing is applied unless the user confirms; a cancel or a dialog
+close performs no work.
+
+After explicit approval, a second, distinct prompt sends the approved strategy and
+the same rule/task/diff context to the session model. Normal editing tools remain
+available for this apply interaction. Both instructions require a separate explicit
+user confirmation before changing tests, configuration, or dependencies; only the
+code covered by the approved strategy is in scope without it.
+
+The workflow allows at most one proposal and one apply per evaluation identity;
+duplicate commands are ignored. The TUI never triggers a retry or a re-evaluation.
+The apply interaction produces an ordinary completed assistant turn, so the server
+plugin reviews that turn normally on the next idle, exactly like any other turn.
+The bridge carries no secret, and no payload, diff, or secret is logged.
