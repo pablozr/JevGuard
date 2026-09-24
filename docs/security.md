@@ -153,9 +153,8 @@ bun install --global @pablozrrrr/jevguard
 jevguard login
 ```
 
-Adding the plugin to `opencode.json` does not put `jevguard` on `PATH`.
-`@pablozrrrr/jevguard` is not published yet; until then, install the packed local
-tarball globally and run `jevguard login`.
+Adding the plugin to `opencode.json` does not put `jevguard` on `PATH`. Install the
+package globally — or run it through `bunx` — to run `jevguard login`.
 
 The CLI reads the key using a masked terminal prompt and stores it in the native
 operating-system credential store:

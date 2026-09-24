@@ -24,7 +24,7 @@ const BUILD_SENTINEL_VARIABLE = "JEVGUARD_ARTIFACT_BUILD_SENTINEL";
 const BUILD_SENTINEL_VALUE = "JEVGUARD_ARTIFACT_BUILD_SENTINEL_7f3c9d2a";
 
 const PLUGIN_PACKAGE_NAME = "@pablozrrrr/jevguard";
-const PLUGIN_VERSION = "0.1.0";
+const PLUGIN_VERSION = "0.2.0";
 const RULES_SKILL_PREFIX = "skills/jevguard-rules";
 const INIT_SKILL_PREFIX = "skills/jev-init";
 const EXPECTED_DIST_FILES = [
@@ -498,9 +498,9 @@ describe("local package artifact", () => {
     const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
 
     // The dry-run always packs and reports the tarball. When the version is
-    // unpublished it exits 0; once `0.1.0` exists on the registry npm refuses the
-    // publish-over-existing-version step, which still proves the artifact is valid
-    // and that nothing was published.
+    // unpublished it exits 0; once that version exists on the registry npm refuses
+    // the publish-over-existing-version step, which still proves the artifact is
+    // valid and that nothing was published.
     expect(output).toContain(`${PLUGIN_PACKAGE_NAME}@${PLUGIN_VERSION}`);
     expect(output).not.toContain("auto-corrected");
     expect(output).not.toContain("npm warn publish");

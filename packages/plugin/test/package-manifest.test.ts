@@ -39,7 +39,7 @@ describe("plugin development manifest", () => {
     const manifest = readManifest();
 
     expect(manifest.name).toBe("@pablozrrrr/jevguard");
-    expect(manifest.version).toBe("0.1.0");
+    expect(manifest.version).toBe("0.2.0");
     expect(manifest.license).toBe("MIT");
     expect(manifest.description).toBeDefined();
     expect(manifest.repository?.url).toBe("git+https://github.com/pablozr/JevGuard.git");

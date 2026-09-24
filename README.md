@@ -187,22 +187,21 @@ or secret is logged.
 
 ## Install
 
-Once `@pablozrrrr/jevguard` is published to npm, the intended install is one line in
+Once `@pablozrrrr/jevguard` is installed, the intended setup is one line in
 `opencode.json`:
 
 ```json
 { "plugin": ["@pablozrrrr/jevguard"] }
 ```
 
-OpenCode then resolves the package from the npm registry or its cache and loads it
-on the next start. Adding the entry only loads the plugin; it does **not** put the
-`jevguard` CLI on `PATH` (see [Install the CLI](#install-the-cli)). Restart
-OpenCode after changing the plugin list.
+OpenCode resolves the package from the npm registry or its cache and loads it on the
+next start. Adding the entry only loads the plugin; it does **not** put the
+`jevguard` CLI on `PATH` (see [Install the CLI](#install-the-cli)). Restart OpenCode
+after changing the plugin list.
 
 > [!IMPORTANT]
-> `@pablozrrrr/jevguard` is **not published to npm yet**. The one-line entry above is
-> future behavior and will not resolve until the package is released. Before
-> publication, load the plugin as a local artifact plugin instead.
+> A bare plugin entry resolves only from the npm registry. To run an unreleased
+> local build, load the packed tarball as a local artifact plugin instead.
 
 ### Build the local artifact
 
@@ -229,12 +228,19 @@ The packed manifest depends only on public runtime packages
 the tarball therefore needs npm registry access for those packages; the artifact
 does not vendor them and does not promise an offline install.
 
-### Load the local plugin before publication
+### Load the plugin
 
 OpenCode `1.18.32` resolves a **bare** `opencode.json` `plugin` entry from the npm
-registry or its cache, not from the consumer's `node_modules`. Until the package is
-published, install the tarball into the project's `.opencode` directory and load it
-through a local plugin shim:
+registry or its cache:
+
+```json
+{
+  "plugin": ["@pablozrrrr/jevguard"]
+}
+```
+
+To run an unreleased local build instead, install the packed tarball into the
+project's `.opencode` directory and load it through a local plugin shim:
 
 ```sh
 cd /path/to/consumer/.opencode
@@ -248,8 +254,8 @@ export { JevGuardPlugin } from "@pablozrrrr/jevguard";
 
 OpenCode loads `.opencode/plugins/` with its bundled Bun runtime. The shim runs as
 a local plugin module and resolves `@pablozrrrr/jevguard` from
-`.opencode/node_modules`. Do **not** add `@pablozrrrr/jevguard` to the `opencode.json`
-`plugin` list before publication; that bare entry does not resolve locally.
+`.opencode/node_modules`. Use either the bare `plugin` entry or the local shim, not
+both.
 
 Remediation is built into the same server plugin: the `config` hook registers the
 hidden `jevguard-proposer` subagent, so no second entrypoint or shim is needed. The
@@ -280,8 +286,8 @@ Jev.
 
 ### Install the CLI
 
-Loading the plugin does not expose the `jevguard` binary on `PATH`. Once the
-package is published, run the login command without a global install:
+Loading the plugin does not expose the `jevguard` binary on `PATH`. Run the login
+command without a global install:
 
 ```sh
 bunx --package @pablozrrrr/jevguard jevguard login
@@ -294,7 +300,7 @@ bun install --global @pablozrrrr/jevguard
 jevguard login
 ```
 
-Until the package is published, install the local tarball globally instead:
+To run an unreleased local build, install the packed tarball globally instead:
 
 ```sh
 bun install --global /path/to/pablozrrrr-jevguard-<version>.tgz
@@ -303,8 +309,6 @@ jevguard login
 
 Known limitations:
 
-- `@pablozrrrr/jevguard` has no registry release yet, so the one-line `opencode.json`
-  plugin entry does not resolve until the package is published.
 - Target host is OpenCode `1.18.32`. Exact `1.18.32` runtime smoke is still
   pending; a local `1.18.28` run worked.
 - The plugin and CLI run on Bun, and the packed `jevguard` bin keeps a Bun
