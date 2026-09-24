@@ -52,14 +52,14 @@ describe("plugin development manifest", () => {
     const engines = readManifest().engines;
 
     expect(engines?.bun).toBe(">=1.1.0");
-    expect(engines?.opencode).toBe(">=1.18.31 <2");
+    expect(engines?.opencode).toBe(">=1.18.32 <2");
   });
 
   test("keeps TypeScript entrypoints for workspace development", () => {
     const exports = readManifest().exports;
 
     expect(exports?.["."]).toBe("./src/index.ts");
-    expect(exports?.["./tui"]).toBe("./src/tui/index.ts");
+    expect(exports?.["./tui"]).toBeUndefined();
   });
 
   test("does not present the source tree as packaged output", () => {
@@ -73,7 +73,7 @@ describe("plugin development manifest", () => {
       "@jevguard/core": "workspace:*",
       "@jevguard/opencode-adapter": "workspace:*",
     });
-    expect(manifest.devDependencies).toEqual({ "@opencode-ai/plugin": "1.18.31" });
+    expect(manifest.devDependencies).toEqual({ "@opencode-ai/plugin": "1.18.32" });
   });
 
   test("declares no npm lifecycle scripts", () => {

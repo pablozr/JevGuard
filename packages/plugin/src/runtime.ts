@@ -9,9 +9,11 @@ import type { PluginEventInput, PluginRuntime, PluginRuntimeDependencies } from 
  * Builds the plugin runtime for one initialization. The event hook resolves
  * immediately after scheduling: attribution and the dedupe mark stay serialized in
  * one FIFO queue, while the attributed review runs detached so policy, Jev,
- * presentation, and review-bridge dispatch never sit on the agent's critical path.
- * `drain` awaits all detached work and is the test-only handle the host never
- * receives.
+ * presentation, and any automatic proposal never sit on the agent's critical path.
+ * A session created by this plugin's own proposal is excluded before attribution, so
+ * the child session's idle events can never be reviewed or propose again. `drain`
+ * awaits all detached work and is the test-only handle the host never receives. There
+ * is no command hook and no prompt, message mutation, or apply path.
  */
 export function createPluginRuntime(dependencies: PluginRuntimeDependencies): PluginRuntime {
   let attributionTail: Promise<void> = Promise.resolve();
@@ -34,6 +36,10 @@ export function createPluginRuntime(dependencies: PluginRuntimeDependencies): Pl
 
   async function processIdle(sessionID: string): Promise<void> {
     try {
+      if (dependencies.proposals.isChildSession(sessionID)) {
+        return;
+      }
+
       const attribution = await attributeTurn(sessionID, {
         facade: dependencies.facade,
         deduplicator: dependencies.deduplicator,

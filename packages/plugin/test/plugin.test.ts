@@ -3,12 +3,12 @@ import {
   type BuiltInReviewResult,
   type BuiltInUnavailableReason,
   createFifoJevPort,
+  createRemediationProposalStore,
   type JevBuiltInAnswerResult,
   type JevEvaluationPort,
   type JevEvaluationResult,
   type JevRequest,
-  type ReviewBridgePayload,
-  REVIEW_BRIDGE_COMMAND_PREFIX,
+  type RemediationProposalStore,
   type ReviewLevelResult,
   type ReviewResult,
   type RuleReviewResult,
@@ -18,7 +18,7 @@ import {
   type UnavailableReason,
 } from "@jevguard/core";
 import {
-  type BridgeCommandDelivery,
+  type DeliveryStatus,
   InMemoryTurnDeduplicator,
   type OpenCodeFileDiff,
   type OpenCodeMessageRecord,
@@ -26,12 +26,16 @@ import {
   type PolicyLoader,
   type PolicyLoadResult,
   type PresentationDelivery,
-  type ReviewBridgePort,
+  type ProposalPromptInput,
+  type ProposalSessionFacade,
+  type ProposalSessionNavigator,
+  type RemediationNotifier,
   type ReviewPresenter,
 } from "@jevguard/opencode-adapter";
 import type { Plugin } from "@opencode-ai/plugin";
 import { describe, expect, test } from "vitest";
 import { JevGuardPlugin } from "../src/index";
+import { registerRemediationConfig } from "../src/remediation/config";
 import { createPluginRuntime } from "../src/runtime";
 import type { PluginRuntime, PluginRuntimeDependencies } from "../src/types";
 
@@ -285,21 +289,100 @@ class FakePresenter implements ReviewPresenter {
   }
 }
 
-class FakeBridge implements ReviewBridgePort {
-  readonly commands: string[] = [];
-  attempts = 0;
+class FakeNotifier implements RemediationNotifier {
+  readonly calls: string[] = [];
   fail = false;
 
-  async execute(command: string): Promise<BridgeCommandDelivery> {
-    this.attempts += 1;
+  constructor(private readonly order: string[] = []) {}
 
+  async proposalPreparing(): Promise<DeliveryStatus> {
+    return this.record("proposalPreparing", "prepare");
+  }
+
+  async proposalReady(): Promise<DeliveryStatus> {
+    return this.record("proposalReady", "notify");
+  }
+
+  private record(call: string, label: string): DeliveryStatus {
     if (this.fail) {
-      throw new Error("bridge unavailable");
+      throw new Error("notifier unavailable");
     }
 
-    this.commands.push(command);
+    this.calls.push(call);
+    this.order.push(label);
 
     return "DELIVERED";
+  }
+}
+
+class FakeNavigator implements ProposalSessionNavigator {
+  readonly calls: string[] = [];
+  fail = false;
+
+  constructor(private readonly order: string[] = []) {}
+
+  async navigate(sessionID: string): Promise<DeliveryStatus> {
+    if (this.fail) {
+      throw new Error("navigation unavailable");
+    }
+
+    this.calls.push(sessionID);
+    this.order.push("navigate");
+
+    return "DELIVERED";
+  }
+}
+
+class RecordingProposalStore implements RemediationProposalStore {
+  constructor(
+    private readonly inner: RemediationProposalStore,
+    private readonly order: string[],
+  ) {}
+
+  claim(evaluationId: string): boolean {
+    return this.inner.claim(evaluationId);
+  }
+
+  registerChildSession(sessionID: string): void {
+    this.order.push("register");
+    this.inner.registerChildSession(sessionID);
+  }
+
+  isChildSession(sessionID: string): boolean {
+    return this.inner.isChildSession(sessionID);
+  }
+}
+
+class FakeProposalFacade implements ProposalSessionFacade {
+  readonly created: Array<{ readonly parentID: string; readonly title: string }> = [];
+  readonly prompts: ProposalPromptInput[] = [];
+  nextSessionID = "ses_child";
+  failCreate = false;
+  failPrompt = false;
+
+  constructor(private readonly order: string[] = []) {}
+
+  async createChildSession(input: {
+    readonly parentID: string;
+    readonly title: string;
+  }): Promise<string> {
+    this.created.push({ parentID: input.parentID, title: input.title });
+    this.order.push("create");
+
+    if (this.failCreate) {
+      throw new Error("child session unavailable");
+    }
+
+    return this.nextSessionID;
+  }
+
+  async prompt(input: ProposalPromptInput): Promise<void> {
+    this.prompts.push(input);
+    this.order.push("prompt");
+
+    if (this.failPrompt) {
+      throw new Error("proposal prompt unavailable");
+    }
   }
 }
 
@@ -422,7 +505,11 @@ interface Harness {
   readonly policy: FakePolicyLoader;
   readonly presenter: FakePresenter;
   readonly jev: FakeJev;
-  readonly bridge: FakeBridge;
+  readonly proposals: RemediationProposalStore;
+  readonly proposalFacade: FakeProposalFacade;
+  readonly navigator: FakeNavigator;
+  readonly notifier: FakeNotifier;
+  readonly order: string[];
 }
 
 /**
@@ -434,7 +521,11 @@ function harness(): Harness {
   const policy = new FakePolicyLoader();
   const presenter = new FakePresenter();
   const jev = new FakeJev();
-  const bridge = new FakeBridge();
+  const order: string[] = [];
+  const proposals = new RecordingProposalStore(createRemediationProposalStore(), order);
+  const proposalFacade = new FakeProposalFacade(order);
+  const navigator = new FakeNavigator(order);
+  const notifier = new FakeNotifier(order);
 
   const dependencies: PluginRuntimeDependencies = {
     facade,
@@ -442,10 +533,24 @@ function harness(): Harness {
     policy,
     presenter,
     jev: createFifoJevPort(jev, { maxConcurrency: MAX_CONCURRENT_JEV_CALLS }),
-    bridge,
+    proposals,
+    proposalFacade,
+    navigator,
+    notifier,
   };
 
-  return { runtime: createPluginRuntime(dependencies), facade, policy, presenter, jev, bridge };
+  return {
+    runtime: createPluginRuntime(dependencies),
+    facade,
+    policy,
+    presenter,
+    jev,
+    proposals,
+    proposalFacade,
+    navigator,
+    notifier,
+    order,
+  };
 }
 
 async function dispatch(runtime: PluginRuntime, event: unknown): Promise<void> {
@@ -671,6 +776,12 @@ describe("JevGuardPlugin composition", () => {
     const plugin: Plugin = JevGuardPlugin;
 
     expect(typeof plugin).toBe("function");
+  });
+
+  test("exposes only the observation hook with no command hook", () => {
+    const { runtime } = harness();
+
+    expect(Object.keys(runtime.hooks)).toEqual(["event"]);
   });
 
   test("ignores events that are not an idle session status", async () => {
@@ -1411,93 +1522,176 @@ describe("JevGuardPlugin observe-only containment", () => {
   });
 });
 
-function decodeBridgeCommand(command: string): ReviewBridgePayload {
-  if (!command.startsWith(REVIEW_BRIDGE_COMMAND_PREFIX)) {
-    throw new Error(`unexpected bridge command prefix: ${command}`);
-  }
+const CHILD_SESSION_ID = "ses_child";
+const PROPOSER_AGENT = "jevguard-proposer";
 
-  const encoded = command.slice(REVIEW_BRIDGE_COMMAND_PREFIX.length);
+const DISABLED_CONFIG = [
+  "version: 1",
+  "thresholds:",
+  "  error:",
+  "    warn: 0.4",
+  "    fail: 0.7",
+  "  warning:",
+  "    warn: 0.6",
+  "remediation:",
+  "  auto_propose: false",
+].join("\n");
 
-  return JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")) as ReviewBridgePayload;
+const CUSTOM_MODEL_CONFIG = [
+  "version: 1",
+  "thresholds:",
+  "  error:",
+  "    warn: 0.4",
+  "    fail: 0.7",
+  "  warning:",
+  "    warn: 0.6",
+  "remediation:",
+  "  model: openai/gpt-5",
+].join("\n");
+
+const INVALID_REMEDIATION_CONFIG = [
+  "version: 1",
+  "thresholds:",
+  "  error:",
+  "    warn: 0.4",
+  "    fail: 0.7",
+  "  warning:",
+  "    warn: 0.6",
+  "remediation:",
+  "  model: not-a-provider-model",
+].join("\n");
+
+function errorFailSetup(values: Harness): void {
+  loadRules(values.policy, scopedRule("error"));
+  values.facade.diffs = [{ file: "src/a.ts", patch: PATCH }];
+  values.jev.probability = 0.8;
+  values.jev.probabilities.set(SCOPE_CREEP_ID, 0.1);
+  values.jev.probabilities.set(COMPLEXITY_ID, 0.1);
 }
 
-function oversizedRule(id: string): string {
-  return [
-    `## ${id}`,
-    "",
-    "severity: error",
-    "",
-    "### Rule",
-    "",
-    "d".repeat(1024),
-    "",
-    "### Violation",
-    "",
-    "v".repeat(1024),
-    "",
-    "### Allowed",
-    "",
-    "a".repeat(1024),
-  ].join("\n");
+function proposalText(values: Harness): string {
+  return values.proposalFacade.prompts[0]?.text ?? "";
 }
 
-function errorFailSetup(harnessValues: Harness): void {
-  loadRules(harnessValues.policy, scopedRule("error"));
-  harnessValues.facade.diffs = [{ file: "src/a.ts", patch: PATCH }];
-  harnessValues.jev.probability = 0.8;
-  harnessValues.jev.probabilities.set(SCOPE_CREEP_ID, 0.1);
-  harnessValues.jev.probabilities.set(COMPLEXITY_ID, 0.1);
-}
-
-describe("JevGuardPlugin review bridge", () => {
-  test("dispatches exactly one command with the exact snapshot for a local error FAIL", async () => {
+describe("JevGuardPlugin automatic proposals", () => {
+  test("creates one child session and prompts the hidden proposer for a rule FAIL", async () => {
     const values = harness();
     errorFailSetup(values);
 
     await dispatch(values.runtime, idleEvent());
 
-    expect(values.bridge.attempts).toBe(1);
-    expect(values.bridge.commands).toHaveLength(1);
+    expect(lastReview(values.presenter).summary.verdict).toBe("FAIL");
+    expect(values.proposalFacade.created).toEqual([
+      { parentID: SESSION_ID, title: "JevGuard remediation proposal" },
+    ]);
+    expect(values.proposalFacade.prompts).toHaveLength(1);
 
-    const command = values.bridge.commands[0] ?? "";
-    const encoded = command.slice(REVIEW_BRIDGE_COMMAND_PREFIX.length);
+    const prompt = values.proposalFacade.prompts[0];
 
-    expect(command.startsWith(REVIEW_BRIDGE_COMMAND_PREFIX)).toBe(true);
-    expect(encoded).toMatch(/^[A-Za-z0-9_-]+$/);
-    expect(decodeBridgeCommand(command)).toEqual({
-      version: 1,
-      evaluationId: `${ASSISTANT_ID}:TEST-1`,
-      sessionID: SESSION_ID,
-      messageID: ASSISTANT_ID,
-      rule: {
-        id: "TEST-1",
-        description: "Module description.",
-        violation: "The change violates the rule.",
-        allowed: ALLOWED_EXCEPTION,
-      },
-      probability: 0.8,
-    });
+    expect(prompt?.sessionID).toBe(CHILD_SESSION_ID);
+    expect(prompt?.agent).toBe(PROPOSER_AGENT);
+    expect(prompt?.model).toEqual({ providerID: "opencode", modelID: "gpt-5.6-luna" });
+    expect(prompt?.tools).toEqual({ "*": false });
+    expect(typeof prompt?.system).toBe("string");
+    expect(prompt?.text).toContain("TEST-1");
+    expect(prompt?.text).toContain(PATCH);
+    expect(values.notifier.calls).toEqual(["proposalPreparing", "proposalReady"]);
+    expect(values.navigator.calls).toEqual([CHILD_SESSION_ID]);
   });
 
-  test.each([
-    { probability: 0.1, outcome: "PASS" },
-    { probability: 0.5, outcome: "WARN" },
-  ] as const)("emits no command for a local error $outcome", async ({ probability, outcome }) => {
+  test("creates, registers, navigates, then prompts the child session in order", async () => {
     const values = harness();
-    loadRules(values.policy, scopedRule("error"));
+    errorFailSetup(values);
+
+    await dispatch(values.runtime, idleEvent());
+
+    expect(values.order).toEqual(["create", "register", "navigate", "prepare", "prompt", "notify"]);
+    expect(values.navigator.calls).toEqual([CHILD_SESSION_ID]);
+  });
+
+  test("uses the configured model for the proposer", async () => {
+    const values = harness();
+    loadRules(values.policy, scopedRule("error"), CUSTOM_MODEL_CONFIG);
     values.facade.diffs = [{ file: "src/a.ts", patch: PATCH }];
-    values.jev.probability = probability;
+    values.jev.probability = 0.8;
     values.jev.probabilities.set(SCOPE_CREEP_ID, 0.1);
     values.jev.probabilities.set(COMPLEXITY_ID, 0.1);
 
     await dispatch(values.runtime, idleEvent());
 
-    expect(lastReview(values.presenter).summary.verdict).toBe(outcome);
-    expect(values.bridge.attempts).toBe(0);
-    expect(values.bridge.commands).toEqual([]);
+    expect(values.proposalFacade.prompts[0]?.model).toEqual({
+      providerID: "openai",
+      modelID: "gpt-5",
+    });
   });
 
-  test("emits no command for a warning rule, which never fails", async () => {
+  test("builds one aggregate request per turn with all FAIL findings and the full attributed patch", async () => {
+    const values = harness();
+    const rules = [ruleText("SRC-1", "error", "src/**"), ruleText("SRC-2", "error", "src/**")].join(
+      "\n\n",
+    );
+    loadRules(values.policy, rules);
+    values.facade.diffs = [
+      { file: "src/a.ts", patch: PATCH },
+      { file: "docs/readme.md", patch: DOCS_SENTINEL },
+    ];
+    values.jev.probabilities.set("SRC-1", 0.8);
+    values.jev.probabilities.set("SRC-2", 0.9);
+    values.jev.probabilities.set(SCOPE_CREEP_ID, 0.95);
+    values.jev.probabilities.set(COMPLEXITY_ID, 0.1);
+
+    await dispatch(values.runtime, idleEvent());
+
+    expect(values.proposalFacade.created).toHaveLength(1);
+    expect(values.proposalFacade.prompts).toHaveLength(1);
+
+    const text = proposalText(values);
+
+    expect(text).toContain("- id: SRC-1");
+    expect(text).toContain("- id: SRC-2");
+    expect(text).toContain("- check_id: SCOPE-CREEP");
+    expect(text).toContain("severity: error");
+    expect(text).toContain("violation_probability: 0.95");
+    expect(text).toContain("scoped_paths: src/a.ts");
+    expect(text).toContain(DOCS_SENTINEL);
+  });
+
+  test("includes a built-in FAIL even without any rule FAIL", async () => {
+    const values = harness();
+    loadRules(values.policy, scopedRule("error"));
+    values.facade.diffs = [{ file: "src/a.ts", patch: PATCH }];
+    values.jev.probability = 0.1;
+    values.jev.probabilities.set(SCOPE_CREEP_ID, 0.95);
+    values.jev.probabilities.set(COMPLEXITY_ID, 0.1);
+
+    await dispatch(values.runtime, idleEvent());
+
+    expect(values.proposalFacade.prompts).toHaveLength(1);
+    expect(proposalText(values)).toContain("- check_id: SCOPE-CREEP");
+  });
+
+  test.each([
+    { probability: 0.1, outcome: "PASS" },
+    { probability: 0.5, outcome: "WARN" },
+  ] as const)(
+    "records no proposal for a local error $outcome",
+    async ({ probability, outcome }) => {
+      const values = harness();
+      loadRules(values.policy, scopedRule("error"));
+      values.facade.diffs = [{ file: "src/a.ts", patch: PATCH }];
+      values.jev.probability = probability;
+      values.jev.probabilities.set(SCOPE_CREEP_ID, 0.1);
+      values.jev.probabilities.set(COMPLEXITY_ID, 0.1);
+
+      await dispatch(values.runtime, idleEvent());
+
+      expect(lastReview(values.presenter).summary.verdict).toBe(outcome);
+      expect(values.proposalFacade.created).toEqual([]);
+      expect(values.notifier.calls).toEqual([]);
+    },
+  );
+
+  test("records no proposal for a warning rule", async () => {
     const values = harness();
     loadRules(values.policy, scopedRule("warning"));
     values.facade.diffs = [{ file: "src/a.ts", patch: PATCH }];
@@ -1508,50 +1702,48 @@ describe("JevGuardPlugin review bridge", () => {
     await dispatch(values.runtime, idleEvent());
 
     expect(lastResults(values.presenter)[0]).toMatchObject({ outcome: "WARN" });
-    expect(values.bridge.attempts).toBe(0);
+    expect(values.proposalFacade.created).toEqual([]);
   });
 
-  test("never bridges a built-in scope-creep FAIL", async () => {
+  test("records no proposal when full turn evidence is blocked despite a scoped rule FAIL", async () => {
     const values = harness();
     loadRules(values.policy, scopedRule("error"));
-    values.facade.diffs = [{ file: "src/a.ts", patch: PATCH }];
-    values.jev.probability = 0.1;
-    values.jev.probabilities.set(SCOPE_CREEP_ID, 0.95);
+    values.facade.diffs = [
+      { file: "src/a.ts", patch: PATCH },
+      { file: "docs/.env", patch: "SECRET=1" },
+    ];
+    values.jev.probability = 0.8;
+    values.jev.probabilities.set(SCOPE_CREEP_ID, 0.1);
     values.jev.probabilities.set(COMPLEXITY_ID, 0.1);
 
     await dispatch(values.runtime, idleEvent());
 
-    expect(lastResults(values.presenter)[1]).toMatchObject({
-      kind: "BUILT_IN",
-      checkId: SCOPE_CREEP_ID,
+    expect(lastResults(values.presenter)[0]).toMatchObject({
+      ruleId: "TEST-1",
       outcome: "FAIL",
     });
-    expect(values.bridge.commands).toEqual([]);
+    expect(values.proposalFacade.created).toEqual([]);
+    expect(values.notifier.calls).toEqual([]);
   });
 
-  test("bridges only the local rule when the built-in also fails", async () => {
-    const values = harness();
-    errorFailSetup(values);
-    values.jev.probabilities.set(SCOPE_CREEP_ID, 0.95);
-
-    await dispatch(values.runtime, idleEvent());
-
-    expect(values.bridge.commands).toHaveLength(1);
-    expect(decodeBridgeCommand(values.bridge.commands[0] ?? "").rule.id).toBe("TEST-1");
-  });
-
-  test("emits no command when the rule is unavailable", async () => {
+  test("records no proposal when full turn evidence is oversized despite a scoped rule FAIL", async () => {
     const values = harness();
     loadRules(values.policy, scopedRule("error"));
-    values.jev.fail = true;
+    values.facade.diffs = [
+      { file: "src/a.ts", patch: PATCH },
+      { file: "docs/big.ts", patch: "x".repeat(DEFAULT_EVIDENCE_POLICY.maxDiffLength + 1) },
+    ];
+    values.jev.probability = 0.8;
+    values.jev.probabilities.set(SCOPE_CREEP_ID, 0.1);
+    values.jev.probabilities.set(COMPLEXITY_ID, 0.1);
 
     await dispatch(values.runtime, idleEvent());
 
-    expect(lastResults(values.presenter)[0]).toMatchObject({ outcome: "UNAVAILABLE" });
-    expect(values.bridge.attempts).toBe(0);
+    expect(lastResults(values.presenter)[0]).toMatchObject({ ruleId: "TEST-1", outcome: "FAIL" });
+    expect(values.proposalFacade.created).toEqual([]);
   });
 
-  test("emits no command when the turn is skipped", async () => {
+  test("records no proposal when the turn has no attributed patch", async () => {
     const values = harness();
     loadRules(values.policy, scopedRule("error"));
     values.facade.diffs = [];
@@ -1559,76 +1751,232 @@ describe("JevGuardPlugin review bridge", () => {
     await dispatch(values.runtime, idleEvent());
 
     expect(lastResults(values.presenter)[0]).toMatchObject({ outcome: "SKIPPED" });
-    expect(values.bridge.attempts).toBe(0);
+    expect(values.proposalFacade.created).toEqual([]);
   });
 
-  test("emits no command for a malformed policy", async () => {
+  test("records no proposal when remediation is disabled by config", async () => {
+    const values = harness();
+    loadRules(values.policy, scopedRule("error"), DISABLED_CONFIG);
+    values.facade.diffs = [{ file: "src/a.ts", patch: PATCH }];
+    values.jev.probability = 0.8;
+    values.jev.probabilities.set(SCOPE_CREEP_ID, 0.1);
+    values.jev.probabilities.set(COMPLEXITY_ID, 0.1);
+
+    await dispatch(values.runtime, idleEvent());
+
+    expect(lastReview(values.presenter).summary.verdict).toBe("FAIL");
+    expect(values.proposalFacade.created).toEqual([]);
+  });
+
+  test("records no proposal when the config is invalid", async () => {
+    const values = harness();
+    loadRules(values.policy, scopedRule("error"), invalidConfigShape);
+    values.facade.diffs = [{ file: "src/a.ts", patch: PATCH }];
+    values.jev.probability = 0.8;
+    values.jev.probabilities.set(SCOPE_CREEP_ID, 0.1);
+    values.jev.probabilities.set(COMPLEXITY_ID, 0.1);
+
+    await dispatch(values.runtime, idleEvent());
+
+    expect(lastResults(values.presenter)[0]).toMatchObject({
+      outcome: "UNAVAILABLE",
+      reason: "INVALID_CONFIG",
+    });
+    expect(values.proposalFacade.created).toEqual([]);
+  });
+
+  test("treats an invalid remediation section as INVALID_CONFIG", async () => {
+    const values = harness();
+    loadRules(values.policy, scopedRule("error"), INVALID_REMEDIATION_CONFIG);
+    values.facade.diffs = [{ file: "src/a.ts", patch: PATCH }];
+    values.jev.probability = 0.8;
+    values.jev.probabilities.set(SCOPE_CREEP_ID, 0.1);
+    values.jev.probabilities.set(COMPLEXITY_ID, 0.1);
+
+    await dispatch(values.runtime, idleEvent());
+
+    expect(lastResults(values.presenter)[0]).toMatchObject({
+      outcome: "UNAVAILABLE",
+      reason: "INVALID_CONFIG",
+    });
+    expect(values.proposalFacade.created).toEqual([]);
+  });
+
+  test("records no proposal for a malformed policy", async () => {
     const values = harness();
     loadRules(values.policy, "not a rule document");
 
     await dispatch(values.runtime, idleEvent());
 
     expect(lastResults(values.presenter)[0]).toMatchObject({ outcome: "UNAVAILABLE" });
-    expect(values.bridge.attempts).toBe(0);
+    expect(values.proposalFacade.created).toEqual([]);
   });
 
-  test("rejects an oversized snapshot without dispatching and never truncates", async () => {
+  test("creates at most one proposal per evaluated turn across repeated idles", async () => {
     const values = harness();
-    const sessionID = "s".repeat(256);
-    const messageID = "m".repeat(256);
-    loadRules(values.policy, oversizedRule("R".repeat(128)));
-    values.facade.records = turnRecords(messageID, USER_ID);
-    values.facade.diffs = [{ file: "src/a.ts", patch: PATCH }];
-    values.jev.probability = 0.8;
-    values.jev.probabilities.set(SCOPE_CREEP_ID, 0.1);
-    values.jev.probabilities.set(COMPLEXITY_ID, 0.1);
+    errorFailSetup(values);
 
-    await dispatch(values.runtime, idleEvent(sessionID));
+    await dispatch(values.runtime, idleEvent());
+    await dispatch(values.runtime, idleEvent());
 
-    expect(lastResults(values.presenter)[0]).toMatchObject({ outcome: "FAIL" });
-    expect(values.bridge.attempts).toBe(0);
-    expect(values.bridge.commands).toEqual([]);
+    expect(values.proposalFacade.created).toHaveLength(1);
+    expect(values.notifier.calls).toEqual(["proposalPreparing", "proposalReady"]);
   });
 
-  test("bridges each failing local error rule with its own snapshot", async () => {
+  test("excludes the registered child session from review", async () => {
     const values = harness();
-    loadRules(
-      values.policy,
-      [ruleText("SRC-1", "error", "src/**"), ruleText("SRC-2", "error", "src/**")].join("\n\n"),
+    errorFailSetup(values);
+    values.facade.recordsBySession.set(
+      CHILD_SESSION_ID,
+      turnRecords(SECOND_ASSISTANT_ID, SECOND_USER_ID),
+    );
+
+    await dispatch(values.runtime, idleEvent());
+
+    const callsBefore = values.facade.calls.length;
+
+    await dispatch(values.runtime, idleEvent(CHILD_SESSION_ID));
+
+    expect(values.facade.calls.length).toBe(callsBefore);
+    expect(values.presenter.reviews).toHaveLength(1);
+    expect(values.proposalFacade.created).toHaveLength(1);
+  });
+
+  test("keeps concurrent sessions independent", async () => {
+    const values = harness();
+    loadRules(values.policy, scopedRule("error"));
+    values.facade.recordsBySession.set(
+      SECOND_SESSION_ID,
+      turnRecords(SECOND_ASSISTANT_ID, SECOND_USER_ID),
     );
     values.facade.diffs = [{ file: "src/a.ts", patch: PATCH }];
     values.jev.probability = 0.8;
     values.jev.probabilities.set(SCOPE_CREEP_ID, 0.1);
     values.jev.probabilities.set(COMPLEXITY_ID, 0.1);
 
-    await dispatch(values.runtime, idleEvent());
+    await dispatch(values.runtime, idleEvent(SESSION_ID));
+    values.proposalFacade.nextSessionID = "ses_child_2";
+    await dispatch(values.runtime, idleEvent(SECOND_SESSION_ID));
 
-    expect(values.bridge.commands).toHaveLength(2);
-    expect(values.bridge.commands.map((command) => decodeBridgeCommand(command).rule.id)).toEqual([
-      "SRC-1",
-      "SRC-2",
+    expect(values.proposalFacade.created.map((entry) => entry.parentID)).toEqual([
+      SESSION_ID,
+      SECOND_SESSION_ID,
     ]);
-    expect(
-      values.bridge.commands.map((command) => decodeBridgeCommand(command).rule.allowed),
-    ).toEqual(["", ""]);
+    expect(values.notifier.calls).toEqual([
+      "proposalPreparing",
+      "proposalReady",
+      "proposalPreparing",
+      "proposalReady",
+    ]);
   });
 
-  test("contains a bridge failure without affecting the review, presentation, or later turns", async () => {
+  test("contains a child session creation failure without changing the review", async () => {
     const values = harness();
     errorFailSetup(values);
-    values.bridge.fail = true;
+    values.proposalFacade.failCreate = true;
 
     await expect(dispatch(values.runtime, idleEvent())).resolves.toBeUndefined();
 
-    expect(values.presenter.reviews).toHaveLength(1);
     expect(lastReview(values.presenter).summary.verdict).toBe("FAIL");
-    expect(values.bridge.attempts).toBe(1);
+    expect(values.proposalFacade.prompts).toEqual([]);
+    expect(values.notifier.calls).toEqual([]);
+    expect(values.navigator.calls).toEqual([]);
+  });
 
-    values.facade.records = turnRecords(SECOND_ASSISTANT_ID, SECOND_USER_ID);
+  test("contains a prompt failure without changing the review and without a ready toast", async () => {
+    const values = harness();
+    errorFailSetup(values);
+    values.proposalFacade.failPrompt = true;
 
     await expect(dispatch(values.runtime, idleEvent())).resolves.toBeUndefined();
 
-    expect(values.presenter.reviews).toHaveLength(2);
-    expect(values.bridge.attempts).toBe(2);
+    expect(lastReview(values.presenter).summary.verdict).toBe("FAIL");
+    expect(values.proposalFacade.created).toHaveLength(1);
+    expect(values.navigator.calls).toEqual([CHILD_SESSION_ID]);
+    expect(values.notifier.calls).toEqual(["proposalPreparing"]);
+  });
+
+  test("contains a notifier failure without changing the review and still prompts", async () => {
+    const values = harness();
+    errorFailSetup(values);
+    values.notifier.fail = true;
+
+    await expect(dispatch(values.runtime, idleEvent())).resolves.toBeUndefined();
+
+    expect(lastReview(values.presenter).summary.verdict).toBe("FAIL");
+    expect(values.proposalFacade.prompts).toHaveLength(1);
+    expect(values.notifier.calls).toEqual([]);
+    expect(values.navigator.calls).toEqual([CHILD_SESSION_ID]);
+  });
+
+  test("contains a navigation failure and still prompts the proposal", async () => {
+    const values = harness();
+    errorFailSetup(values);
+    values.navigator.fail = true;
+
+    await expect(dispatch(values.runtime, idleEvent())).resolves.toBeUndefined();
+
+    expect(lastReview(values.presenter).summary.verdict).toBe("FAIL");
+    expect(values.proposalFacade.prompts).toHaveLength(1);
+    expect(values.notifier.calls).toEqual(["proposalPreparing", "proposalReady"]);
+    expect(values.navigator.calls).toEqual([]);
+  });
+
+  test("never invokes parent prompt or message mutation APIs", async () => {
+    const values = harness();
+    errorFailSetup(values);
+
+    await dispatch(values.runtime, idleEvent());
+
+    expect(values.facade.forbidden).toEqual([]);
+  });
+});
+
+describe("JevGuardPlugin remediation config", () => {
+  test("registers the internal proposer subagent with disabled tools and wildcard-deny permissions", () => {
+    const config: Record<string, unknown> = {};
+
+    registerRemediationConfig(config);
+
+    const agents = Reflect.get(config, "agent") as Record<string, Record<string, unknown>>;
+    const proposer = agents["jevguard-proposer"];
+
+    expect(proposer?.mode).toBe("subagent");
+    expect(proposer?.hidden).toBe(true);
+    expect(proposer?.tools).toEqual({ "*": false });
+    expect(proposer?.permission).toEqual({ "*": "deny" });
+    expect(typeof proposer?.prompt).toBe("string");
+  });
+
+  test("registers no command", () => {
+    const config: Record<string, unknown> = {};
+
+    registerRemediationConfig(config);
+
+    expect(Reflect.get(config, "command")).toBeUndefined();
+  });
+
+  test("overwrites a conflicting internal agent while preserving unrelated config", () => {
+    const config: Record<string, unknown> = {
+      agent: {
+        "jevguard-proposer": {
+          mode: "primary",
+          tools: { edit: true },
+          permission: { edit: "allow" },
+        },
+        build: { mode: "primary" },
+      },
+    };
+
+    registerRemediationConfig(config);
+
+    const agents = Reflect.get(config, "agent") as Record<string, Record<string, unknown>>;
+
+    expect(agents["jevguard-proposer"]).toMatchObject({
+      mode: "subagent",
+      tools: { "*": false },
+      permission: { "*": "deny" },
+    });
+    expect(agents.build).toEqual({ mode: "primary" });
   });
 });

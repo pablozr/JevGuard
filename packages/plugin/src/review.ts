@@ -1,12 +1,16 @@
 import {
-  DEFAULT_EVIDENCE_POLICY,
   aggregateReview,
+  buildProposalRequest,
+  DEFAULT_EVIDENCE_POLICY,
   evaluateBuiltIns,
   evaluateRules,
   type GateConfigResult,
   parseRules,
+  type RemediationConfigResult,
+  type RemediationProposalRequest,
   type ReviewResult,
   resolveGateConfig,
+  resolveRemediationConfig,
   type RuleParseResults,
   type Turn,
   type UnavailableReason,
@@ -16,8 +20,8 @@ import {
   type PolicyLoadResult,
   type PolicyLoader,
 } from "@jevguard/opencode-adapter";
-import { dispatchReviewBridge } from "./bridge";
 import { presentReview } from "./present";
+import { proposeForTurn } from "./remediation/propose";
 import { reviewLevelUnavailable } from "./review-result";
 import type { ReviewDependencies } from "./types";
 
@@ -31,6 +35,12 @@ interface RuleLaneReview {
   readonly rules: RuleParseResults;
 }
 
+/** Both validated configuration sections read from one `.jev/config.yaml` value. */
+interface PolicyConfig {
+  readonly gate: GateConfigResult;
+  readonly remediation: RemediationConfigResult;
+}
+
 /**
  * Reviews one attributed turn: read the fixed policy paths once, then run the local
  * rule lane and the single built-in batch concurrently and present exactly one
@@ -39,8 +49,10 @@ interface RuleLaneReview {
  * sequential inside their lane, so a turn submits one request per rule plus one batch
  * request to the shared Jev port, whose concurrency wrapper caps in-flight calls. The
  * final results are rules in source order, then scope creep, then complexity,
- * regardless of completion timing. After presentation, each local `error` rule that
- * reached `FAIL` dispatches one detached review bridge command.
+ * regardless of completion timing. After presentation, an enabled and valid
+ * remediation config builds one aggregate proposal request for the whole turn and
+ * schedules at most one automatic proposal. This review never injects into agent
+ * context.
  */
 export async function reviewAttributedTurn(
   turn: Turn,
@@ -48,10 +60,11 @@ export async function reviewAttributedTurn(
   dependencies: ReviewDependencies,
 ): Promise<void> {
   const loaded = await loadPolicy(dependencies.policy);
+  const config = readPolicyConfig(loaded);
   const builtInInput = { turn, evidencePolicy: DEFAULT_EVIDENCE_POLICY };
 
   const [ruleLane, builtIns] = await Promise.all([
-    evaluateRuleLane(turn, loaded, dependencies),
+    evaluateRuleLane(turn, loaded, config.gate, dependencies),
     evaluateBuiltIns(builtInInput, { jev: dependencies.jev }),
   ]);
 
@@ -62,20 +75,36 @@ export async function reviewAttributedTurn(
   ]);
 
   await presentReview(dependencies.presenter, review);
-  await dispatchReviewBridge(
-    {
-      sessionID,
-      messageID: turn.id,
-      rules: ruleLane.rules,
-      results: review.results,
-    },
-    dependencies.bridge,
-  );
+
+  const request = buildAggregateRequest(turn, sessionID, ruleLane, review.results, config);
+
+  await proposeForTurn(request, dependencies);
+}
+
+function buildAggregateRequest(
+  turn: Turn,
+  sessionID: string,
+  ruleLane: RuleLaneReview,
+  results: readonly ReviewResult[],
+  config: PolicyConfig,
+): RemediationProposalRequest | null {
+  if (config.remediation.status !== "VALID") {
+    return null;
+  }
+
+  return buildProposalRequest({
+    turn,
+    sessionID,
+    rules: ruleLane.rules,
+    results,
+    config: config.remediation.config,
+  });
 }
 
 async function evaluateRuleLane(
   turn: Turn,
   loaded: PolicyLoadResult | null,
+  gate: GateConfigResult,
   dependencies: Pick<ReviewDependencies, "jev">,
 ): Promise<RuleLaneReview> {
   if (loaded === null) {
@@ -96,13 +125,12 @@ async function evaluateRuleLane(
   }
 
   const parsedRules = parseRules(rules);
-  const gateConfig = readGateConfig(loaded.source.config);
 
   const review = await evaluateRules(
     {
       turn,
       rules: parsedRules,
-      gateConfig,
+      gateConfig: gate,
       evidencePolicy: DEFAULT_EVIDENCE_POLICY,
     },
     { jev: dependencies.jev },
@@ -128,14 +156,32 @@ async function loadPolicy(policy: PolicyLoader): Promise<PolicyLoadResult | null
   }
 }
 
-function readGateConfig(config: string | null): GateConfigResult {
-  const value = readConfigValue(config);
-
-  if (value.status === "INVALID") {
-    return { status: "INVALID", reason: "INVALID_CONFIG" };
+function readPolicyConfig(loaded: PolicyLoadResult | null): PolicyConfig {
+  if (loaded === null || loaded.status === "FAILED") {
+    return invalidPolicyConfig();
   }
 
-  return resolveGateConfig(value.value);
+  const value = readConfigValue(loaded.source.config);
+
+  if (value.status === "INVALID") {
+    return invalidPolicyConfig();
+  }
+
+  const gate = resolveGateConfig(value.value);
+  const remediation = resolveRemediationConfig(value.value);
+
+  if (gate.status === "INVALID" || remediation.status === "INVALID") {
+    return invalidPolicyConfig();
+  }
+
+  return { gate, remediation };
+}
+
+function invalidPolicyConfig(): PolicyConfig {
+  return {
+    gate: { status: "INVALID", reason: "INVALID_CONFIG" },
+    remediation: { status: "INVALID", reason: "INVALID_CONFIG" },
+  };
 }
 
 function readConfigValue(config: string | null): ConfigValue {

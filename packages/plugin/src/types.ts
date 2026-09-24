@@ -1,8 +1,10 @@
-import type { JevEvaluationPort } from "@jevguard/core";
+import type { JevEvaluationPort, RemediationProposalStore } from "@jevguard/core";
 import type {
   OpenCodeSessionFacade,
   PolicyLoader,
-  ReviewBridgePort,
+  ProposalSessionFacade,
+  ProposalSessionNavigator,
+  RemediationNotifier,
   ReviewPresenter,
   TurnDeduplicator,
 } from "@jevguard/opencode-adapter";
@@ -12,9 +14,10 @@ export interface PluginEventInput {
 }
 
 /**
- * The host hook surface this plugin returns. The event payload stays `unknown`
- * internally so malformed events are ignored; it remains assignable to the typed
- * `Hooks` surface because it accepts every possible host event.
+ * The host hook surface this plugin returns. Only the event payload is observed;
+ * malformed input is ignored internally, so the object remains assignable to the
+ * typed `Hooks` surface. There is no command hook: remediation is automatic and never
+ * rewrites host output.
  */
 export interface PluginHooks {
   event(input: PluginEventInput): Promise<void>;
@@ -34,7 +37,10 @@ export interface ReviewDependencies {
   readonly policy: PolicyLoader;
   readonly presenter: ReviewPresenter;
   readonly jev: JevEvaluationPort;
-  readonly bridge: ReviewBridgePort;
+  readonly proposals: RemediationProposalStore;
+  readonly proposalFacade: ProposalSessionFacade;
+  readonly navigator: ProposalSessionNavigator;
+  readonly notifier: RemediationNotifier;
 }
 
 export interface PluginRuntimeDependencies extends ReviewDependencies {
