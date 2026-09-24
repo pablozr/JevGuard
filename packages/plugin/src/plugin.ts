@@ -20,7 +20,7 @@ import type { Plugin } from "@opencode-ai/plugin";
 import { registerRemediationConfig } from "./remediation/config";
 import { createPluginRuntime } from "./runtime";
 import { createConfigHook } from "./skills/config-hook";
-import { resolveInstalledSkillDirectory } from "./skills/skill-directory";
+import { resolveInstalledSkillDirectories } from "./skills/skill-directory";
 import type { PluginRuntimeDependencies } from "./types";
 
 const DEFAULT_JEV_MAX_CONCURRENCY = 2;
@@ -34,8 +34,9 @@ const DEFAULT_JEV_MAX_CONCURRENCY = 2;
  * enabled, valid remediation config, it creates one child session, registers and
  * navigates the TUI to it, then prompts the hidden `jevguard-proposer` subagent and
  * shows a generic toast when the proposal is ready. The `config` hook
- * registers the bundled `jevguard-rules` skill and that internal subagent only; there
- * is no command hook, no session prompt into the parent, and no auto-apply.
+ * registers the bundled `jevguard-rules` and `jev-init` skills and that internal
+ * subagent only; there is no command hook, no session prompt into the parent, and no
+ * auto-apply.
  */
 export const JevGuardPlugin: Plugin = async (input) => {
   const presentationClient = createOpenCodePresentationClient(input.client);
@@ -68,7 +69,7 @@ export const JevGuardPlugin: Plugin = async (input) => {
   };
 
   const skillConfigHook = createConfigHook({
-    skillDirectory: resolveInstalledSkillDirectory(import.meta.url),
+    skillDirectories: resolveInstalledSkillDirectories(import.meta.url),
   });
 
   return {

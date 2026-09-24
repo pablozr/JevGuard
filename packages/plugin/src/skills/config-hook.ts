@@ -53,22 +53,20 @@ export function appendSkillPath(config: unknown, skillDirectory: string): void {
 }
 
 export interface ConfigHookOptions {
-  readonly skillDirectory: string | null;
+  readonly skillDirectories: readonly string[];
 }
 
 /**
- * Builds the OpenCode `config` hook that registers the bundled skill directory.
+ * Builds the OpenCode `config` hook that registers every bundled skill directory.
  * It mutates the host's live config in place and never throws into host startup:
  * a missing installed directory leaves the config untouched.
  */
 export function createConfigHook(options: ConfigHookOptions): (input: unknown) => Promise<void> {
   return async (input) => {
-    if (options.skillDirectory === null) {
-      return;
-    }
-
     try {
-      appendSkillPath(input, options.skillDirectory);
+      for (const skillDirectory of options.skillDirectories) {
+        appendSkillPath(input, skillDirectory);
+      }
     } catch {
       return;
     }

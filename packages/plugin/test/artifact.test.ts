@@ -25,15 +25,18 @@ const BUILD_SENTINEL_VALUE = "JEVGUARD_ARTIFACT_BUILD_SENTINEL_7f3c9d2a";
 
 const PLUGIN_PACKAGE_NAME = "@pablozrrrr/jevguard";
 const PLUGIN_VERSION = "0.1.0";
-const SKILL_PACKED_PREFIX = "skills/jevguard-rules";
+const RULES_SKILL_PREFIX = "skills/jevguard-rules";
+const INIT_SKILL_PREFIX = "skills/jev-init";
 const EXPECTED_DIST_FILES = [
   "LICENSE",
   "README.md",
   "cli/main.js",
   "index.js",
   "package.json",
-  `${SKILL_PACKED_PREFIX}/SKILL.md`,
-  `${SKILL_PACKED_PREFIX}/validate-rules.js`,
+  `${INIT_SKILL_PREFIX}/SKILL.md`,
+  `${INIT_SKILL_PREFIX}/validate-init.js`,
+  `${RULES_SKILL_PREFIX}/SKILL.md`,
+  `${RULES_SKILL_PREFIX}/validate-rules.js`,
 ];
 const EXPECTED_ARCHIVE_FILES = EXPECTED_DIST_FILES.map((file) => `package/${file}`).sort();
 const EXPECTED_PACKED_FILES = [
@@ -41,8 +44,10 @@ const EXPECTED_PACKED_FILES = [
   "cli/main.js",
   "README.md",
   "LICENSE",
-  `${SKILL_PACKED_PREFIX}/SKILL.md`,
-  `${SKILL_PACKED_PREFIX}/validate-rules.js`,
+  `${RULES_SKILL_PREFIX}/SKILL.md`,
+  `${RULES_SKILL_PREFIX}/validate-rules.js`,
+  `${INIT_SKILL_PREFIX}/SKILL.md`,
+  `${INIT_SKILL_PREFIX}/validate-init.js`,
 ];
 const EXPECTED_EXPORTS = { ".": "./index.js" };
 const EXPECTED_RUNTIME_DEPENDENCIES = {
@@ -110,6 +115,46 @@ const INVALID_SKILL_DOCUMENT = [
   "### Violation",
   "",
   "The change violates the rule.",
+  "",
+].join("\n");
+
+const VALID_INIT_SKILL_RULES = [
+  "```yaml",
+  "rules:",
+  "  ARCH-100:",
+  "    source: user",
+  "```",
+  "",
+  "## ARCH-100",
+  "",
+  "severity: warning",
+  "scope: src/**",
+  "",
+  "### Rule",
+  "",
+  "Keep changes under src readable.",
+  "",
+  "### Violation",
+  "",
+  "The change adds unnecessary complexity.",
+  "",
+].join("\n");
+
+const VALID_INIT_SKILL_CONFIG = [
+  "version: 1",
+  "",
+  "thresholds:",
+  "  error:",
+  "    warn: 0.40",
+  "    fail: 0.70",
+  "  warning:",
+  "    warn: 0.60",
+  "",
+  "remediation:",
+  "  auto_propose: true",
+  "  propose_on:",
+  "    - FAIL",
+  "  model: opencode/gpt-5.6-luna",
   "",
 ].join("\n");
 
@@ -228,16 +273,23 @@ function toPosix(path: string): string {
   return path.replaceAll("\\", "/");
 }
 
-function packedValidatorPath(): string {
-  return join(extractedDir, "package", "skills", "jevguard-rules", "validate-rules.js");
+function installedValidatorPath(skill: string, validator: string): string {
+  return join(opencodeDir, "node_modules", PLUGIN_PACKAGE_NAME, "skills", skill, `${validator}.js`);
 }
 
-function runPackedValidator(rulesText: string, name: string): { status: number; stdout: string } {
-  const rulesPath = join(tempRoot, name);
+function writePackedTemp(name: string, text: string): string {
+  const path = join(tempRoot, name);
 
-  writeFileSync(rulesPath, rulesText, "utf8");
+  writeFileSync(path, text, "utf8");
 
-  const result = spawnSync("bun", [packedValidatorPath(), rulesPath], { encoding: "utf8" });
+  return path;
+}
+
+function runPackedValidator(
+  validatorPath: string,
+  args: readonly string[],
+): { status: number; stdout: string } {
+  const result = spawnSync("bun", [validatorPath, ...args], { encoding: "utf8" });
 
   return { status: result.status ?? -1, stdout: result.stdout ?? "" };
 }
@@ -281,18 +333,45 @@ describe("local package artifact", () => {
   });
 
   test("ships a validator that reports valid and invalid candidates without policy content", () => {
-    const valid = runPackedValidator(VALID_SKILL_DOCUMENT, "skill-valid.md");
+    const validator = installedValidatorPath("jevguard-rules", "validate-rules");
+    const valid = runPackedValidator(validator, [
+      writePackedTemp("skill-valid.md", VALID_SKILL_DOCUMENT),
+    ]);
 
     expect(valid.status).toBe(0);
     expect(JSON.parse(valid.stdout)).toMatchObject({ status: "valid", ruleIds: ["ARCH-100"] });
 
-    const invalid = runPackedValidator(INVALID_SKILL_DOCUMENT, "skill-invalid.md");
+    const invalid = runPackedValidator(validator, [
+      writePackedTemp("skill-invalid.md", INVALID_SKILL_DOCUMENT),
+    ]);
 
     expect(invalid.status).toBe(1);
     expect(JSON.parse(invalid.stdout)).toMatchObject({
       status: "invalid",
       errorCodes: ["MISSING_SEVERITY"],
     });
+    expect(invalid.stdout).not.toContain("Missing severity metadata");
+  });
+
+  test("ships an init validator that checks provenance and config without content", () => {
+    const validator = installedValidatorPath("jev-init", "validate-init");
+    const config = writePackedTemp("init-skill-config.yaml", VALID_INIT_SKILL_CONFIG);
+    const valid = runPackedValidator(validator, [
+      writePackedTemp("init-skill-valid.md", VALID_INIT_SKILL_RULES),
+      config,
+    ]);
+
+    expect(valid.status).toBe(0);
+    expect(JSON.parse(valid.stdout)).toMatchObject({ status: "valid", ruleIds: ["ARCH-100"] });
+
+    const invalid = runPackedValidator(validator, [
+      writePackedTemp("init-skill-invalid.md", INVALID_SKILL_DOCUMENT),
+      config,
+    ]);
+
+    expect(invalid.status).toBe(1);
+    expect(JSON.parse(invalid.stdout)).toMatchObject({ status: "invalid" });
+    expect(invalid.stdout).toContain("PROVENANCE_MISSING");
     expect(invalid.stdout).not.toContain("Missing severity metadata");
   });
 
@@ -309,15 +388,10 @@ describe("local package artifact", () => {
     const config = JSON.parse(output) as {
       readonly skills?: { readonly paths?: readonly string[] };
     };
-    const expected = join(
-      opencodeDir,
-      "node_modules",
-      PLUGIN_PACKAGE_NAME,
-      "skills",
-      "jevguard-rules",
-    );
+    const installedSkills = join(opencodeDir, "node_modules", PLUGIN_PACKAGE_NAME, "skills");
+    const expected = [join(installedSkills, "jevguard-rules"), join(installedSkills, "jev-init")];
 
-    expect(config.skills?.paths?.map(toPosix)).toEqual([toPosix(expected)]);
+    expect(config.skills?.paths?.map(toPosix)).toEqual(expected.map(toPosix));
   });
 
   test("publishes the exact public manifest with only runtime dependencies", () => {

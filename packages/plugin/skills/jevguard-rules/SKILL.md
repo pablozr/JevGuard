@@ -21,6 +21,9 @@ anything is written.
   tool you invoke is the bundled validator next to this `SKILL.md`.
 - Preserve every valid existing rule block unless the user explicitly asks to replace,
   remove, or weaken it. Refuse to silently drop a policy.
+- Preserve an existing `jev-init` provenance preamble at the top of `.jev/rules.md`.
+  Never delete it, never move it below a rule heading, and never add a `source` key
+  inside a rule block.
 - Never write `.jev/rules.md` without a valid parser result and an explicit final
   confirmation from the user.
 
@@ -77,6 +80,19 @@ scope: src/**
 
 <non-empty exception, or omit the section>
 ```
+
+If `.jev/rules.md` already begins with a `jev-init` provenance manifest — one fenced
+`yaml` block before the first `##` rule heading that maps rule IDs to
+`{ source, evidence }` — keep it as the first thing in the document and update it to
+match the final rule set:
+
+- keep each existing entry for a rule that still exists unchanged, including its
+  `source` and any evidence;
+- remove each entry whose rule is being removed;
+- add or replace an entry with `source: user` for every rule this skill adds or changes
+  at the user's request;
+- never introduce `source: inferred`; this skill records only what the user asked for;
+- if the file has no provenance manifest, do not invent one.
 
 Before writing, explicitly call out any change that weakens, removes, or repairs
 policy: deleted rules, new exceptions, lowered severity, narrowed scope, or a changed

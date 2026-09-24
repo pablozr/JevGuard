@@ -7,23 +7,39 @@ const PACKAGE_DIR = resolve(SCRIPT_DIR, "..");
 const REPO_ROOT = resolve(PACKAGE_DIR, "..", "..");
 const SOURCE_DIR = join(PACKAGE_DIR, "src");
 const DIST_DIR = join(PACKAGE_DIR, "dist");
-const SKILL_NAME = "jevguard-rules";
-const SKILL_SOURCE_DIR = join(PACKAGE_DIR, "skills", SKILL_NAME);
-const SKILL_DIST_DIR = join(DIST_DIR, "skills", SKILL_NAME);
-const SKILL_DIST_PREFIX = `skills/${SKILL_NAME}`;
+
+interface BundledSkill {
+  readonly name: string;
+  readonly validator: string;
+}
+
+/**
+ * Bundled OpenCode skills, in registration order. Each ships its `SKILL.md` and the
+ * private validator it invokes next to it under `skills/<name>/`.
+ */
+const BUNDLED_SKILLS: readonly BundledSkill[] = [
+  { name: "jevguard-rules", validator: "validate-rules" },
+  { name: "jev-init", validator: "validate-init" },
+];
+
+function skillDistPrefix(skill: BundledSkill): string {
+  return `skills/${skill.name}`;
+}
 
 /**
  * The packed allowlist is explicit so the artifact never ships sources, maps, or
- * tests. The bundled validator under `skills/` is the private parser helper the
- * shipped `jevguard-rules` skill invokes.
+ * tests. The bundled validators under `skills/` are the private helpers the shipped
+ * skills invoke.
  */
 const ARTIFACT_FILES: readonly string[] = [
   "index.js",
   "cli/main.js",
   "README.md",
   "LICENSE",
-  `${SKILL_DIST_PREFIX}/SKILL.md`,
-  `${SKILL_DIST_PREFIX}/validate-rules.js`,
+  ...BUNDLED_SKILLS.flatMap((skill) => [
+    `${skillDistPrefix(skill)}/SKILL.md`,
+    `${skillDistPrefix(skill)}/${skill.validator}.js`,
+  ]),
 ];
 
 /**
@@ -66,7 +82,9 @@ async function bundleEntries(): Promise<void> {
     entrypoints: [
       join(SOURCE_DIR, "index.ts"),
       join(SOURCE_DIR, "cli/main.ts"),
-      join(SOURCE_DIR, "skills", SKILL_NAME, "validate-rules.ts"),
+      ...BUNDLED_SKILLS.map((skill) =>
+        join(SOURCE_DIR, "skills", skill.name, `${skill.validator}.ts`),
+      ),
     ],
     outdir: DIST_DIR,
     root: SOURCE_DIR,
@@ -117,9 +135,14 @@ async function copyDocs(): Promise<void> {
   await cp(join(REPO_ROOT, "LICENSE"), join(DIST_DIR, "LICENSE"));
 }
 
-async function copySkill(): Promise<void> {
-  await mkdir(SKILL_DIST_DIR, { recursive: true });
-  await cp(join(SKILL_SOURCE_DIR, "SKILL.md"), join(SKILL_DIST_DIR, "SKILL.md"));
+async function copySkills(): Promise<void> {
+  for (const skill of BUNDLED_SKILLS) {
+    const source = join(PACKAGE_DIR, "skills", skill.name, "SKILL.md");
+    const destination = join(DIST_DIR, "skills", skill.name, "SKILL.md");
+
+    await mkdir(join(DIST_DIR, "skills", skill.name), { recursive: true });
+    await cp(source, destination);
+  }
 }
 
 async function main(): Promise<void> {
@@ -131,7 +154,7 @@ async function main(): Promise<void> {
   await bundleEntries();
   await writeArtifactManifest(source);
   await copyDocs();
-  await copySkill();
+  await copySkills();
 
   console.log(`artifact built at ${DIST_DIR}`);
 }
