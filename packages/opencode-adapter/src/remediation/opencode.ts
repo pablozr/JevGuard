@@ -1,34 +1,41 @@
 import type { OpencodeClient } from "@opencode-ai/sdk";
-import type { BridgeCommandDelivery, OpenCodeCommandClient, ReviewBridgePort } from "./types";
+import type { ProposalPromptInput, ProposalSessionFacade } from "./types";
 
 /**
- * Adapts the concrete OpenCode client to the narrow bridge command surface. Typing
- * the parameter as the SDK client keeps compilation pinned to the supported OpenCode
- * SDK version and to the exact `executeCommand` request shape.
+ * Concrete proposal facade over the OpenCode SDK session API. The SDK resolves
+ * `{ data, error }` instead of throwing, so absent data or an error payload is
+ * rejected and left for the plugin orchestration to contain. The child session is
+ * created under the originating session, and the prompt carries the controlled
+ * system prompt, the explicit agent and model, and wildcard-disabled tools.
  */
-export function createOpenCodeCommandClient(client: OpencodeClient): OpenCodeCommandClient {
+export function createOpenCodeProposalSessionFacade(client: OpencodeClient): ProposalSessionFacade {
   return {
-    tui: {
-      executeCommand: (input) => client.tui.executeCommand({ body: input.body }),
+    async createChildSession(input): Promise<string> {
+      const result = await client.session.create({
+        body: { parentID: input.parentID, title: input.title },
+      });
+
+      if (result.data === undefined || result.error !== undefined) {
+        throw new Error("OpenCode child session unavailable");
+      }
+
+      return result.data.id;
     },
-  };
-}
 
-/**
- * Review bridge port over the OpenCode TUI command channel. Only the internal command
- * string crosses the boundary; an SDK error payload or a rejected request collapses to
- * `FAILED` and never throws, so the caller's review and presentation are unaffected.
- * No payload, diff, or secret is logged here.
- */
-export function createOpenCodeReviewBridge(client: OpenCodeCommandClient): ReviewBridgePort {
-  return {
-    async execute(command: string): Promise<BridgeCommandDelivery> {
-      try {
-        const result = await client.tui.executeCommand({ body: { command } });
+    async prompt(input: ProposalPromptInput): Promise<void> {
+      const result = await client.session.prompt({
+        path: { id: input.sessionID },
+        body: {
+          agent: input.agent,
+          model: { providerID: input.model.providerID, modelID: input.model.modelID },
+          system: input.system,
+          tools: { ...input.tools },
+          parts: [{ type: "text", text: input.text }],
+        },
+      });
 
-        return result.error === undefined ? "DELIVERED" : "FAILED";
-      } catch {
-        return "FAILED";
+      if (result.data === undefined || result.error !== undefined) {
+        throw new Error("OpenCode proposal prompt unavailable");
       }
     },
   };

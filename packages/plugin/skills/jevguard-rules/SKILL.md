@@ -2,7 +2,7 @@
 name: jevguard-rules
 description: Use when the user wants to create, add, edit, remove, weaken, or repair a JevGuard policy rule in `.jev/rules.md`, or asks what JevGuard checks. Interviews only for missing rule facts, validates the full candidate with the bundled parser, and requires explicit final confirmation before replacing the file. Do not use for `.jev/config.yaml`, credentials, or running a review.
 license: MIT
-compatibility: opencode >=1.18.31 <2
+compatibility: opencode >=1.18.32 <2
 ---
 
 # JevGuard rules

@@ -15,6 +15,23 @@ const SERVICE_NAME = "jevguard";
 const TOAST_DURATION_MS = 5000;
 
 /**
+ * Minimal publish surface for the TUI session-select event. The installed 1.18.32
+ * v1 SDK publish body union omits `tui.session.select` although the server accepts
+ * it (the event is defined in the v2 schema), so the concrete client is narrowed
+ * here once at the adapter boundary.
+ */
+interface TuiSessionSelectPublisher {
+  readonly tui: {
+    publish(input: {
+      readonly body: {
+        readonly type: "tui.session.select";
+        readonly properties: { readonly sessionID: string };
+      };
+    }): Promise<{ readonly error?: unknown }>;
+  };
+}
+
+/**
  * Adapts the concrete OpenCode client to the narrow presentation surface. Typing
  * the parameter as the SDK client keeps compilation pinned to the supported
  * OpenCode SDK version.
@@ -22,12 +39,18 @@ const TOAST_DURATION_MS = 5000;
 export function createOpenCodePresentationClient(
   client: OpencodeClient,
 ): OpenCodePresentationClient {
+  const publisher = client as unknown as TuiSessionSelectPublisher;
+
   return {
     app: {
       log: (input) => client.app.log({ body: input.body }),
     },
     tui: {
       showToast: (input) => client.tui.showToast({ body: input.body }),
+      selectSession: (input) =>
+        publisher.tui.publish({
+          body: { type: "tui.session.select", properties: { sessionID: input.sessionID } },
+        }),
     },
   };
 }

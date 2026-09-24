@@ -19,7 +19,6 @@ const SKILL_DIST_PREFIX = `skills/${SKILL_NAME}`;
  */
 const ARTIFACT_FILES: readonly string[] = [
   "index.js",
-  "tui/index.js",
   "cli/main.js",
   "README.md",
   "LICENSE",
@@ -66,7 +65,6 @@ async function bundleEntries(): Promise<void> {
   const result = await Bun.build({
     entrypoints: [
       join(SOURCE_DIR, "index.ts"),
-      join(SOURCE_DIR, "tui", "index.ts"),
       join(SOURCE_DIR, "cli/main.ts"),
       join(SOURCE_DIR, "skills", SKILL_NAME, "validate-rules.ts"),
     ],
@@ -99,7 +97,7 @@ async function writeArtifactManifest(source: SourceManifest): Promise<void> {
     license: source.license,
     type: "module",
     main: "./index.js",
-    exports: { ".": "./index.js", "./tui": "./tui/index.js" },
+    exports: { ".": "./index.js" },
     bin: { jevguard: "cli/main.js" },
     files: [...ARTIFACT_FILES],
     engines: source.engines,

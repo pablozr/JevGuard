@@ -25,6 +25,8 @@ import type {
   OpenCodeLogInput,
   OpenCodeLogResult,
   OpenCodePresentationClient,
+  OpenCodeSessionSelectInput,
+  OpenCodeSessionSelectResult,
   OpenCodeToastInput,
   OpenCodeToastResult,
   ReviewLogEntry,
@@ -171,10 +173,13 @@ class FakeToastSink implements ToastSink {
 class FakeOpenCodeClient implements OpenCodePresentationClient {
   logResult: OpenCodeLogResult = {};
   toastResult: OpenCodeToastResult = {};
+  sessionSelectResult: OpenCodeSessionSelectResult = {};
   logError: Error | null = null;
   toastError: Error | null = null;
+  sessionSelectError: Error | null = null;
   readonly logCalls: OpenCodeLogInput[] = [];
   readonly toastCalls: OpenCodeToastInput[] = [];
+  readonly sessionSelectCalls: OpenCodeSessionSelectInput[] = [];
 
   readonly app = {
     log: (input: OpenCodeLogInput): Promise<OpenCodeLogResult> => {
@@ -197,6 +202,15 @@ class FakeOpenCodeClient implements OpenCodePresentationClient {
       }
 
       return Promise.resolve(this.toastResult);
+    },
+    selectSession: (input: OpenCodeSessionSelectInput): Promise<OpenCodeSessionSelectResult> => {
+      this.sessionSelectCalls.push(input);
+
+      if (this.sessionSelectError !== null) {
+        return Promise.reject(this.sessionSelectError);
+      }
+
+      return Promise.resolve(this.sessionSelectResult);
     },
   };
 }

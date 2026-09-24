@@ -82,7 +82,9 @@ export {
   countSummary,
   createOpenCodeLogSink,
   createOpenCodePresentationClient,
+  createOpenCodeSessionNavigator,
   createOpenCodeToastSink,
+  createRemediationNotifier,
   createReviewPresenter,
   displayOutcome,
   logLevelFor,
@@ -92,15 +94,21 @@ export {
   toReviewToast,
   toastVariantFor,
 } from "./presentation";
+export { createOpenCodeProposalSessionFacade } from "./remediation";
+export type { ProposalModel, ProposalPromptInput, ProposalSessionFacade } from "./remediation";
 export type {
   DeliveryStatus,
   OpenCodeLogInput,
   OpenCodeLogResult,
   OpenCodePresentationClient,
+  OpenCodeSessionSelectInput,
+  OpenCodeSessionSelectResult,
   OpenCodeToastInput,
   OpenCodeToastResult,
   PresentationDelivery,
   PresentationPorts,
+  ProposalSessionNavigator,
+  RemediationNotifier,
   ReviewLogEntry,
   ReviewLogResult,
   ReviewLogSummary,
@@ -110,11 +118,3 @@ export type {
   ToastSink,
   ToastVariant,
 } from "./presentation";
-export { createOpenCodeCommandClient, createOpenCodeReviewBridge } from "./remediation";
-export type {
-  BridgeCommandDelivery,
-  OpenCodeCommandClient,
-  OpenCodeExecuteCommandInput,
-  OpenCodeExecuteCommandResult,
-  ReviewBridgePort,
-} from "./remediation";

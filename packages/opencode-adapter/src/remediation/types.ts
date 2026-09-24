@@ -1,29 +1,32 @@
-export type BridgeCommandDelivery = "DELIVERED" | "FAILED";
-
 /**
- * Narrow write-only port for the internal review bridge command. Implementations own
- * the host transport; a failure is returned as `FAILED` and is never thrown.
+ * Model identity for one proposer invocation, already split into the provider and
+ * model IDs the host expects.
  */
-export interface ReviewBridgePort {
-  execute(command: string): Promise<BridgeCommandDelivery>;
-}
-
-export interface OpenCodeExecuteCommandInput {
-  readonly body: {
-    readonly command: string;
-  };
-}
-
-export interface OpenCodeExecuteCommandResult {
-  readonly error?: unknown;
+export interface ProposalModel {
+  readonly providerID: string;
+  readonly modelID: string;
 }
 
 /**
- * Narrow OpenCode client surface for bridge commands. Structural typing keeps the
- * adapter decoupled from the SDK runtime and lets tests fake command delivery.
+ * One proposer invocation. `system`, `tools`, and `text` are supplied by the plugin
+ * from controlled contracts; the host client only transports them. No credential is
+ * carried here.
  */
-export interface OpenCodeCommandClient {
-  readonly tui: {
-    executeCommand(input: OpenCodeExecuteCommandInput): Promise<OpenCodeExecuteCommandResult>;
-  };
+export interface ProposalPromptInput {
+  readonly sessionID: string;
+  readonly agent: string;
+  readonly model: ProposalModel;
+  readonly system: string;
+  readonly tools: Readonly<Record<string, boolean>>;
+  readonly text: string;
+}
+
+/**
+ * Host port for the automatic proposal. It creates one child session under the
+ * originating session and prompts the hidden proposer subagent with no tools. The
+ * concrete adapter owns the OpenCode SDK calls and unwraps their results.
+ */
+export interface ProposalSessionFacade {
+  createChildSession(input: { readonly parentID: string; readonly title: string }): Promise<string>;
+  prompt(input: ProposalPromptInput): Promise<void>;
 }

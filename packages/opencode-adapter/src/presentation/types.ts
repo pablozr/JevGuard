@@ -95,6 +95,25 @@ export interface ReviewPresenter {
   present(review: TurnReview): Promise<PresentationDelivery>;
 }
 
+/**
+ * Safe, transient status surface for the automatic proposal. It carries no rule,
+ * task, diff, finding, or secret; only generic lifecycle messages: the proposal is
+ * being prepared in the child session, and then that it is ready.
+ */
+export interface RemediationNotifier {
+  proposalPreparing(): Promise<DeliveryStatus>;
+  proposalReady(): Promise<DeliveryStatus>;
+}
+
+/**
+ * Safe TUI navigation surface for the automatic proposal. It moves the client to
+ * the proposal's child session and carries no rule, task, diff, finding, or secret.
+ * Every delivery failure is contained as `FAILED`.
+ */
+export interface ProposalSessionNavigator {
+  navigate(sessionID: string): Promise<DeliveryStatus>;
+}
+
 export interface OpenCodeLogInput {
   readonly body: {
     readonly service: string;
@@ -121,9 +140,18 @@ export interface OpenCodeToastResult {
   readonly error?: unknown;
 }
 
+export interface OpenCodeSessionSelectInput {
+  readonly sessionID: string;
+}
+
+export interface OpenCodeSessionSelectResult {
+  readonly error?: unknown;
+}
+
 /**
  * Narrow OpenCode client surface for presentation. Structural typing keeps the
- * adapter decoupled from the SDK runtime and lets tests fake log/toast delivery.
+ * adapter decoupled from the SDK runtime and lets tests fake log/toast/navigation
+ * delivery.
  */
 export interface OpenCodePresentationClient {
   readonly app: {
@@ -131,5 +159,6 @@ export interface OpenCodePresentationClient {
   };
   readonly tui: {
     showToast(input: OpenCodeToastInput): Promise<OpenCodeToastResult>;
+    selectSession(input: OpenCodeSessionSelectInput): Promise<OpenCodeSessionSelectResult>;
   };
 }

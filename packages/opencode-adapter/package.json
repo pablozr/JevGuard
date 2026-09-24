@@ -18,7 +18,7 @@
     "@inquirer/password": "^5.2.2",
     "@jevguard/core": "workspace:*",
     "@napi-rs/keyring": "2.1.0",
-    "@opencode-ai/sdk": "1.18.31",
+    "@opencode-ai/sdk": "1.18.32",
     "@typesafe-ai/sdk": "0.6.0",
     "yaml": "2.9.1"
   }

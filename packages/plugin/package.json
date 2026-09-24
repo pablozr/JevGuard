@@ -7,8 +7,7 @@
   "type": "module",
   "types": "./src/index.ts",
   "exports": {
-    ".": "./src/index.ts",
-    "./tui": "./src/tui/index.ts"
+    ".": "./src/index.ts"
   },
   "bin": {
     "jevguard": "./src/cli/main.ts"
@@ -24,7 +23,7 @@
   },
   "engines": {
     "bun": ">=1.1.0",
-    "opencode": ">=1.18.31 <2"
+    "opencode": ">=1.18.32 <2"
   },
   "keywords": [
     "opencode",
@@ -45,6 +44,6 @@
     "@jevguard/opencode-adapter": "workspace:*"
   },
   "devDependencies": {
-    "@opencode-ai/plugin": "1.18.31"
+    "@opencode-ai/plugin": "1.18.32"
   }
 }
