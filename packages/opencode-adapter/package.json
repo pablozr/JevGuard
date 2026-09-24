@@ -6,7 +6,8 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./attribution": "./src/attribution/index.ts"
+    "./attribution": "./src/attribution/index.ts",
+    "./policy": "./src/policy/index.ts"
   },
   "scripts": {
     "format": "biome format --write .",
