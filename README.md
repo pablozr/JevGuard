@@ -27,12 +27,13 @@ specific policy, and leaves planning, code generation, and correction with the
 coding agent.
 
 > [!WARNING]
-> JevGuard is in active development. The current release targets OpenCode `1.18.31`
+> JevGuard is in active development. The current release targets OpenCode `1.18.32`
 > and evaluates every rule block declared in `.jev/rules.md` plus the `SCOPE-CREEP`
 > and `COMPLEXITY` built-ins. Reviews are background and observe-only: they report
-> results but never alter the agent context or block a task. A separate, opt-in
-> remediation workflow can act on a local `error`-severity `FAIL` only after you
-> explicitly approve it.
+> results but never alter the agent context or block a task. When remediation is
+> enabled and a review has any `FAIL`, the plugin asks a hidden `jevguard-proposer`
+> subagent for a proposal in an isolated child session and shows a generic toast; the
+> proposer never edits code.
 
 ## Why JevGuard
 
@@ -124,7 +125,7 @@ malformed answer fails only its own check.
 `SCOPE-CREEP` asks whether the change contains material functional, behavioral,
 architectural, dependency, configuration, documentation, or refactoring work the task
 did not request and that is not reasonably necessary to complete it. It uses fixed
-`error` thresholds (`40%`/`70%`), independent of `.jev/config.yaml`.
+`error` thresholds (`65%`/`90%`), independent of `.jev/config.yaml`.
 
 `COMPLEXITY` asks whether the change introduces material complexity disproportionate
 to, or not reasonably necessary for, completing the task, such as unnecessary
@@ -142,42 +143,47 @@ Reviews run in the background. The idle event returns as soon as the serialized
 attribution step is scheduled; policy reads, Jev calls, and presentation never sit on
 the agent's critical path.
 
-## User-approved remediation
+## Safe auto-propose remediation
 
 Reviews are observe-only by default: a review never injects feedback into the agent
-context, adds a session message, blocks a turn, or changes your code. A separate,
-opt-in path can act on one review result — a local `error`-severity repository rule
-that reached `FAIL`.
+context, adds a session message, prompts a session, blocks a turn, or changes your
+code. A separate, configurable path can turn a review result into a proposal, and it is
+delivered entirely by the same server plugin.
 
-- After presentation, the server plugin emits at most one internal bridge command per
-  affected `error` rule. Built-ins (`SCOPE-CREEP`, `COMPLEXITY`), `warning` rules, and
-  every other outcome emit nothing. JevGuard never autocorrects a built-in or a
-  warning.
-- The bridge command (`jevguard.review.v1:<base64url JSON>`) is bounded and carries
-  only the rule snapshot, the evaluation identity (`messageID:ruleId`), the session
-  and message IDs, and the raw probability. It never carries the task or diff, and
-  nothing is logged.
-- A separately loaded TUI entrypoint (`@pablozrrrr/jevguard/tui`) consumes the
-  command, re-validates it, and recovers the task and attributed patch from the
-  session API with the same attribution and evidence policy as the review. There is no
-  repository or global diff fallback: missing, incomplete, oversized, or blocked
-  evidence stops the flow with a safe status and no proposal.
-- Only then does it ask the current session model for a proposal. That interaction
-  disables every advertised tool and asks for a strategy only — no file changes and no
-  patch.
-- A confirmation dialog shows the rule ID and the strategy. Nothing is applied unless
-  you confirm; a cancel or a dialog close performs no work. Approval starts a second,
-  distinct interaction that applies the approved strategy and leaves normal editing
-  tools available.
-- The workflow allows at most one proposal and one apply per evaluation identity;
-  duplicate commands are ignored, and it never retries or re-evaluates on its own.
-- The apply produces an ordinary completed assistant turn, so the server plugin
-  verifies the result by reviewing that turn normally on the next idle — exactly like
-  any other turn.
+When `.jev/config.yaml` enables remediation (it is enabled by default) and a review
+contains any `FAIL`, the plugin, after presenting the review, sends one aggregate
+proposal request to a hidden `jevguard-proposer` subagent:
 
-Both interactions instruct the model to treat the rule, task, and diff as data, and to
-require a separate explicit confirmation before changing tests, configuration, or
-dependencies. No secret crosses the bridge, and no payload, diff, or secret is logged.
+- The request aggregates every `FAIL` finding in the review — local `error` rules and
+  the `SCOPE-CREEP` built-in — together with the turn's task and its **complete, safe,
+  full attributed patch**. `COMPLEXITY` is advisory and never fails, and `warning`
+  rules never fail.
+- The full attributed patch must pass the same safety policy as the review. If any
+  attributed file is blocked or the patch is oversized, the plugin records no proposal
+  at all — even when a rule-scoped `FAIL` exists — because there is no complete safe
+  evidence to send. It never falls back to a repository or global diff.
+- The request is sent in an isolated child session parented to the source session. The
+  `jevguard-proposer` subagent has wildcard-deny permissions and wildcard-disabled
+  tools, so it cannot call a tool, edit a file, or produce a patch. It returns a
+  strategy and one manual apply instruction only.
+- A generic toast reports that the proposal is ready in the child session. It carries
+  no rule, task, diff, finding, or credential.
+
+The plugin creates at most one proposal per evaluated turn, and the child session is
+excluded from review for the plugin lifetime, so a proposal can never recurse or
+trigger a second one. A host, model, or toast failure is contained and never changes
+the review.
+
+The proposer is a strategy step, not an apply step: it never edits code, and nothing
+is applied automatically. You read the proposal, copy its manual apply instruction
+into your normal coding agent, and apply it there. That apply is an ordinary completed
+assistant turn, so the server plugin reviews it normally on the next idle — exactly
+like any other turn.
+
+The proposal prompt treats the task, paths, diff, rules, and findings as untrusted
+data, and requires a separate explicit confirmation before proposing changes to tests,
+configuration, or dependencies. No secret is ever carried, and no payload, task, diff,
+or secret is logged.
 
 ## Install
 
@@ -225,7 +231,7 @@ does not vendor them and does not promise an offline install.
 
 ### Load the local plugin before publication
 
-OpenCode `1.18.31` resolves a **bare** `opencode.json` `plugin` entry from the npm
+OpenCode `1.18.32` resolves a **bare** `opencode.json` `plugin` entry from the npm
 registry or its cache, not from the consumer's `node_modules`. Until the package is
 published, install the tarball into the project's `.opencode` directory and load it
 through a local plugin shim:
@@ -245,16 +251,10 @@ a local plugin module and resolves `@pablozrrrr/jevguard` from
 `.opencode/node_modules`. Do **not** add `@pablozrrrr/jevguard` to the `opencode.json`
 `plugin` list before publication; that bare entry does not resolve locally.
 
-Remediation needs a second local TUI entry. Add its shim beside the server shim:
-
-```ts
-// .opencode/plugins/jevguard-tui.ts
-export { default } from "@pablozrrrr/jevguard/tui";
-```
-
-The server plugin reviews and reports turns whether or not the TUI entry is loaded.
-Without it, a local `error` `FAIL` still emits its bridge command, but nothing consumes
-it, so no proposal appears.
+Remediation is built into the same server plugin: the `config` hook registers the
+hidden `jevguard-proposer` subagent, so no second entrypoint or shim is needed. The
+server plugin reviews and reports turns, and — when remediation is enabled and a review
+fails — creates the proposal child session automatically.
 
 ### Author rules with the bundled skill
 
@@ -298,7 +298,7 @@ Known limitations:
 
 - `@pablozrrrr/jevguard` has no registry release yet, so the one-line `opencode.json`
   plugin entry does not resolve until the package is published.
-- Target host is OpenCode `1.18.31`. Exact `1.18.31` runtime smoke is still
+- Target host is OpenCode `1.18.32`. Exact `1.18.32` runtime smoke is still
   pending; a local `1.18.28` run worked.
 - The plugin and CLI run on Bun, and the packed `jevguard` bin keeps a Bun
   shebang. Install and run the artifact with the Bun runtime.
@@ -380,14 +380,18 @@ The current release implements the full local review path:
   carries every entry's outcome, raw probability, or reason, including the built-in
   results and the synthetic review-level entry when there is one. The fixed result
   order is rules in source order, then `SCOPE-CREEP`, then `COMPLEXITY`.
-- After presentation, at most one detached bridge command is emitted per local
-  `error`-severity rule that reached `FAIL`. Built-ins, `warning` rules, and every
-  other outcome emit nothing, and a transport failure never affects the review,
-  presentation, or later turns.
+- After presentation, when remediation is enabled and the review contains any `FAIL`,
+  at most one aggregate proposal request is sent to the hidden `jevguard-proposer`
+  subagent in an isolated child session parented to the source session, and a generic
+  toast reports that the proposal is ready. The request carries every `FAIL` finding
+  (local `error` rules and the `SCOPE-CREEP` built-in), the task, and the complete,
+  safe, full attributed patch; a blocked or oversized patch records no proposal. A
+  notifier or host failure never affects the review, presentation, or later turns.
 
-The review itself injects no feedback into the agent session and blocks no task. A
-local `error` `FAIL` also emits the opt-in bridge command above; nothing is applied
-without explicit user approval.
+The review itself injects no feedback into the agent session, prompts no session, and
+blocks no task. The proposal above is a strategy only; nothing is applied, and
+the user copies its manual apply instruction into their normal coding agent, whose
+ordinary turn is reviewed normally.
 
 ## Roadmap
 
@@ -412,8 +416,11 @@ V0.9  Local feedback and calibration
 V1    Claude Code and Codex adapters
 ```
 
-The approval-gated remediation described above is the human-gated variant recorded in
-`SPEC.md` §8. The `V0.6` entry remains the future, unattended corrective loop.
+The auto-propose slice is implemented: after a review with a `FAIL`, an enabled
+configuration asks the hidden `jevguard-proposer` subagent for a strategy in an
+isolated child session, and never applies a change. The `V0.6` entry remains the
+future, unattended corrective loop; the proposer is a bounded, strategy-only step, not
+that loop.
 
 CI and pull-request policy review come after V1, using the same versioned rules.
 
@@ -445,12 +452,13 @@ as a transient TUI toast and a structured log entry.
 The local, private tarball (`pnpm artifact:build`, `pnpm artifact:pack`) packages
 that slice so a clean consumer can install it without workspace links.
 
-OpenCode sees only transient toasts, structured logs, and — for a local `error`
-`FAIL` — the internal bridge command a separately loaded TUI entrypoint can consume.
-The review does not inject anything into the agent context, add session messages, or
-block a task. Remediation is a separate, approval-gated workflow and never runs
-without your explicit confirmation. Real-host validation against exact OpenCode
-`1.18.31` is still pending.
+OpenCode sees only transient toasts, structured logs, and — when remediation is
+enabled and a review has a `FAIL` — one proposal child session and a generic toast.
+The review does not inject anything into the agent context, prompt the source session,
+add session messages, or block a task. The proposal is a separate, configurable,
+strategy-only workflow delivered by the server plugin; it never edits code and never
+applies a change. Real-host validation against exact OpenCode `1.18.32` is still
+pending.
 
 ## Development
 

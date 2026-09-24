@@ -25,6 +25,7 @@ yarn-error.log*
 /CONTEXT.md
 /docs/adr/
 /docs/tasks/
+/PLUGIN-FLOW.md
 
 # Editor and operating-system files
 .DS_Store

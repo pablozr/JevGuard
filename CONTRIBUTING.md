@@ -54,8 +54,8 @@ testkit ───────────────────┘
   and use cases. It must not import OpenCode, Bun, Node filesystem/environment, HTTP,
   or TUI APIs.
 - `opencode-adapter` owns host integration and I/O: event handling, turn
-  attribution, policy file reads, concrete Jev transport, credentials, logging, and
-  toasts.
+  attribution, policy file reads, concrete Jev transport, credentials, logging,
+  toasts, and the proposal child session.
 - `plugin` is composition only: it constructs dependencies and exposes the OpenCode
   entrypoint. No policy logic belongs here.
 - `testkit` provides fixtures and fakes; production packages must never import it.
@@ -99,10 +99,14 @@ in `plugin` or `core`.
     `reviewAttributedTurn` presents exactly one aggregate to the structured log and
     the TUI toast. Results are the rules in source order, then `SCOPE-CREEP`, then
     `COMPLEXITY`, regardless of completion timing.
-11. After presentation, `dispatchReviewBridge` emits at most one detached bridge
-    command per local `error` rule that reached `FAIL`. Built-ins, `warning` rules,
-    and every other outcome emit nothing, and a delivery failure never affects the
-    review or later turns.
+11. After presentation, when remediation is enabled and the review contains any
+    `FAIL`, `buildProposalRequest` builds one aggregate request — every `FAIL` finding
+    (local `error` rules and the `SCOPE-CREEP` built-in), the task, and the complete,
+    safe, full attributed patch — and `proposeForTurn` sends it once to the hidden
+    `jevguard-proposer` subagent in an isolated child session parented to the source
+    session. The full patch must pass the safety policy; a blocked or oversized patch
+    records no proposal. The child session is excluded from review, and a host, model,
+    or toast failure never affects the review or later turns.
 
 ```mermaid
 flowchart TD
@@ -128,30 +132,37 @@ flowchart TD
     S --> K
     X --> K
     K --> L["One structured log + TUI toast, rules then SCOPE-CREEP then COMPLEXITY"]
-    L --> M{"Any local error-severity rule FAIL?"}
-    M -->|no| Z["No bridge command emitted"]
-    M -->|yes, one per rule| P["Bridge command to TUI (opt-in, approval-gated)"]
+    L --> M{"Remediation enabled and any FAIL in review?"}
+    M -->|no| Z["No proposal"]
+    M -->|yes, one per turn| P["One aggregate request to hidden jevguard-proposer in a child session + generic toast (configurable, strategy only)"]
 ```
 
-### User-approved remediation (separate TUI target)
+### Safe auto-propose remediation
 
-Remediation is not part of the review lane. It is a separate, opt-in OpenCode TUI
-entrypoint (`@pablozrrrr/jevguard/tui`, source in `packages/plugin/src/tui/`) that is
-loaded only when the user registers it. It consumes the internal bridge command,
-re-validates it, and recovers the task and attributed patch from the session API with
-the same attribution and evidence policy as the review — there is no repository or
-global diff fallback. Any missing, incomplete, oversized, or blocked evidence
-surfaces a safe status and stops; no proposal is sent.
+Remediation is not part of the review lane and needs no separate entrypoint. It is
+automatic, configurable, and strategy-only. After presentation, when `.jev/config.yaml`
+enables remediation and the review contains any `FAIL`, the review builds one
+aggregate request — every `FAIL` finding (local `error` rules and the `SCOPE-CREEP`
+built-in), the task, and the complete, safe, full attributed patch — and schedules at
+most one proposal. The plugin `config` hook registers the hidden `jevguard-proposer`
+subagent with wildcard-disabled tools and wildcard-deny permissions
+(`{"*": "deny"}`); there is no command hook.
 
-Only after safe, complete evidence is recovered does it prompt the current session
-model for a proposal with **every advertised tool disabled** (`disabledToolMap`), so
-the interaction returns a strategy and cannot modify files. A confirmation dialog
-(`DialogConfirm`) shows the rule ID and strategy; a cancel or a dialog close performs
-no work. Approval starts a second, distinct prompt that applies the approved strategy
-with normal editing tools. The workflow makes at most one proposal and one apply per
-evaluation identity (`messageID:ruleId`), ignores duplicates, and never triggers a
-retry or a re-evaluation. The apply is an ordinary completed turn, so the review lane
-verifies it through the normal server idle evaluation — there is no separate verifier.
+`proposeForTurn` claims the evaluated turn (`messageID`), creates one child session
+parented to the source session, registers it so its own idle events are excluded from
+review for the plugin lifetime, and prompts the proposer subagent with the configured
+model and a fixed system prompt. The subagent cannot call a tool, edit a file, or
+produce a patch: it returns a strategy and one manual apply instruction. A generic
+toast reports that the proposal is ready. Every host, model, or toast failure is
+contained and never affects the review or later turns.
+
+The full attributed patch must pass the same safety policy as the review. A blocked or
+oversized patch records no proposal, even when a rule-scoped `FAIL` exists, and there
+is never a repository or global diff fallback. At most one proposal is created per
+evaluated turn, and there is no retry, loop, or re-evaluation. The user copies the
+proposal's manual apply instruction into their normal coding agent; that apply is an
+ordinary completed assistant turn, so the review lane verifies it through the normal
+server idle evaluation — there is no separate verifier and no automatic apply.
 
 ### Key files by bug category
 
@@ -195,13 +206,22 @@ verifies it through the normal server idle evaluation — there is no separate v
   - `.../presentation/display.ts`, `.../presentation/log.ts`, `.../presentation/toast.ts`
     — outcome precedence and safe aggregate messages.
 - Remediation
-  - `packages/core/src/bridge/` — bridge payload types, bounds, and encoding.
-  - `packages/opencode-adapter/src/remediation/opencode.ts` — bridge transport over the
-    TUI command channel.
-  - `packages/plugin/src/bridge.ts` — one detached bridge command per local `error`
-    `FAIL`.
-  - `packages/plugin/src/tui/` — separate TUI entrypoint: decode, evidence recovery,
-    proposal, confirm, and apply.
+  - `packages/core/src/remediation/config.ts` — strict `remediation` config validation
+    and the `provider/model` specifier split.
+  - `packages/core/src/remediation/request.ts` — one aggregate proposal request from
+    every `FAIL` finding and the complete, safe, full attributed patch.
+  - `packages/core/src/remediation/store.ts` — one-proposal claim and child-session
+    exclusion.
+  - `packages/core/src/remediation/prompt.ts` — fixed proposer system prompt and
+    labelled untrusted-data user content.
+  - `packages/opencode-adapter/src/presentation/remediation.ts` — the fixed, generic
+    remediation-ready toast.
+  - `packages/opencode-adapter/src/remediation/opencode.ts` — child-session creation
+    and proposer prompt over the OpenCode SDK.
+  - `packages/plugin/src/remediation/config.ts` — registers the hidden
+    `jevguard-proposer` subagent on the host config.
+  - `packages/plugin/src/remediation/propose.ts` — claims, creates the child session,
+    prompts the proposer, and notifies.
 - Composition and artifact
   - `packages/plugin/src/plugin.ts` — composition root.
   - `packages/plugin/src/review.ts` — policy load + evaluate + present.
@@ -216,11 +236,13 @@ verifies it through the normal server idle evaluation — there is no separate v
 - One applicable rule maps to exactly one Jev Noul. `Allowed` stays inside that
   Noul's criteria; never add a second decision.
 - No patch or no scope match is `SKIPPED` without calling Jev.
-- Keep the review background and observe-only: never inject agent context, block a
-  turn, or edit code from the review. User-approved remediation is a separate,
-  approval-gated workflow (`SPEC.md` §8) that acts only on a local `error`-severity
-  `FAIL`, only after explicit confirmation; never widen it to unattended retries,
-  re-evaluation, built-ins, or `warning` rules.
+- Keep the review background and observe-only: never inject agent context, prompt the
+  source session, block a turn, or edit code from the review. Safe auto-propose
+  remediation is a separate, configurable workflow (`SPEC.md` §8) delivered by the
+  server plugin; it acts only when a review contains a `FAIL` and the complete full-turn
+  evidence is safe. Never widen it to unattended retries, re-evaluation, automatic
+  apply, or code edits, and never let the proposer prompt the source session or inject
+  into its context.
 - Never expose the API key in config, arguments, logs, errors, toasts, fixtures, or
   agent context. Accept the key only through the OS credential store or the
   CI/automation environment override.
@@ -269,9 +291,9 @@ orchestration in `core`.
 - Add or update tests for behavior changes and regressions.
 - Do not use a global git diff as fallback evidence.
 - Do not change `UNAVAILABLE` into a semantic verdict.
-- Keep the review observe-only. Do not add unattended or automatic remediation,
-  blocking behavior, or agent-context injection to the review. The approval-gated
-  remediation workflow must stay explicit, bounded, and separate.
+- Keep the review observe-only. Do not add blocking behavior, source-session
+  prompting, or agent-context injection to the review. The auto-propose remediation
+  workflow must stay configurable, bounded, strategy-only, and separate.
 - Do not expose API keys, environment files, secrets, or rejected evidence in
   tests, fixtures, logs, or documentation.
 - Do not accept the TypeSafe API key as a CLI argument or repository setting. Local

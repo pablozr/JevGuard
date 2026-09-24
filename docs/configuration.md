@@ -171,6 +171,12 @@ thresholds:
     fail: 0.70
   warning:
     warn: 0.60
+
+remediation:
+  auto_propose: true
+  propose_on:
+    - FAIL
+  model: opencode/gpt-5.6-luna
 ```
 
 Validation rules:
@@ -179,9 +185,17 @@ Validation rules:
 - `thresholds.error.warn`, `thresholds.error.fail`, and `thresholds.warning.warn`
   must be numbers in `[0, 1]`.
 - `thresholds.error.warn` must be strictly less than `thresholds.error.fail`.
+- `remediation` is optional. When absent, the defaults shown above apply.
+- `remediation.auto_propose` must be a boolean.
+- `remediation.propose_on` must be a non-empty list whose only accepted value is
+  `FAIL`.
+- `remediation.model` must be exactly one non-empty provider and one non-empty model
+  separated by `/` (`provider/model`), with no whitespace and no additional `/`.
+- Any other key inside `remediation` is invalid.
 
-A present but invalid configuration is `INVALID_CONFIG` and makes the review
-`UNAVAILABLE`. JevGuard never guesses which thresholds you intended.
+A present but invalid configuration — including an invalid `remediation` section — is
+`INVALID_CONFIG` and makes the review `UNAVAILABLE`. JevGuard never guesses which
+thresholds or remediation policy you intended.
 
 ### Thresholds
 
@@ -269,48 +283,43 @@ result is a missing judgment, and it does not erase a known `FAIL` elsewhere in 
 turn.
 
 By default, OpenCode sees only these transient toasts and logs. The review itself
-does not inject messages into the agent context, does not modify the session, and
-does not block a turn. A separate, opt-in workflow can act on a local `FAIL` only
-after the user explicitly approves it, as described below.
+does not inject messages into the agent context, does not modify the source session,
+and does not block a turn. A separate, configurable workflow can turn a review that
+contains a `FAIL` into a proposal, as described below.
 
-## User-approved remediation
+## Safe auto-propose remediation
 
-The review remains observe-only unless the user approves a remediation. After a
-review, the server plugin emits at most one internal bridge command per local
-`error`-severity repository rule that reached `FAIL`. Built-ins (`SCOPE-CREEP`,
-`COMPLEXITY`), `warning` rules, and every other outcome emit nothing.
+The review remains observe-only unless remediation is enabled, and the server plugin
+delivers it inside the same plugin entrypoint. Remediation is controlled by
+`remediation.auto_propose` (default `true`) and `remediation.propose_on` (default
+`FAIL`). After presenting a review that contains any `FAIL`, the plugin sends one
+aggregate proposal request to a hidden `jevguard-proposer` subagent and shows a
+generic toast. It never edits code and never applies a change.
 
-The command is `jevguard.review.v1:<base64url JSON>` and travels over the host TUI
-command channel. Its payload is a bounded snapshot of the exact rule that produced
-the judgment, the deterministic evaluation identity (`messageID:ruleId`), the
-session and message IDs, and the raw probability. The serialized payload is capped
-at `4096` UTF-8 bytes with per-field caps; an invalid or oversized snapshot is
-rejected, never truncated. The diff and task are not carried in the command.
+The request aggregates every `FAIL` finding in the review — local `error`-severity
+repository rules and the `SCOPE-CREEP` built-in — together with the turn's task and its
+complete, safe, full attributed patch. `COMPLEXITY` is advisory and never fails, and
+`warning` rules never fail, so neither triggers a proposal. The patch is the same
+complete attributed patch the review uses; there is no repository or global diff
+fallback.
 
-A separate TUI entrypoint (`@pablozrrrr/jevguard/tui`) consumes that command,
-re-validates it, and recovers the task and attributed patch from the session API
-using the same attribution as the review: the named assistant message must be a
-completed turn, the task comes from its direct parent user message, and the patch is
-fetched for that parent user message. There is no repository or global diff
-fallback. Missing, incomplete, oversized, or blocked evidence stops the flow with a
-safe status message; no proposal is sent.
+The full attributed patch must pass the safety policy. If any attributed file is
+blocked or the patch is oversized, the plugin records no proposal at all — even when a
+rule-scoped `FAIL` exists — because there is no complete safe evidence to send. The
+task is capped at `16384` characters; a longer task records no proposal rather than
+truncating evidence.
 
-Only after safe, complete attributed evidence is recovered are the task, rule
-snapshot, and diff sent to the current OpenCode session model. The proposal
-interaction disables every advertised tool and asks for a concise, ordered strategy
-only; it must not modify files and must not produce code or a patch. The proposal is
-a strategy, not a byte patch. A confirmation dialog then shows the rule ID and the
-strategy, and nothing is applied unless the user confirms; a cancel or a dialog
-close performs no work.
+The plugin `config` hook registers the hidden `jevguard-proposer` subagent with
+wildcard-disabled tools and wildcard-deny permissions (`{"*": "deny"}`), so it cannot
+call a tool, edit a file, or produce a patch. The proposal is sent in an isolated child
+session parented to the source session, with the configured `remediation.model`; the
+child session is excluded from review for the plugin lifetime, so a proposal can never
+recurse or trigger a second one. The generic toast carries no rule, task, diff, finding,
+or credential.
 
-After explicit approval, a second, distinct prompt sends the approved strategy and
-the same rule/task/diff context to the session model. Normal editing tools remain
-available for this apply interaction. Both instructions require a separate explicit
-user confirmation before changing tests, configuration, or dependencies; only the
-code covered by the approved strategy is in scope without it.
-
-The workflow allows at most one proposal and one apply per evaluation identity;
-duplicate commands are ignored. The TUI never triggers a retry or a re-evaluation.
-The apply interaction produces an ordinary completed assistant turn, so the server
-plugin reviews that turn normally on the next idle, exactly like any other turn.
-The bridge carries no secret, and no payload, diff, or secret is logged.
+At most one proposal is created per evaluated turn. There is no retry, loop, or
+re-evaluation, and no automatic apply. The user reads the proposal, copies its manual
+apply instruction into their normal coding agent, and applies it there. That apply is
+an ordinary completed assistant turn, so the server plugin reviews it normally on the
+next idle, exactly like any other turn. No secret is carried, and no payload, task,
+diff, or secret is logged.
