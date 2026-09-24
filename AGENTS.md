@@ -36,8 +36,8 @@ testkit ───────────────────┘
   infrastructure implementations, structured logging, TUI toasts, the proposal child
   session, and the safe remediation notifier.
 - `plugin` is composition plus the single public OpenCode server plugin entrypoint.
-  Its `config` hook registers the bundled skill and the hidden `jevguard-proposer`
-  subagent; there is no command hook and no apply path.
+  Its `config` hook registers the bundled `jevguard-rules` and `jev-init` skills and
+  the hidden `jevguard-proposer` subagent; there is no command hook and no apply path.
 - `testkit` provides fixtures and fakes; never make production packages depend on it.
 
 The credential CLI and OS credential-store integration are adapter/infrastructure

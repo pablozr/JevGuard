@@ -99,24 +99,44 @@ diff or by another file's patch.
 
 ## Rule authoring skill
 
-The package ships a `jevguard-rules` OpenCode skill with a private rule validator.
-On startup the plugin's `config` hook appends the installed skill directory to the
-host's `skills.paths` and leaves every other config key untouched; it reads no
-credential and performs no evaluation.
+The package ships two OpenCode skills with private validators: `jevguard-rules` to
+author rules and `jev-init` to bootstrap a policy where none exists. On startup the
+plugin's `config` hook appends the installed skill directories to the host's
+`skills.paths` and leaves every other config key untouched; it reads no credential and
+performs no evaluation.
 
-The skill authors `.jev/rules.md` only. It reads the current policy, interviews for
-missing rule facts, writes a candidate to a temp sibling, validates that exact
-candidate with the same parser JevGuard uses, and replaces the real file only after
-the candidate is valid and the user explicitly confirms the final content. It never
-edits `.jev/config.yaml`, never runs the public `jevguard` CLI, and never calls
-Jev/TypeSafe inference.
+`jevguard-rules` authors `.jev/rules.md` only. It reads the current policy, interviews
+for missing rule facts, writes a candidate to a temp sibling, validates that exact
+candidate with the same parser JevGuard uses, and replaces the real file only after the
+candidate is valid and the user explicitly confirms the final content. It never edits
+`.jev/config.yaml`, never runs the public `jevguard` CLI, and never calls Jev/TypeSafe
+inference.
 
-The validator is a private helper, not a public CLI. It prints only a JSON summary:
-parse status, rule counts, rule IDs, and parser error codes. It never prints rule
-text, document contents, file contents, or credentials, and it rejects a missing
-path, a directory, an oversized document, and a read failure with a typed error code.
-Like the rest of JevGuard, the skill must never read or reproduce secret values or
-secret files.
+`jev-init` runs only when neither `.jev/rules.md` nor `.jev/config.yaml` exists. It
+reads a bounded inventory — agent instructions, README and docs, project structure,
+language/build/test/format/lint configuration, and representative source only to
+corroborate a concrete candidate — and records provenance in a preamble before the
+rules. It never reads environment variables, `.env` or credential files, the credential
+store, or `.git/config`, and it never reproduces a secret value. It validates the exact
+staged candidates with the production rule parser and the production gate and
+remediation config resolvers, and writes both files only after the user confirms both
+exact paths. It never calls Jev/TypeSafe inference.
+
+The `jev-init` validator's guarantees are mechanical: it rejects a symlinked candidate
+path before reading it, requires every `inferred` rule to have parsed as `warning` with
+at least two safe evidence paths, rejects `.git` and denied-secret evidence references,
+and validates the default gate and remediation configuration. The agent workflow carries
+the guarantees a validator cannot check: that an inferred rule has genuinely normative,
+independent corroboration, and that both files are created with an exclusive-create
+primitive (`wx`/`O_EXCL`) that rolls back only the file(s) that run created and never
+overwrites or deletes a preexisting file.
+
+Each validator is a private helper, not a public CLI. It prints only a content-free
+JSON summary: status, rule IDs, and deterministic error codes. It never prints rule
+text, config values, evidence contents, document contents, file contents, or
+credentials, and it rejects a missing path, a directory, a symlink, an oversized
+document, and a read failure with a typed error code. Like the rest of JevGuard, the
+skills must never read or reproduce secret values or secret files.
 
 ## Credentials
 

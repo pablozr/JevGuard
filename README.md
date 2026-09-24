@@ -209,8 +209,8 @@ OpenCode after changing the plugin list.
 The artifact ships the plugin as a **locally packed tarball** that bundles the
 private `@jevguard/core` and `@jevguard/opencode-adapter` workspace code, so a
 clean consumer installs one tarball and never resolves a workspace link or a
-private registry package. It also packages the `jevguard-rules` skill and its
-private rule validator under `skills/jevguard-rules/`.
+private registry package. It also packages the `jevguard-rules` and `jev-init`
+skills and their private validators under `skills/<name>/`.
 
 Build the tarball from this repository:
 
@@ -258,11 +258,18 @@ fails — creates the proposal child session automatically.
 
 ### Author rules with the bundled skill
 
-The package ships a `jevguard-rules` OpenCode skill beside the plugin. On startup
-the plugin's `config` hook appends the installed skill directory to the host's
-`skills.paths`, so the skill is discovered without a manual `opencode.json` entry.
-Skill discovery is read at OpenCode startup: restart OpenCode after installing or
-updating the package so the skill appears.
+The package ships two OpenCode skills beside the plugin: `jevguard-rules` to author
+rules, and `jev-init` to bootstrap a policy where none exists. On startup the plugin's
+`config` hook appends the installed skill directories to the host's `skills.paths`, so
+the skills are discovered without a manual `opencode.json` entry. Skill discovery is
+read at OpenCode startup: restart OpenCode after installing or updating the package so
+the skills appear.
+
+`jev-init` runs only when neither `.jev/rules.md` nor `.jev/config.yaml` exists. It
+reads a bounded inventory of the repository, keeps rules only from the user's explicit
+constraints and strongly evidenced local conventions, records provenance in a preamble,
+and previews both candidate files before requiring explicit confirmation naming both
+exact paths. Once a policy exists, every rule change belongs to `jevguard-rules`.
 
 Policy content is different. `.jev/rules.md` and `.jev/config.yaml` are read once
 per attributed turn, so editing rule text takes effect on the next reviewed turn
@@ -421,6 +428,11 @@ configuration asks the hidden `jevguard-proposer` subagent for a strategy in an
 isolated child session, and never applies a change. The `V0.6` entry remains the
 future, unattended corrective loop; the proposer is a bounded, strategy-only step, not
 that loop.
+
+The `V0.4` `jev-init` skill is implemented: when no policy exists it bootstraps
+`.jev/rules.md` and `.jev/config.yaml` from the user's explicit constraints and
+strongly evidenced local conventions, records each rule's provenance, and writes both
+files only after validating the confirmed candidates.
 
 CI and pull-request policy review come after V1, using the same versioned rules.
 

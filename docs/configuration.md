@@ -12,11 +12,13 @@ Both files are read once per attributed turn. A missing `.jev/rules.md` is not a
 pass: the review becomes `UNAVAILABLE`.
 
 Editing policy content needs no restart: the next attributed turn reads the current
-files. Discovery of the plugin and its bundled `jevguard-rules` skill, by contrast,
-happens at OpenCode startup; restart OpenCode after installing or updating the
-package. The skill's bundled validator reads only the candidate `.jev/rules.md`,
-reports safe counts, rule IDs, and parser error codes, and never edits
-`.jev/config.yaml`.
+files. Discovery of the plugin and its bundled `jevguard-rules` and `jev-init` skills,
+by contrast, happens at OpenCode startup; restart OpenCode after installing or
+updating the package. `jev-init` bootstraps both files only when neither exists;
+afterward, `jevguard-rules` authors rules. Each skill's bundled validator reads only
+the candidate policy files and reports safe counts, rule IDs, and parser error codes;
+`jevguard-rules` never edits `.jev/config.yaml`, and `jev-init` writes it only as part
+of a confirmed greenfield bootstrap.
 
 ## `rules.md`
 
@@ -102,6 +104,33 @@ unknown or empty, a section is unknown or duplicated, or a required section is
 missing or empty. An invalid block becomes a per-rule `UNAVAILABLE` result with
 reason `INVALID_RULE`; Jev is never called for that block, and its valid siblings
 are still evaluated.
+
+### Provenance preamble
+
+A `.jev/rules.md` bootstrapped by `jev-init` begins with a fenced `yaml` manifest that
+records where each rule came from. It sits before the first `##` rule heading, so the
+parser ignores it, and it never carries policy:
+
+```yaml
+rules:
+  ARCH-001:
+    source: user
+  LANG-002:
+    source: inferred
+    evidence:
+      - AGENTS.md
+      - package.json
+```
+
+Every valid rule has exactly one entry and every entry maps to a valid rule. `source`
+is `user` or `inferred`; an `inferred` rule requires at least two safe
+repository-relative POSIX evidence paths and `warning` severity. The bundled validator
+enforces those two mechanical conditions and rejects `.git`, absolute, traversal, and
+denied-secret evidence references; the skill's semantic bar — a normative document plus
+independent agreeing evidence — is not machine-checkable. Provenance is authoring
+metadata, not runtime policy: it does not change how any rule is evaluated. When
+`jevguard-rules` later replaces the rules, it preserves this preamble and records the
+rules the user requested as `source: user`.
 
 ### Scope behavior
 
