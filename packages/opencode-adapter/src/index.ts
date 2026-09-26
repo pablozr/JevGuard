@@ -68,6 +68,26 @@ export type {
   TypeSafeSystemOneClient,
   TypeSafeSystemOneRequest,
 } from "./jev";
+export {
+  addPluginEntry,
+  createConfirmationPrompt,
+  createDefaultConfigDocument,
+  createNodeConfigFileSystem,
+  install,
+  JEVGUARD_PLUGIN_ENTRY,
+  resolveConfigPath,
+} from "./opencode-config";
+export type {
+  ConfigFileSystem,
+  ConfirmationPrompt,
+  ConfirmationResult,
+  InstallDependencies,
+  InstallFailureReason,
+  InstallOutcome,
+  InstallPathContext,
+  InstallTarget,
+  PluginEntryMutation,
+} from "./opencode-config";
 export { createNodePolicyFileSystem, createPolicyFileLoader, parsePolicyConfig } from "./policy";
 export type {
   ConfigParseFailureReason,
