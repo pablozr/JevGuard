@@ -2,7 +2,11 @@ import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
 import { runCli } from "../src/cli/run-cli";
 import type { CliDependencies, CliIO } from "../src/cli/types";
-import type { LoginOutcome } from "@jevguard/opencode-adapter";
+import type { InstallOutcome, InstallTarget, LoginOutcome } from "@jevguard/opencode-adapter";
+
+const GLOBAL_PATH = "C:/home/.config/opencode/opencode.json";
+const PROJECT_PATH = "C:/repo/opencode.json";
+const MANUAL_SNIPPET = '{ "plugin": ["@pablozrrrr/jevguard"] }';
 
 class RecordingIO implements CliIO {
   readonly out: string[] = [];
@@ -17,18 +21,31 @@ class RecordingIO implements CliIO {
   }
 }
 
-class StubLogin implements CliDependencies {
-  calls = 0;
-  outcome: LoginOutcome = { status: "SAVED" };
+class StubDependencies implements CliDependencies {
+  loginCalls = 0;
+  loginOutcome: LoginOutcome = { status: "SAVED" };
+  installCalls = 0;
+  readonly installTargets: InstallTarget[] = [];
+  installOutcome: InstallOutcome = {
+    status: "INSTALLED",
+    target: "global",
+    path: GLOBAL_PATH,
+  };
 
   login(): Promise<LoginOutcome> {
-    this.calls += 1;
-    return Promise.resolve(this.outcome);
+    this.loginCalls += 1;
+    return Promise.resolve(this.loginOutcome);
+  }
+
+  install(target: InstallTarget): Promise<InstallOutcome> {
+    this.installCalls += 1;
+    this.installTargets.push(target);
+    return Promise.resolve(this.installOutcome);
   }
 }
 
-function harness(): { io: RecordingIO; dependencies: StubLogin } {
-  return { io: new RecordingIO(), dependencies: new StubLogin() };
+function harness(): { io: RecordingIO; dependencies: StubDependencies } {
+  return { io: new RecordingIO(), dependencies: new StubDependencies() };
 }
 
 describe("runCli dispatch", () => {
@@ -38,7 +55,7 @@ describe("runCli dispatch", () => {
     const exitCode = await runCli(["login"], io, dependencies);
 
     expect(exitCode).toBe(0);
-    expect(dependencies.calls).toBe(1);
+    expect(dependencies.loginCalls).toBe(1);
     expect(io.out.join("\n")).toContain("Credential saved");
     expect(io.err).toEqual([]);
   });
@@ -49,7 +66,7 @@ describe("runCli dispatch", () => {
     const exitCode = await runCli([], io, dependencies);
 
     expect(exitCode).toBe(1);
-    expect(dependencies.calls).toBe(0);
+    expect(dependencies.loginCalls).toBe(0);
     expect(io.out).toEqual([]);
     expect(io.err.join("\n")).toContain("Usage: jevguard login");
   });
@@ -60,7 +77,7 @@ describe("runCli dispatch", () => {
     const exitCode = await runCli(["logout"], io, dependencies);
 
     expect(exitCode).toBe(1);
-    expect(dependencies.calls).toBe(0);
+    expect(dependencies.loginCalls).toBe(0);
     expect(io.err.join("\n")).toContain("Usage: jevguard login");
   });
 
@@ -70,14 +87,14 @@ describe("runCli dispatch", () => {
     const exitCode = await runCli(["login", "test-key"], io, dependencies);
 
     expect(exitCode).toBe(1);
-    expect(dependencies.calls).toBe(0);
+    expect(dependencies.loginCalls).toBe(0);
     expect(io.err.join("\n")).toContain("Usage: jevguard login");
     expect(io.err.join("\n")).not.toContain("test-key");
   });
 
   test("reports an aborted prompt without a success message", async () => {
     const { io, dependencies } = harness();
-    dependencies.outcome = { status: "ABORTED" };
+    dependencies.loginOutcome = { status: "ABORTED" };
 
     const exitCode = await runCli(["login"], io, dependencies);
 
@@ -88,7 +105,7 @@ describe("runCli dispatch", () => {
 
   test("reports a non-TTY login as an actionable failure", async () => {
     const { io, dependencies } = harness();
-    dependencies.outcome = { status: "FAILED", reason: "NOT_A_TTY" };
+    dependencies.loginOutcome = { status: "FAILED", reason: "NOT_A_TTY" };
 
     const exitCode = await runCli(["login"], io, dependencies);
 
@@ -98,13 +115,116 @@ describe("runCli dispatch", () => {
 
   test("reports a store failure without serializing a native error", async () => {
     const { io, dependencies } = harness();
-    dependencies.outcome = { status: "FAILED", reason: "STORE_WRITE_FAILURE" };
+    dependencies.loginOutcome = { status: "FAILED", reason: "STORE_WRITE_FAILURE" };
 
     const exitCode = await runCli(["login"], io, dependencies);
 
     expect(exitCode).toBe(1);
     expect(io.err.join("\n")).toContain("OS credential store");
     expect(io.err.join("\n")).not.toContain("test-key");
+  });
+
+  test("dispatches install to the global target and reports success", async () => {
+    const { io, dependencies } = harness();
+
+    const exitCode = await runCli(["install"], io, dependencies);
+
+    expect(exitCode).toBe(0);
+    expect(dependencies.installTargets).toEqual(["global"]);
+    expect(io.out.join("\n")).toContain(GLOBAL_PATH);
+    expect(io.err).toEqual([]);
+  });
+
+  test("dispatches install --project to the project target", async () => {
+    const { io, dependencies } = harness();
+    dependencies.installOutcome = {
+      status: "INSTALLED",
+      target: "project",
+      path: PROJECT_PATH,
+    };
+
+    const exitCode = await runCli(["install", "--project"], io, dependencies);
+
+    expect(exitCode).toBe(0);
+    expect(dependencies.installTargets).toEqual(["project"]);
+    expect(io.out.join("\n")).toContain(PROJECT_PATH);
+  });
+
+  test("reports an already-installed plugin as success without rewriting", async () => {
+    const { io, dependencies } = harness();
+    dependencies.installOutcome = {
+      status: "ALREADY_INSTALLED",
+      target: "global",
+      path: GLOBAL_PATH,
+    };
+
+    const exitCode = await runCli(["install"], io, dependencies);
+
+    expect(exitCode).toBe(0);
+    expect(io.out.join("\n")).toContain("already registered");
+    expect(io.err).toEqual([]);
+  });
+
+  test("rejects install with an unknown flag without calling the dependency", async () => {
+    const { io, dependencies } = harness();
+
+    const exitCode = await runCli(["install", "--other"], io, dependencies);
+
+    expect(exitCode).toBe(1);
+    expect(dependencies.installCalls).toBe(0);
+    expect(io.err.join("\n")).toContain("Usage: jevguard login");
+  });
+
+  test("rejects install with an extra argument and never echoes it", async () => {
+    const { io, dependencies } = harness();
+
+    const exitCode = await runCli(["install", "test-key"], io, dependencies);
+
+    expect(exitCode).toBe(1);
+    expect(dependencies.installCalls).toBe(0);
+    expect(io.err.join("\n")).toContain("Usage: jevguard login");
+    expect(io.err.join("\n")).not.toContain("test-key");
+  });
+
+  test("reports an aborted install without a success message", async () => {
+    const { io, dependencies } = harness();
+    dependencies.installOutcome = { status: "ABORTED", target: "global", path: GLOBAL_PATH };
+
+    const exitCode = await runCli(["install"], io, dependencies);
+
+    expect(exitCode).toBe(1);
+    expect(io.out).toEqual([]);
+    expect(io.err.join("\n")).toContain("Install cancelled");
+  });
+
+  test("prints the manual snippet when the install cannot confirm off a TTY", async () => {
+    const { io, dependencies } = harness();
+    dependencies.installOutcome = {
+      status: "FAILED",
+      target: "global",
+      path: GLOBAL_PATH,
+      reason: "NOT_A_TTY",
+    };
+
+    const exitCode = await runCli(["install"], io, dependencies);
+
+    expect(exitCode).toBe(1);
+    expect(io.err.join("\n")).toContain(MANUAL_SNIPPET);
+  });
+
+  test("prints the manual snippet when a JSONC config blocks the install", async () => {
+    const { io, dependencies } = harness();
+    dependencies.installOutcome = {
+      status: "FAILED",
+      target: "global",
+      path: GLOBAL_PATH,
+      reason: "UNSUPPORTED_JSONC",
+    };
+
+    const exitCode = await runCli(["install"], io, dependencies);
+
+    expect(exitCode).toBe(1);
+    expect(io.err.join("\n")).toContain(MANUAL_SNIPPET);
   });
 });
 
