@@ -187,8 +187,29 @@ or secret is logged.
 
 ## Install
 
-Once `@pablozrrrr/jevguard` is installed, the intended setup is one line in
-`opencode.json`:
+Installing `@pablozrrrr/jevguard` does **not** register it with OpenCode by itself.
+OpenCode only loads plugins listed in `plugin: [...]` in `opencode.json`, so register
+the plugin from the installed CLI:
+
+```sh
+# global config: ~/.config/opencode/opencode.json
+jevguard install
+
+# project config: ./opencode.json
+jevguard install --project
+```
+
+The installer asks for confirmation, edits only the `plugin` array, and is
+idempotent. It only edits a `plugin` array of plain strings, so OpenCode's
+`[["pkg", { "options": {} }]]` tuple form is a known limitation: the installer leaves
+the file unchanged and prints the manual snippet instead. If `jevguard` is not on
+`PATH`, run it through `bunx`:
+
+```sh
+bunx --package @pablozrrrr/jevguard jevguard install
+```
+
+The manual alternative is one entry in `opencode.json`:
 
 ```json
 { "plugin": ["@pablozrrrr/jevguard"] }

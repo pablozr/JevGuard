@@ -138,6 +138,18 @@ credentials, and it rejects a missing path, a directory, a symlink, an oversized
 document, and a read failure with a typed error code. Like the rest of JevGuard, the
 skills must never read or reproduce secret values or secret files.
 
+## Plugin registration
+
+`jevguard install` (and `jevguard install --project`) registers the plugin by editing
+only the `plugin` array of the target `opencode.json` — the global config under
+`~/.config/opencode/` or the project config at `./opencode.json`. It requires an
+explicit interactive `y/N` confirmation before any write and refuses when stdin is not
+a TTY. It never creates or edits a `.jsonc` file, never falls back to a different
+document, and never reads the credential store or `auth.json`. It only edits a
+`plugin` array of plain strings; OpenCode's `[["pkg", { "options": {} }]]` tuple form
+is a known limitation, so the installer leaves the file unchanged and prints the
+manual snippet instead.
+
 ## Credentials
 
 For normal local use, run the login command with the published package:
