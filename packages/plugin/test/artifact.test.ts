@@ -24,7 +24,7 @@ const BUILD_SENTINEL_VARIABLE = "JEVGUARD_ARTIFACT_BUILD_SENTINEL";
 const BUILD_SENTINEL_VALUE = "JEVGUARD_ARTIFACT_BUILD_SENTINEL_7f3c9d2a";
 
 const PLUGIN_PACKAGE_NAME = "@pablozrrrr/jevguard";
-const PLUGIN_VERSION = "0.2.0";
+const PLUGIN_VERSION = "0.2.1";
 const RULES_SKILL_PREFIX = "skills/jevguard-rules";
 const INIT_SKILL_PREFIX = "skills/jev-init";
 const EXPECTED_DIST_FILES = [
