@@ -9,13 +9,14 @@ export interface ProposalModel {
 
 /**
  * One proposer invocation. `system`, `tools`, and `text` are supplied by the plugin
- * from controlled contracts; the host client only transports them. No credential is
- * carried here.
+ * from controlled contracts; the host client only transports them. A `null` model
+ * omits the model from the prompt so the host applies its own default. No credential
+ * is carried here.
  */
 export interface ProposalPromptInput {
   readonly sessionID: string;
   readonly agent: string;
-  readonly model: ProposalModel;
+  readonly model: ProposalModel | null;
   readonly system: string;
   readonly tools: Readonly<Record<string, boolean>>;
   readonly text: string;

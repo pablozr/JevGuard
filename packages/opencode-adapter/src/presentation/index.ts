@@ -19,7 +19,11 @@ export {
   createOpenCodePresentationClient,
   createOpenCodeToastSink,
 } from "./opencode";
-export { createRemediationNotifier, createOpenCodeSessionNavigator } from "./remediation";
+export {
+  createOpenCodeSessionNavigator,
+  createRemediationFailureLogSink,
+  createRemediationNotifier,
+} from "./remediation";
 export { countSummary, toReviewToast, toastVariantFor } from "./toast";
 export type {
   DeliveryStatus,
@@ -32,7 +36,9 @@ export type {
   OpenCodeToastResult,
   PresentationDelivery,
   PresentationPorts,
+  ProposalFailureReason,
   ProposalSessionNavigator,
+  RemediationFailureLogSink,
   RemediationNotifier,
   ReviewLogEntry,
   ReviewLogResult,

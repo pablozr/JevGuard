@@ -94,6 +94,22 @@ describe("createOpenCodeProposalSessionFacade", () => {
     });
   });
 
+  test("omits the model from the prompt body when it is null so the host applies its default", async () => {
+    const { client, requests } = recordingClient(() =>
+      Promise.resolve(jsonResponse({ info: { id: "msg_1" }, parts: [] })),
+    );
+
+    await createOpenCodeProposalSessionFacade(client).prompt({ ...PROMPT, model: null });
+
+    expect(requests).toHaveLength(1);
+    expect(JSON.parse(requests[0]?.body ?? "{}")).toEqual({
+      agent: "jevguard-proposer",
+      system: "system contract",
+      tools: { "*": false },
+      parts: [{ type: "text", text: "proposal body" }],
+    });
+  });
+
   test("rejects createChildSession when the SDK resolves with an error and no data", async () => {
     const { client } = recordingClient(() => Promise.resolve(errorResponse(400)));
 

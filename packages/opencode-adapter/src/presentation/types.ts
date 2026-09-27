@@ -96,13 +96,33 @@ export interface ReviewPresenter {
 }
 
 /**
+ * Typed reason code for one contained automatic-proposal failure. It is the only
+ * failure detail that may be logged: no task, diff, rule, finding, path, or
+ * credential is ever attached to a failure.
+ */
+export type ProposalFailureReason =
+  | "MODEL_SPECIFIER_INVALID"
+  | "CHILD_SESSION_FAILED"
+  | "PROPOSAL_PROMPT_FAILED";
+
+/**
  * Safe, transient status surface for the automatic proposal. It carries no rule,
  * task, diff, finding, or secret; only generic lifecycle messages: the proposal is
- * being prepared in the child session, and then that it is ready.
+ * being prepared in the child session, then that it is ready, or that it failed.
  */
 export interface RemediationNotifier {
   proposalPreparing(): Promise<DeliveryStatus>;
   proposalReady(): Promise<DeliveryStatus>;
+  proposalFailed(): Promise<DeliveryStatus>;
+}
+
+/**
+ * Safe failure-log surface for the automatic proposal. `write` records exactly one
+ * typed reason code and nothing else; every delivery failure is contained as
+ * `FAILED` and never throws.
+ */
+export interface RemediationFailureLogSink {
+  write(reason: ProposalFailureReason): Promise<DeliveryStatus>;
 }
 
 /**

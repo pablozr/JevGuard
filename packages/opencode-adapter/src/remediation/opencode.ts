@@ -6,7 +6,8 @@ import type { ProposalPromptInput, ProposalSessionFacade } from "./types";
  * `{ data, error }` instead of throwing, so absent data or an error payload is
  * rejected and left for the plugin orchestration to contain. The child session is
  * created under the originating session, and the prompt carries the controlled
- * system prompt, the explicit agent and model, and wildcard-disabled tools.
+ * system prompt, the explicit agent, wildcard-disabled tools, and — when configured —
+ * an explicit model; `null` omits the model so the host applies its own default.
  */
 export function createOpenCodeProposalSessionFacade(client: OpencodeClient): ProposalSessionFacade {
   return {
@@ -23,11 +24,15 @@ export function createOpenCodeProposalSessionFacade(client: OpencodeClient): Pro
     },
 
     async prompt(input: ProposalPromptInput): Promise<void> {
+      const model = input.model;
+
       const result = await client.session.prompt({
         path: { id: input.sessionID },
         body: {
           agent: input.agent,
-          model: { providerID: input.model.providerID, modelID: input.model.modelID },
+          ...(model === null
+            ? {}
+            : { model: { providerID: model.providerID, modelID: model.modelID } }),
           system: input.system,
           tools: { ...input.tools },
           parts: [{ type: "text", text: input.text }],
