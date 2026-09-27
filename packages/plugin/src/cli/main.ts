@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import { performInstall } from "./install";
 import { performLogin } from "./login";
+import { performReport } from "./report";
 import { runCli } from "./run-cli";
 import type { CliIO } from "./types";
 
@@ -12,6 +13,7 @@ const io: CliIO = {
 const exitCode = await runCli(process.argv.slice(2), io, {
   login: performLogin,
   install: performInstall,
+  report: performReport,
 });
 
 process.exitCode = exitCode;

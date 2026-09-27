@@ -2,7 +2,10 @@ import { createFifoJevPort, createRemediationProposalStore } from "@jevguard/cor
 import {
   createCredentialProvider,
   createKeyringCredentialStore,
+  createLocalReviewHistory,
+  createMirroredReviewLogSink,
   createNodePolicyFileSystem,
+  createNodeReviewHistoryFileSystem,
   createOpenCodeLogSink,
   createOpenCodePresentationClient,
   createOpenCodeProposalSessionFacade,
@@ -11,6 +14,7 @@ import {
   createOpenCodeToastSink,
   createPolicyFileLoader,
   createProcessEnvironment,
+  createProcessReviewHistoryContext,
   createRemediationFailureLogSink,
   createRemediationNotifier,
   createReviewPresenter,
@@ -42,6 +46,11 @@ const DEFAULT_JEV_MAX_CONCURRENCY = 2;
 export const JevGuardPlugin: Plugin = async (input) => {
   const presentationClient = createOpenCodePresentationClient(input.client);
   const toast = createOpenCodeToastSink(presentationClient);
+  const history = createLocalReviewHistory({
+    context: createProcessReviewHistoryContext(),
+    fileSystem: createNodeReviewHistoryFileSystem(),
+    now: () => new Date(),
+  });
 
   const dependencies: PluginRuntimeDependencies = {
     facade: createOpenCodeSessionFacade(input.client),
@@ -51,7 +60,7 @@ export const JevGuardPlugin: Plugin = async (input) => {
       fileSystem: createNodePolicyFileSystem(),
     }),
     presenter: createReviewPresenter({
-      log: createOpenCodeLogSink(presentationClient),
+      log: createMirroredReviewLogSink(createOpenCodeLogSink(presentationClient), history),
       toast,
     }),
     proposals: createRemediationProposalStore(),

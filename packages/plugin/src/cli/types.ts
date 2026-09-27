@@ -1,3 +1,4 @@
+import type { ReviewReport } from "@jevguard/core";
 import type { InstallOutcome, InstallTarget, LoginOutcome } from "@jevguard/opencode-adapter";
 
 export interface CliIO {
@@ -8,4 +9,5 @@ export interface CliIO {
 export interface CliDependencies {
   readonly login: () => Promise<LoginOutcome>;
   readonly install: (target: InstallTarget) => Promise<InstallOutcome>;
+  readonly report: () => Promise<ReviewReport>;
 }

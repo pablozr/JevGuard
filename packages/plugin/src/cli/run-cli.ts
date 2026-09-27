@@ -6,15 +6,18 @@ import {
   describeInstallFailure,
   describeInstallInstalled,
   describeLoginFailure,
+  describeReport,
   LOGIN_ABORTED_MESSAGE,
   LOGIN_SAVED_MESSAGE,
+  REPORT_READ_FAILURE_MESSAGE,
+  serializeReport,
   USAGE,
 } from "./messages";
 
 /**
- * Dispatches the `jevguard` CLI: `login`, `install`, and `install --project`. Any
- * other command, argument, or secret-looking argument yields usage and a nonzero
- * exit, and no argument value is ever echoed.
+ * Dispatches the `jevguard` CLI: `login`, `install [--project]`, and
+ * `report [--json]`. Any other command, argument, or secret-looking argument yields
+ * usage and a nonzero exit, and no argument value is ever echoed.
  */
 export async function runCli(
   argv: readonly string[],
@@ -31,6 +34,14 @@ export async function runCli(
 
   if (argv.length === 2 && argv[0] === "install" && argv[1] === "--project") {
     return runInstall(io, dependencies, "project");
+  }
+
+  if (argv.length === 1 && argv[0] === "report") {
+    return runReport(io, dependencies, false);
+  }
+
+  if (argv.length === 2 && argv[0] === "report" && argv[1] === "--json") {
+    return runReport(io, dependencies, true);
   }
 
   io.writeErr(USAGE);
@@ -82,4 +93,18 @@ function reportInstall(io: CliIO, outcome: InstallOutcome): number {
 
   io.writeErr(describeInstallFailure(outcome.reason, outcome.path));
   return 1;
+}
+
+async function runReport(io: CliIO, dependencies: CliDependencies, json: boolean): Promise<number> {
+  try {
+    const report = await dependencies.report();
+
+    io.writeOut(json ? serializeReport(report) : describeReport(report));
+
+    return 0;
+  } catch {
+    io.writeErr(REPORT_READ_FAILURE_MESSAGE);
+
+    return 1;
+  }
 }

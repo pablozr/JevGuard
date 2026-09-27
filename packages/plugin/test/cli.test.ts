@@ -2,11 +2,43 @@ import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
 import { runCli } from "../src/cli/run-cli";
 import type { CliDependencies, CliIO } from "../src/cli/types";
-import type { InstallOutcome, InstallTarget, LoginOutcome } from "@jevguard/opencode-adapter";
+import type {
+  InstallOutcome,
+  InstallTarget,
+  LoginOutcome,
+  ReviewHistoryRecord,
+} from "@jevguard/opencode-adapter";
+import { aggregateReviewHistory, type ReviewReport } from "@jevguard/core";
 
 const GLOBAL_PATH = "C:/home/.config/opencode/opencode.json";
 const PROJECT_PATH = "C:/repo/opencode.json";
 const MANUAL_SNIPPET = '{ "plugin": ["@pablozrrrr/jevguard"] }';
+
+const PATH_SENTINEL = "src/SECRET_PATH_SENTINEL.ts";
+
+function reportFixture(): ReviewReport {
+  const record: ReviewHistoryRecord = {
+    timestamp: "2026-01-01T00:00:00.000Z",
+    turnId: "turn-1",
+    summary: {
+      highestVerdict: "FAIL",
+      hasUnavailable: false,
+      counts: { pass: 0, warn: 0, fail: 1, skipped: 0, unavailable: 0 },
+    },
+    results: [
+      {
+        kind: "RULE",
+        ruleId: "ARCH-001",
+        severity: "error",
+        scopedPaths: [PATH_SENTINEL],
+        outcome: "FAIL",
+        violationProbability: 0.9,
+      },
+    ],
+  };
+
+  return aggregateReviewHistory([record], 0);
+}
 
 class RecordingIO implements CliIO {
   readonly out: string[] = [];
@@ -31,6 +63,8 @@ class StubDependencies implements CliDependencies {
     target: "global",
     path: GLOBAL_PATH,
   };
+  reportCalls = 0;
+  reportResult: ReviewReport = aggregateReviewHistory([], 0);
 
   login(): Promise<LoginOutcome> {
     this.loginCalls += 1;
@@ -41,6 +75,11 @@ class StubDependencies implements CliDependencies {
     this.installCalls += 1;
     this.installTargets.push(target);
     return Promise.resolve(this.installOutcome);
+  }
+
+  report(): Promise<ReviewReport> {
+    this.reportCalls += 1;
+    return Promise.resolve(this.reportResult);
   }
 }
 
@@ -225,6 +264,68 @@ describe("runCli dispatch", () => {
 
     expect(exitCode).toBe(1);
     expect(io.err.join("\n")).toContain(MANUAL_SNIPPET);
+  });
+});
+
+describe("runCli report", () => {
+  test("prints a human summary and exits zero", async () => {
+    const { io, dependencies } = harness();
+    dependencies.reportResult = reportFixture();
+
+    const exitCode = await runCli(["report"], io, dependencies);
+
+    expect(exitCode).toBe(0);
+    expect(dependencies.reportCalls).toBe(1);
+    expect(io.err).toEqual([]);
+    expect(io.out.join("\n")).toContain("JevGuard review history");
+    expect(io.out.join("\n")).toContain("ARCH-001");
+  });
+
+  test("prints the same aggregation as JSON for report --json", async () => {
+    const { io, dependencies } = harness();
+    dependencies.reportResult = reportFixture();
+
+    const exitCode = await runCli(["report", "--json"], io, dependencies);
+
+    expect(exitCode).toBe(0);
+    expect(io.err).toEqual([]);
+    expect(JSON.parse(io.out.join("\n"))).toEqual(dependencies.reportResult);
+  });
+
+  test("treats a missing or empty history as a normal empty report", async () => {
+    const { io, dependencies } = harness();
+
+    const exitCode = await runCli(["report"], io, dependencies);
+
+    expect(exitCode).toBe(0);
+    expect(io.err).toEqual([]);
+    expect(io.out.join("\n")).toBe("No review history yet.");
+  });
+
+  test("rejects an unknown report argument without echoing it", async () => {
+    const { io, dependencies } = harness();
+
+    const exitCode = await runCli(["report", "SECRET_VALUE"], io, dependencies);
+
+    expect(exitCode).toBe(1);
+    expect(dependencies.reportCalls).toBe(0);
+    expect(io.err.join("\n")).toContain("jevguard report [--json]");
+    expect(io.err.join("\n")).not.toContain("SECRET_VALUE");
+  });
+
+  test("never prints a path or a diff sentinel", async () => {
+    const { io, dependencies } = harness();
+    dependencies.reportResult = reportFixture();
+
+    await runCli(["report"], io, dependencies);
+    await runCli(["report", "--json"], io, dependencies);
+
+    const output = io.out.join("\n");
+
+    expect(output).not.toContain(PATH_SENTINEL);
+    expect(output).not.toContain("src/");
+    expect(output).not.toContain("--- a/");
+    expect(output).not.toContain("@@");
   });
 });
 

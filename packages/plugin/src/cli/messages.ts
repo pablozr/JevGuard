@@ -4,15 +4,27 @@ import type {
   InstallTarget,
   LoginFailureReason,
 } from "@jevguard/opencode-adapter";
+import type {
+  ReportBuiltInCount,
+  ReportOutcomeTotals,
+  ReportReasonCount,
+  ReportRuleBreakdown,
+  ReviewReport,
+} from "@jevguard/core";
 
 export const USAGE = [
   "Usage: jevguard login",
   "       jevguard install [--project]",
+  "       jevguard report [--json]",
   "",
   "`jev-init` and `jevguard-rules` are OpenCode skills, not CLI commands. Register",
   "the plugin in opencode.json (or run `jevguard install`) and invoke them from",
   "OpenCode.",
 ].join("\n");
+
+export const EMPTY_HISTORY_MESSAGE = "No review history yet.";
+
+export const REPORT_READ_FAILURE_MESSAGE = "Could not read the review history.";
 
 export const LOGIN_SAVED_MESSAGE = "Credential saved to the OS credential store.";
 
@@ -68,4 +80,73 @@ export function describeInstallFailure(reason: InstallFailureReason, path: strin
 
 function manualSnippetFailure(message: string): string {
   return [message, "Add this to the plugin array manually:", MANUAL_INSTALL_SNIPPET].join("\n");
+}
+
+/** Serializable JSON form of the aggregation for `jevguard report --json`. */
+export function serializeReport(report: ReviewReport): string {
+  return JSON.stringify(report, null, 2);
+}
+
+/**
+ * Human-readable aggregation summary. It prints aggregated counts, rule IDs, check
+ * IDs, and reason codes only: never a file path, task, diff, or credential. An empty
+ * history is stated plainly rather than treated as an error.
+ */
+export function describeReport(report: ReviewReport): string {
+  if (report.entryCount === 0) {
+    return EMPTY_HISTORY_MESSAGE;
+  }
+
+  return [
+    "JevGuard review history",
+    `Turns: ${report.entryCount} · skipped malformed lines: ${report.skippedLineCount}`,
+    `First: ${report.firstTimestamp ?? "unknown"}`,
+    `Last: ${report.lastTimestamp ?? "unknown"}`,
+    `Outcomes: ${describeTotals(report.outcomes)}`,
+    "",
+    "UNAVAILABLE reasons:",
+    ...describeReasons(report.unavailableReasons),
+    "",
+    "SKIPPED reasons:",
+    ...describeReasons(report.skippedReasons),
+    "",
+    "Built-ins:",
+    ...describeBuiltIns(report.builtIns),
+    "",
+    "Rules:",
+    ...describeRules(report.rules),
+    "",
+    `Evaluation: whole ${report.evaluation.wholeEvaluations} · sliced ${report.evaluation.slicedEvaluations} · slice judgments ${report.evaluation.totalSliceJudgments}`,
+  ].join("\n");
+}
+
+function describeTotals(totals: ReportOutcomeTotals): string {
+  return `pass ${totals.pass} · warn ${totals.warn} · fail ${totals.fail} · unavailable ${totals.unavailable} · skipped ${totals.skipped}`;
+}
+
+function describeReasons(reasons: readonly ReportReasonCount<string>[]): readonly string[] {
+  if (reasons.length === 0) {
+    return ["  (none)"];
+  }
+
+  return reasons.map((entry) => `  ${entry.reason}: ${entry.count}`);
+}
+
+function describeBuiltIns(checks: readonly ReportBuiltInCount[]): readonly string[] {
+  if (checks.length === 0) {
+    return ["  (none)"];
+  }
+
+  return checks.map((entry) => `  ${entry.checkId}: ${entry.count}`);
+}
+
+function describeRules(rules: readonly ReportRuleBreakdown[]): readonly string[] {
+  if (rules.length === 0) {
+    return ["  (none)"];
+  }
+
+  return rules.map(
+    (entry) =>
+      `  ${entry.ruleId}: ${describeTotals(entry.counts)} · sliced ${entry.slicedRuleCount}`,
+  );
 }
