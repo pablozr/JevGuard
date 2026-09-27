@@ -52,6 +52,8 @@ JevGuard makes those questions versioned, scoped, and machine-actionable.
 
 severity: error
 scope: backend/**
+scope: !backend/generated/**
+evidence: code
 
 ### Rule
 
@@ -65,6 +67,15 @@ A controller performs domain decisions, calculations, or state mutations directl
 
 Validation, HTTP mapping and delegation to services.
 ```
+
+`scope:` may repeat. Each line adds an inclusion glob, and a leading `!` adds an
+exclusion, so a path is in scope when it matches at least one inclusion and no
+exclusion. `evidence:` chooses which files the rule is evaluated against — `code`
+(the default), `docs`, or `any`. Because the default is `code`, prose documentation
+(`.md`, `.mdx`, `.txt`) no longer participates in a rule's evidence unless the rule
+opts in with `evidence: docs` or `evidence: any`; this is intentional. Config and
+data formats (`.json`, `.yaml`, `.toml`, `.xml`, `.csv`, and others) stay in the
+`code` class, so config rules keep their coverage.
 
 The rule stays in the repository beside the code it governs. `Allowed` is a real
 exception, not a suggestion. JevGuard evaluates it as part of the same rule.

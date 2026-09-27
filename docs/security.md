@@ -73,11 +73,24 @@ The evidence policy is fixed in core (not configurable). Only common code and te
 extensions may be sent; a file without an allowlisted extension is rejected rather
 than assumed textual.
 
-Allowed extensions are broad and cover common source, config, docs, shell, and
-data text formats: for example `.ts`, `.tsx`, `.js`, `.jsx`, `.json`, `.md`,
-`.yaml`, `.toml`, `.css`, `.html`, `.py`, `.rb`, `.go`, `.rs`, `.java`, `.cs`,
-`.php`, `.c`, `.cpp`, `.swift`, `.sh`, `.ps1`, `.sql`, `.graphql`, `.tf`, and
-`.patch`.
+The allowlist is split into two extension classes:
+
+- a **code/data** class covering common source, config, shell, and data text formats,
+  for example `.ts`, `.tsx`, `.json`, `.yaml`, `.toml`, `.css`, `.html`, `.py`,
+  `.rb`, `.go`, `.rs`, `.java`, `.cs`, `.php`, `.c`, `.cpp`, `.swift`, `.sh`,
+  `.ps1`, `.sql`, `.graphql`, `.tf`, `.csv`, and `.patch`;
+- a **prose-docs** class covering `.md`, `.mdx`, and `.txt`.
+
+A rule's `evidence:` key selects which class it evaluates: `code` (the default),
+`docs`, or `any`. The default `code` means prose documentation does not enter a code
+rule's evidence, so plan and ticket files cannot sway a code judgment. A rule that
+genuinely inspects documentation declares `evidence: docs` or `evidence: any`.
+
+Class filtering removes a file only when its extension belongs to the other class. A
+denied sensitive path and a file whose extension is in neither class are always
+retained, so the blocked-evidence check still rejects them instead of silently
+omitting them. The `SCOPE-CREEP` and `COMPLEXITY` built-ins are turn-level and use
+both classes together.
 
 Sensitive paths are always rejected, including:
 

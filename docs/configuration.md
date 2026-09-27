@@ -31,6 +31,8 @@ evaluated.
 
 severity: error
 scope: backend/**
+scope: !backend/generated/**
+evidence: code
 
 ### Rule
 
@@ -75,14 +77,27 @@ The parser is line-based and strict:
   are unaffected.
 - Everything between a block's `##` heading and its first `###` heading is
   metadata. Blank lines are ignored. Any non-blank line must match `key: value`,
-  and only `severity` and `scope` are accepted. An unknown key, a duplicate key, or
-  a line without `:` is invalid.
+  and only `severity`, `scope`, and `evidence` are accepted. An unknown key, a
+  duplicate of any key other than `scope`, or a line without `:` is invalid.
 - `severity` is required and must be exactly `error` or `warning`.
-- `scope` is optional. When present it must have a non-empty value. It is a glob
-  matched against changed file paths, where `*` matches within a path segment,
-  `**` matches across segments, and `?` matches one non-separator character. Both
-  `/` and `\` separators are normalized before matching. When `scope` is absent,
-  every changed file in the turn is in scope.
+- `scope` is optional and may repeat. Each `scope:` line adds one pattern: a
+  leading `!` marks an exclusion, and every other pattern is an inclusion. A
+  changed path is in scope when it matches at least one inclusion and no
+  exclusion. A block that declares `scope` but has no inclusion — for example only
+  `!`-exclusions — is invalid, and an empty `scope:` value is invalid. Each
+  pattern is a glob where `*` matches within a path segment, `**` matches across
+  segments, and `?` matches one non-separator character. Both `/` and `\`
+  separators are normalized before matching. When `scope` is absent, every changed
+  file in the turn is in scope. A single `scope: src/**` behaves exactly as before.
+- `evidence` is optional and must be exactly `code`, `docs`, or `any`. It selects
+  the extension class a rule's applicable files may draw from: `code` (the
+  default) sends source, config, and data formats; `docs` sends prose
+  documentation only (`.md`, `.mdx`, `.txt`); `any` sends both. Because the
+  default is `code`, prose documentation no longer participates in a rule's
+  evidence unless the rule opts in with `docs` or `any` — an intentional change so
+  a code rule is not pulled into review by a documentation change alone. Config
+  and data formats (for example `.json`, `.yaml`, `.yml`, `.toml`, `.xml`, `.csv`,
+  `.tsv`) stay in the `code` class, so config rules keep their coverage.
 - Section content is everything after a `###` heading until the next `###`
   heading, trimmed. Sections may appear in any order.
 
@@ -100,10 +115,10 @@ Any other `###` heading is invalid. A repeated section is invalid. An empty
 
 A block is invalid when its rule ID is invalid or duplicated, its metadata is
 malformed or duplicated, its `severity` is missing or invalid, its `scope` is
-unknown or empty, a section is unknown or duplicated, or a required section is
-missing or empty. An invalid block becomes a per-rule `UNAVAILABLE` result with
-reason `INVALID_RULE`; Jev is never called for that block, and its valid siblings
-are still evaluated.
+malformed (empty, or declared without an inclusion), its `evidence` is unknown, a
+section is unknown or duplicated, or a required section is missing or empty. An
+invalid block becomes a per-rule `UNAVAILABLE` result with reason `INVALID_RULE`;
+Jev is never called for that block, and its valid siblings are still evaluated.
 
 ### Provenance preamble
 
@@ -135,9 +150,10 @@ rules the user requested as `source: user`.
 ### Scope behavior
 
 Scope is evaluated per rule against the same attributed turn. A valid rule is
-evaluated only when at least one changed file matches its scope. When no attributed
-file matches, that rule is `SKIPPED` with reason `NO_SCOPE_MATCH` and Jev is never
-called for it.
+evaluated only when at least one changed file is both in scope and in the rule's
+`evidence` class. A path is in scope when it matches at least one `scope:`
+inclusion and no exclusion. When no attributed file qualifies, that rule is
+`SKIPPED` with reason `NO_SCOPE_MATCH` and Jev is never called for it.
 
 `Allowed` belongs to the same violation judgment. It is sent in the same Noul
 criteria as `Rule` and `Violation`; it never creates a second model call or a
@@ -253,9 +269,12 @@ names, extensions, and directories. Oversized or blocked evidence makes only the
 affected matching rule `UNAVAILABLE` (never a partial judgment for that rule);
 rules whose applicable files are all safe still run.
 
-The built-ins use the same policy over every attributed file with a nonempty patch,
-with no scope filtering. An oversized or blocked file makes a built-in `UNAVAILABLE`,
-never partially evaluated. See the [security model](./security.md) for the defaults.
+The extension allowlist is split into a code/data class and a prose-docs class, and
+a rule's `evidence:` key selects which class it evaluates; the default `code`
+excludes prose documentation. The built-ins use the full allowlist (both classes)
+over every attributed file with a nonempty patch, with no scope filtering. An
+oversized or blocked file makes a built-in `UNAVAILABLE`, never partially evaluated.
+See the [security model](./security.md) for the defaults.
 
 ## Outcomes
 
