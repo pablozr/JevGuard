@@ -28,8 +28,8 @@ export const SCOPE_CREEP_ANSWER = "scopeCreep";
 export const COMPLEXITY_ANSWER = "complexity";
 
 /**
- * State for one rule judgment. One applicable rule maps to exactly one Noul;
- * `allowed` stays inside the same criteria.
+ * State for one rule judgment. One complete evidence slice of an applicable rule maps
+ * to exactly one Noul; `allowed` stays inside the same criteria.
  */
 export interface JevRuleRequest {
   readonly kind: "RULE";
@@ -96,10 +96,15 @@ export type JevEvaluationResult = JevRuleEvaluationResult | JevBuiltInBatchResul
 
 /**
  * Port for Jev judgments. Adapters own the transport and validate responses;
- * failures are typed and never thrown.
+ * failures are typed and never thrown. `evaluateRuleBatch` dispatches one turn's rule
+ * slices through a single entry so the credential is resolved once and the adapter
+ * owns a bounded concurrency cap; it returns one result per request in input order.
  */
 export interface JevEvaluationPort {
   evaluate(request: JevRequest): Promise<JevEvaluationResult>;
+  evaluateRuleBatch(
+    requests: readonly JevRuleRequest[],
+  ): Promise<readonly JevRuleEvaluationResult[]>;
 }
 
 /**

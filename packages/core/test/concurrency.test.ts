@@ -5,6 +5,7 @@ import type {
   JevEvaluationPort,
   JevEvaluationResult,
   JevRequest,
+  JevRuleEvaluationResult,
   JevRuleRequest,
 } from "../src/index";
 import { evaluateWithPort } from "../src/evaluation/evaluate-with-port";
@@ -70,6 +71,18 @@ class ControlledPort implements JevEvaluationPort {
         this.active -= 1;
       });
     });
+  }
+
+  async evaluateRuleBatch(
+    requests: readonly JevRuleRequest[],
+  ): Promise<readonly JevRuleEvaluationResult[]> {
+    const results = await Promise.all(requests.map((request) => this.evaluate(request)));
+
+    return results.map((result) =>
+      result.kind === "RULE"
+        ? result
+        : { kind: "RULE", status: "FAILED", reason: "INVALID_RESPONSE" },
+    );
   }
 
   resolve(id: string, result: JevEvaluationResult): void {

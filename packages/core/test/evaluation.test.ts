@@ -5,6 +5,7 @@ import type {
   JevEvaluationPort,
   JevEvaluationResult,
   JevRequest,
+  JevRuleEvaluationResult,
   JevRuleRequest,
   ParsedRule,
   Turn,
@@ -25,6 +26,18 @@ class FakeJevPort implements JevEvaluationPort {
     return this.outcome instanceof Error
       ? Promise.reject(this.outcome)
       : Promise.resolve(this.outcome);
+  }
+
+  async evaluateRuleBatch(
+    requests: readonly JevRuleRequest[],
+  ): Promise<readonly JevRuleEvaluationResult[]> {
+    const results = await Promise.all(requests.map((request) => this.evaluate(request)));
+
+    return results.map((result) =>
+      result.kind === "RULE"
+        ? result
+        : { kind: "RULE", status: "FAILED", reason: "INVALID_RESPONSE" },
+    );
   }
 }
 

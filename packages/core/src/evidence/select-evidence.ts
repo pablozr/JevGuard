@@ -69,11 +69,11 @@ function mountEvidence(files: readonly TurnFile[], policy: EvidencePolicy): Turn
   };
 }
 
-function hasNoAttributedPatch(turn: Turn): boolean {
+export function hasNoAttributedPatch(turn: Turn): boolean {
   return turn.files.every((file) => file.patch.trim() === "");
 }
 
-function selectApplicableFiles(
+export function selectApplicableFiles(
   files: readonly TurnFile[],
   scope: RuleScope | null,
   evidenceClass: RuleEvidenceClass,
@@ -113,6 +113,6 @@ function isInEvidenceClass(
   return !otherClass.includes(extension);
 }
 
-function assembleDiff(files: readonly TurnFile[]): string {
+export function assembleDiff(files: readonly TurnFile[]): string {
   return files.map((file) => file.patch).join("\n");
 }

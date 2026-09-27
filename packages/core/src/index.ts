@@ -5,6 +5,8 @@ export type {
   BuiltInSkippedReason,
   BuiltInUnavailableReason,
   ErrorThresholds,
+  EvidenceMode,
+  EvidenceSliceKind,
   GateConfig,
   GateResult,
   GateThresholds,
@@ -19,9 +21,12 @@ export type {
   ReviewResultKind,
   RuleEvidence,
   RuleEvidenceClass,
+  RuleEvidenceMetadata,
   RuleReviewContext,
   RuleReviewResult,
   RuleScope,
+  RuleSliceJudgment,
+  RuleSliceSummary,
   RuleSeverity,
   SemanticVerdict,
   SkippedReason,
@@ -78,14 +83,23 @@ export { parseRules } from "./rules/parse-rules";
 export type { ReviewCounts, ReviewSummary, TurnReview } from "./review/types";
 export { aggregateReview } from "./review/aggregate";
 export type {
+  BudgetedRulePlan,
   EvidencePolicy,
   EvidenceSelection,
+  EvidenceSlice,
   EvidenceUnavailableReason,
   FileRejectionReason,
   PathSafety,
+  RuleEvidencePlan,
   TurnEvidenceSelection,
 } from "./evidence/types";
 export { DEFAULT_EVIDENCE_POLICY } from "./evidence/defaults";
+export { planRuleEvidence } from "./evidence/plan-slices";
+export {
+  MAX_EXTRA_RULE_CALLS_PER_TURN,
+  MAX_SLICES_PER_RULE,
+  planTurnRuleSlices,
+} from "./evidence/slice-budget";
 export { checkFilePath } from "./evidence/safety";
 export { matchesRuleScope, matchesScope } from "./evidence/scope";
 export { selectRuleEvidence, selectTurnEvidence } from "./evidence/select-evidence";

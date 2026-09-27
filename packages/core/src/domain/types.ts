@@ -96,6 +96,7 @@ export type UnavailableReason =
   | "MISSING_ATTRIBUTED_DIFF"
   | "OVERSIZED_DIFF"
   | "BLOCKED_EVIDENCE"
+  | "SLICE_LIMIT_EXCEEDED"
   | "JEV_FAILURE";
 
 /**
@@ -115,6 +116,45 @@ export type OperationalResult =
   | { readonly outcome: "SKIPPED"; readonly reason: SkippedReason }
   | { readonly outcome: "UNAVAILABLE"; readonly reason: UnavailableReason };
 
+/** How a repository rule's evidence was planned for Jev: one whole slice or several ordered slices. */
+export type EvidenceMode = "WHOLE" | "SLICED";
+
+/** Shape of one planned evidence slice: the whole scoped diff, one file, or one unified-diff hunk. */
+export type EvidenceSliceKind = "WHOLE" | "FILE" | "HUNK";
+
+/** Safe, diff-free identity of one planned slice, in deterministic rule order. */
+export interface RuleSliceSummary {
+  readonly index: number;
+  readonly path: string | null;
+  readonly kind: EvidenceSliceKind;
+  readonly hunkOrdinal: number | null;
+}
+
+/** One valid slice judgment, present only when every planned slice evaluated successfully. */
+export interface RuleSliceJudgment {
+  readonly index: number;
+  readonly probability: number;
+  readonly outcome: SemanticVerdict;
+}
+
+/**
+ * Honest slice coverage for one repository-rule result. `sliceJudgments` is populated
+ * only for a complete result; a failed or over-budget rule records counts and the
+ * failing slice index plus the typed rule-level reason instead, and never exposes
+ * partial sibling probabilities or diff content.
+ */
+export interface RuleEvidenceMetadata {
+  readonly mode: EvidenceMode;
+  readonly plannedSliceCount: number;
+  readonly evaluatedSliceCount: number;
+  readonly failedSliceCount: number;
+  readonly notEvaluatedSliceCount: number;
+  readonly slices: readonly RuleSliceSummary[];
+  readonly sliceJudgments: readonly RuleSliceJudgment[];
+  readonly failingSliceIndex: number | null;
+  readonly failureReason: UnavailableReason | null;
+}
+
 export interface ReviewContext {
   readonly turnId: string;
   readonly ruleId: string | null;
@@ -129,6 +169,7 @@ export interface ReviewContext {
  */
 export interface RuleReviewContext extends ReviewContext {
   readonly kind: "RULE";
+  readonly evidence?: RuleEvidenceMetadata;
 }
 
 export type RuleReviewResult = RuleReviewContext & (GateResult | OperationalResult);

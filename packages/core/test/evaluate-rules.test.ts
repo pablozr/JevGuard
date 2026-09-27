@@ -10,6 +10,8 @@ import type {
   JevEvaluationPort,
   JevEvaluationResult,
   JevRequest,
+  JevRuleEvaluationResult,
+  JevRuleRequest,
   ParsedRule,
   RuleCandidateResult,
   Turn,
@@ -37,6 +39,26 @@ class SequencedJevPort implements JevEvaluationPort {
     }
 
     return Promise.resolve(outcome);
+  }
+
+  async evaluateRuleBatch(
+    requests: readonly JevRuleRequest[],
+  ): Promise<readonly JevRuleEvaluationResult[]> {
+    const results = await Promise.all(
+      requests.map(async (request) => {
+        try {
+          return await this.evaluate(request);
+        } catch {
+          return { kind: "RULE" as const, status: "FAILED" as const, reason: "API_ERROR" as const };
+        }
+      }),
+    );
+
+    return results.map((result) =>
+      result.kind === "RULE"
+        ? result
+        : { kind: "RULE", status: "FAILED", reason: "INVALID_RESPONSE" },
+    );
   }
 }
 
