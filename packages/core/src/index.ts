@@ -83,6 +83,18 @@ export { parseRules } from "./rules/parse-rules";
 export type { ReviewCounts, ReviewSummary, TurnReview } from "./review/types";
 export { aggregateReview } from "./review/aggregate";
 export type {
+  ReportBuiltInCount,
+  ReportEvaluationCoverage,
+  ReportOutcomeTotals,
+  ReportReasonCount,
+  ReportRecord,
+  ReportResult,
+  ReportRuleBreakdown,
+  ReportSummary,
+  ReviewReport,
+} from "./report/types";
+export { aggregateReviewHistory } from "./report/aggregate";
+export type {
   BudgetedRulePlan,
   EvidencePolicy,
   EvidenceSelection,
