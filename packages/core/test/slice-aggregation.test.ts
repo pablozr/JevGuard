@@ -9,10 +9,12 @@ import type {
   JevRuleRequest,
   ParsedRule,
   RuleCandidateResult,
+  RuleReviewContext,
   RuleReviewResult,
   Turn,
   TurnFile,
 } from "../src/index";
+import { assembleSlicedRuleResult } from "../src/evaluation/assemble-rule";
 
 const validConfig: GateConfigResult = { status: "VALID", config: DEFAULT_GATE_CONFIG };
 
@@ -233,6 +235,24 @@ describe("evaluateRules sliced operational results", () => {
       },
     });
     expect(port.batchSizes).toEqual([]);
+  });
+});
+
+describe("assembleSlicedRuleResult defensive invariant", () => {
+  test("zero slices never yields a semantic verdict", () => {
+    const context: RuleReviewContext = {
+      kind: "RULE",
+      turnId: "turn-1",
+      ruleId: "R-1",
+      severity: "error",
+      scopedPaths: [],
+    };
+
+    const result = assembleSlicedRuleResult(makeRule(), context, [], [], DEFAULT_GATE_CONFIG);
+
+    expect(result).toMatchObject({ outcome: "SKIPPED", reason: "NO_SCOPE_MATCH" });
+    expect(["PASS", "WARN", "FAIL"]).not.toContain(result.outcome);
+    expect("violationProbability" in result).toBe(false);
   });
 });
 

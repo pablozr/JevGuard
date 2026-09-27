@@ -23,7 +23,9 @@ const VERDICT_RANK: Record<SemanticVerdict, number> = { PASS: 0, WARN: 1, FAIL: 
  * returned an invalid probability, or was never dispatched makes the rule
  * `UNAVAILABLE/JEV_FAILURE` with the failing index recorded, and no sibling
  * probability is presented as a semantic verdict. `PASS` requires every planned slice
- * to have evaluated below the warning threshold.
+ * to have evaluated below the warning threshold. Zero slices is a defensive
+ * invariant, not a reachable path: it returns `SKIPPED/NO_SCOPE_MATCH` and never a
+ * semantic verdict, so a missing plan can never be mistaken for compliance.
  */
 export function assembleSlicedRuleResult(
   rule: ParsedRule,
@@ -32,6 +34,10 @@ export function assembleSlicedRuleResult(
   evaluations: readonly JevRuleEvaluationResult[],
   gateConfig: GateConfig,
 ): RuleReviewResult {
+  if (slices.length === 0) {
+    return { ...context, outcome: "SKIPPED", reason: "NO_SCOPE_MATCH" };
+  }
+
   const summaries = slices.map(sliceSummary);
   const mode = evidenceMode(slices.length);
   const gates: GateResult[] = [];
