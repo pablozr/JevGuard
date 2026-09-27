@@ -7,8 +7,10 @@ import {
   type RemediationProposalStore,
 } from "@jevguard/core";
 import type {
+  ProposalFailureReason,
   ProposalSessionFacade,
   ProposalSessionNavigator,
+  RemediationFailureLogSink,
   RemediationNotifier,
 } from "@jevguard/opencode-adapter";
 
@@ -20,6 +22,7 @@ export interface ProposalDependencies {
   readonly proposalFacade: ProposalSessionFacade;
   readonly navigator: ProposalSessionNavigator;
   readonly notifier: RemediationNotifier;
+  readonly failures: RemediationFailureLogSink;
 }
 
 /**
@@ -29,10 +32,12 @@ export interface ProposalDependencies {
  * creation, before navigation and the prompt, so its own idle events are excluded
  * from review and can never recurse. The TUI navigates to the child session before
  * the proposer is prompted, so the user's attention moves there while the proposal
- * generates; navigation failure is contained and the prompt still runs. Only after
- * the prompt completes successfully does it notify that the proposal is ready. Every
- * host, model, toast, or navigation failure is contained and never reaches the
- * originating review or its presentation.
+ * generates; navigation failure is contained, is not a proposal failure, and the
+ * prompt still runs. A `null` request model inherits the host model; a present model
+ * is parsed and a malformed specifier is a typed proposal failure. A child-session or
+ * prompt failure is reported as a safe failure log plus a generic failure toast, each
+ * individually contained; the preparing/ready toast failures stay silent. A reported
+ * proposal failure never reaches the originating review or its presentation.
  */
 export async function proposeForTurn(
   request: RemediationProposalRequest | null,
@@ -42,9 +47,10 @@ export async function proposeForTurn(
     return;
   }
 
-  const model = parseModelSpecifier(request.model);
+  const model = request.model === null ? null : parseModelSpecifier(request.model);
 
-  if (model === null) {
+  if (request.model !== null && model === null) {
+    await reportProposalFailure("MODEL_SPECIFIER_INVALID", dependencies);
     return;
   }
 
@@ -52,17 +58,24 @@ export async function proposeForTurn(
     return;
   }
 
+  let sessionID: string;
+
   try {
-    const sessionID = await dependencies.proposalFacade.createChildSession({
+    sessionID = await dependencies.proposalFacade.createChildSession({
       parentID: request.sessionID,
       title: PROPOSAL_SESSION_TITLE,
     });
+  } catch {
+    await reportProposalFailure("CHILD_SESSION_FAILED", dependencies);
+    return;
+  }
 
-    dependencies.proposals.registerChildSession(sessionID);
+  dependencies.proposals.registerChildSession(sessionID);
 
-    await navigateToProposal(dependencies.navigator, sessionID);
-    await notifyProposalPreparing(dependencies.notifier);
+  await navigateToProposal(dependencies.navigator, sessionID);
+  await notifyProposalPreparing(dependencies.notifier);
 
+  try {
     await dependencies.proposalFacade.prompt({
       sessionID,
       agent: PROPOSER_AGENT_NAME,
@@ -71,8 +84,36 @@ export async function proposeForTurn(
       tools: PROPOSER_TOOLS,
       text: buildProposalText(request),
     });
+  } catch {
+    await reportProposalFailure("PROPOSAL_PROMPT_FAILED", dependencies);
+    return;
+  }
 
-    await notifyProposalReady(dependencies.notifier);
+  await notifyProposalReady(dependencies.notifier);
+}
+
+async function reportProposalFailure(
+  reason: ProposalFailureReason,
+  dependencies: ProposalDependencies,
+): Promise<void> {
+  await writeFailureLog(dependencies.failures, reason);
+  await notifyProposalFailed(dependencies.notifier);
+}
+
+async function writeFailureLog(
+  sink: RemediationFailureLogSink,
+  reason: ProposalFailureReason,
+): Promise<void> {
+  try {
+    await sink.write(reason);
+  } catch {
+    return;
+  }
+}
+
+async function notifyProposalFailed(notifier: RemediationNotifier): Promise<void> {
+  try {
+    await notifier.proposalFailed();
   } catch {
     return;
   }

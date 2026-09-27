@@ -4,6 +4,7 @@ import type {
   PolicyLoader,
   ProposalSessionFacade,
   ProposalSessionNavigator,
+  RemediationFailureLogSink,
   RemediationNotifier,
   ReviewPresenter,
   TurnDeduplicator,
@@ -41,6 +42,7 @@ export interface ReviewDependencies {
   readonly proposalFacade: ProposalSessionFacade;
   readonly navigator: ProposalSessionNavigator;
   readonly notifier: RemediationNotifier;
+  readonly failures: RemediationFailureLogSink;
 }
 
 export interface PluginRuntimeDependencies extends ReviewDependencies {

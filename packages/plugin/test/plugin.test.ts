@@ -8,6 +8,7 @@ import {
   type JevEvaluationPort,
   type JevEvaluationResult,
   type JevRequest,
+  type RemediationProposalRequest,
   type RemediationProposalStore,
   type ReviewLevelResult,
   type ReviewResult,
@@ -26,9 +27,11 @@ import {
   type PolicyLoader,
   type PolicyLoadResult,
   type PresentationDelivery,
+  type ProposalFailureReason,
   type ProposalPromptInput,
   type ProposalSessionFacade,
   type ProposalSessionNavigator,
+  type RemediationFailureLogSink,
   type RemediationNotifier,
   type ReviewPresenter,
 } from "@jevguard/opencode-adapter";
@@ -36,6 +39,7 @@ import type { Plugin } from "@opencode-ai/plugin";
 import { describe, expect, test } from "vitest";
 import { JevGuardPlugin } from "../src/index";
 import { registerRemediationConfig } from "../src/remediation/config";
+import { proposeForTurn } from "../src/remediation/propose";
 import { createPluginRuntime } from "../src/runtime";
 import type { PluginRuntime, PluginRuntimeDependencies } from "../src/types";
 
@@ -53,6 +57,8 @@ const MAX_CONCURRENT_JEV_CALLS = 2;
 const PATCH = ["--- a/src/a.ts", "+++ b/src/a.ts", "@@ -1 +1 @@", "-old", "+new", ""].join("\n");
 
 const ALLOWED_EXCEPTION = "Read-only validation and HTTP mapping are allowed.";
+const TASK_SENTINEL = "TASK_SENTINEL_PROPOSAL_71c3";
+const DIFF_SENTINEL = "DIFF_SENTINEL_PROPOSAL_71c3";
 const DOCS_SENTINEL = "DOCS_SENTINEL_PATCH";
 const GLOBAL_SENTINEL = "GLOBAL_SENTINEL_PATCH";
 const HIDDEN_REASONING_SENTINEL = "HIDDEN_REASONING_SENTINEL";
@@ -303,6 +309,10 @@ class FakeNotifier implements RemediationNotifier {
     return this.record("proposalReady", "notify");
   }
 
+  async proposalFailed(): Promise<DeliveryStatus> {
+    return this.record("proposalFailed", "fail");
+  }
+
   private record(call: string, label: string): DeliveryStatus {
     if (this.fail) {
       throw new Error("notifier unavailable");
@@ -310,6 +320,21 @@ class FakeNotifier implements RemediationNotifier {
 
     this.calls.push(call);
     this.order.push(label);
+
+    return "DELIVERED";
+  }
+}
+
+class FakeFailureSink implements RemediationFailureLogSink {
+  readonly reasons: ProposalFailureReason[] = [];
+  fail = false;
+
+  async write(reason: ProposalFailureReason): Promise<DeliveryStatus> {
+    if (this.fail) {
+      throw new Error("failure log unavailable");
+    }
+
+    this.reasons.push(reason);
 
     return "DELIVERED";
   }
@@ -509,6 +534,7 @@ interface Harness {
   readonly proposalFacade: FakeProposalFacade;
   readonly navigator: FakeNavigator;
   readonly notifier: FakeNotifier;
+  readonly failures: FakeFailureSink;
   readonly order: string[];
 }
 
@@ -526,6 +552,7 @@ function harness(): Harness {
   const proposalFacade = new FakeProposalFacade(order);
   const navigator = new FakeNavigator(order);
   const notifier = new FakeNotifier(order);
+  const failures = new FakeFailureSink();
 
   const dependencies: PluginRuntimeDependencies = {
     facade,
@@ -537,6 +564,7 @@ function harness(): Harness {
     proposalFacade,
     navigator,
     notifier,
+    failures,
   };
 
   return {
@@ -549,6 +577,7 @@ function harness(): Harness {
     proposalFacade,
     navigator,
     notifier,
+    failures,
     order,
   };
 }
@@ -1590,7 +1619,7 @@ describe("JevGuardPlugin automatic proposals", () => {
 
     expect(prompt?.sessionID).toBe(CHILD_SESSION_ID);
     expect(prompt?.agent).toBe(PROPOSER_AGENT);
-    expect(prompt?.model).toEqual({ providerID: "opencode", modelID: "gpt-5.6-luna" });
+    expect(prompt?.model).toBeNull();
     expect(prompt?.tools).toEqual({ "*": false });
     expect(typeof prompt?.system).toBe("string");
     expect(prompt?.text).toContain("TEST-1");
@@ -1870,7 +1899,7 @@ describe("JevGuardPlugin automatic proposals", () => {
     ]);
   });
 
-  test("contains a child session creation failure without changing the review", async () => {
+  test("reports a child session creation failure with one safe failure log and one failure toast", async () => {
     const values = harness();
     errorFailSetup(values);
     values.proposalFacade.failCreate = true;
@@ -1879,11 +1908,12 @@ describe("JevGuardPlugin automatic proposals", () => {
 
     expect(lastReview(values.presenter).summary.verdict).toBe("FAIL");
     expect(values.proposalFacade.prompts).toEqual([]);
-    expect(values.notifier.calls).toEqual([]);
+    expect(values.failures.reasons).toEqual(["CHILD_SESSION_FAILED"]);
+    expect(values.notifier.calls).toEqual(["proposalFailed"]);
     expect(values.navigator.calls).toEqual([]);
   });
 
-  test("contains a prompt failure without changing the review and without a ready toast", async () => {
+  test("reports a prompt failure with one safe failure log and no ready toast", async () => {
     const values = harness();
     errorFailSetup(values);
     values.proposalFacade.failPrompt = true;
@@ -1893,7 +1923,35 @@ describe("JevGuardPlugin automatic proposals", () => {
     expect(lastReview(values.presenter).summary.verdict).toBe("FAIL");
     expect(values.proposalFacade.created).toHaveLength(1);
     expect(values.navigator.calls).toEqual([CHILD_SESSION_ID]);
-    expect(values.notifier.calls).toEqual(["proposalPreparing"]);
+    expect(values.failures.reasons).toEqual(["PROPOSAL_PROMPT_FAILED"]);
+    expect(values.notifier.calls).toEqual(["proposalPreparing", "proposalFailed"]);
+  });
+
+  test("reports an invalid model specifier with one safe failure log and one failure toast", async () => {
+    const values = harness();
+    const request: RemediationProposalRequest = {
+      evaluationId: ASSISTANT_ID,
+      sessionID: SESSION_ID,
+      messageID: ASSISTANT_ID,
+      model: "not-a-provider-model",
+      task: "Implement the thing.",
+      paths: ["src/a.ts"],
+      diff: PATCH,
+      ruleFindings: [],
+      builtInFindings: [],
+    };
+
+    await proposeForTurn(request, {
+      proposals: values.proposals,
+      proposalFacade: values.proposalFacade,
+      navigator: values.navigator,
+      notifier: values.notifier,
+      failures: values.failures,
+    });
+
+    expect(values.failures.reasons).toEqual(["MODEL_SPECIFIER_INVALID"]);
+    expect(values.notifier.calls).toEqual(["proposalFailed"]);
+    expect(values.proposalFacade.created).toEqual([]);
   });
 
   test("contains a notifier failure without changing the review and still prompts", async () => {
@@ -1906,6 +1964,7 @@ describe("JevGuardPlugin automatic proposals", () => {
     expect(lastReview(values.presenter).summary.verdict).toBe("FAIL");
     expect(values.proposalFacade.prompts).toHaveLength(1);
     expect(values.notifier.calls).toEqual([]);
+    expect(values.failures.reasons).toEqual([]);
     expect(values.navigator.calls).toEqual([CHILD_SESSION_ID]);
   });
 
@@ -1919,7 +1978,43 @@ describe("JevGuardPlugin automatic proposals", () => {
     expect(lastReview(values.presenter).summary.verdict).toBe("FAIL");
     expect(values.proposalFacade.prompts).toHaveLength(1);
     expect(values.notifier.calls).toEqual(["proposalPreparing", "proposalReady"]);
+    expect(values.failures.reasons).toEqual([]);
     expect(values.navigator.calls).toEqual([]);
+  });
+
+  test("never includes task or diff evidence in the failure log or failure toast", async () => {
+    const values = harness();
+    loadRules(values.policy, scopedRule("error"));
+    values.facade.records = [
+      { info: { id: USER_ID, role: "user" }, parts: [{ type: "text", text: TASK_SENTINEL }] },
+      {
+        info: {
+          id: ASSISTANT_ID,
+          role: "assistant",
+          parentID: USER_ID,
+          time: { created: 1, completed: 2 },
+        },
+        parts: [],
+      },
+    ];
+    values.facade.diffs = [{ file: "src/a.ts", patch: `${PATCH}${DIFF_SENTINEL}` }];
+    values.jev.probability = 0.8;
+    values.jev.probabilities.set(SCOPE_CREEP_ID, 0.1);
+    values.jev.probabilities.set(COMPLEXITY_ID, 0.1);
+    values.proposalFacade.failPrompt = true;
+
+    await dispatch(values.runtime, idleEvent());
+
+    expect(proposalText(values)).toContain(TASK_SENTINEL);
+    expect(proposalText(values)).toContain(DIFF_SENTINEL);
+
+    const failureSurface = JSON.stringify({
+      reasons: values.failures.reasons,
+      toasts: values.notifier.calls,
+    });
+
+    expect(failureSurface).not.toContain(TASK_SENTINEL);
+    expect(failureSurface).not.toContain(DIFF_SENTINEL);
   });
 
   test("never invokes parent prompt or message mutation APIs", async () => {

@@ -11,6 +11,7 @@ import {
   createOpenCodeToastSink,
   createPolicyFileLoader,
   createProcessEnvironment,
+  createRemediationFailureLogSink,
   createRemediationNotifier,
   createReviewPresenter,
   createTypeSafeJevTransport,
@@ -57,6 +58,7 @@ export const JevGuardPlugin: Plugin = async (input) => {
     proposalFacade: createOpenCodeProposalSessionFacade(input.client),
     navigator: createOpenCodeSessionNavigator(presentationClient),
     notifier: createRemediationNotifier(toast),
+    failures: createRemediationFailureLogSink(presentationClient),
     jev: createFifoJevPort(
       createTypeSafeJevTransport(
         createCredentialProvider({
