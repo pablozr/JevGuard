@@ -54,8 +54,23 @@ Do not re-ask what an existing valid block already states. The complete rule nee
 2. **Concrete violation** — the specific change that breaches that boundary.
 3. **Allowed exception** — what is explicitly permitted, or `none`.
 4. **Severity** — `error` or `warning`.
-5. **Scope** — an optional repo-relative POSIX glob such as `src/**`, or no scope.
-6. **Rule ID** — matching `[A-Za-z0-9][A-Za-z0-9._-]*`, unique in the document.
+5. **Scope** — optional repo-relative POSIX globs, one per `scope:` line, where a
+   leading `!` marks an exclusion; or no scope.
+6. **Evidence class** — `code` (default), `docs`, or `any`; ask only when the rule
+   is about prose documentation.
+7. **Rule ID** — matching `[A-Za-z0-9][A-Za-z0-9._-]*`, unique in the document.
+
+Before drafting a security-shaped rule, enumerate the concrete channels a violation
+can travel through and name the channels that apply in the rule text. Consider each
+of these explicitly: process environment variables; subprocess environment (`env=` /
+`subprocess`); command-line arguments; logs; error messages and stack traces;
+LLM/agent context; generated reports and artifacts; and the reviewed diff itself.
+Jev judges the rule text literally, so a channel the rule does not name is a channel
+it cannot catch. A security rule that names only the diff will miss a secret written
+to the process environment or echoed into a log.
+
+For a contract or API rule, require an explicit `scope:` choice — or an explicit
+statement, in the rule text, that the rule is repository-wide — before writing it.
 
 ### 3. Complete the candidate
 
@@ -67,6 +82,8 @@ blocks follow the document grammar:
 
 severity: error
 scope: src/**
+scope: !src/generated/**
+evidence: code
 
 ### Rule
 
@@ -79,6 +96,31 @@ scope: src/**
 ### Allowed
 
 <non-empty exception, or omit the section>
+```
+
+`scope:` may repeat. Each line adds an inclusion glob, and a leading `!` marks an
+exclusion glob: a path is in scope when it matches at least one inclusion and no
+exclusion. A `scope:` block whose lines are all exclusions is invalid, and an empty
+`scope:` value is invalid. A single `scope: src/**` behaves exactly as before. Both
+`/` and `\` separators are normalized, and `*`, `**`, and `?` are supported.
+
+`evidence:` selects which extension class the rule is evaluated against: `code`
+(default), `docs`, or `any`. `evidence: code` sends source, config, and data formats
+and ignores prose docs, so a `.md` file never pulls a code rule into review by
+itself. `evidence: docs` sends prose docs only (`.md`, `.mdx`, `.txt`), and
+`evidence: any` sends both. Use `evidence: docs` or `evidence: any` for a rule that
+must inspect documentation, for example a "no secrets in documentation" rule:
+
+```md
+## DOCS-001
+
+severity: error
+scope: docs/**
+evidence: docs
+
+### Rule
+
+Documentation must not contain secret values.
 ```
 
 If `.jev/rules.md` already begins with a `jev-init` provenance manifest — one fenced

@@ -989,6 +989,41 @@ describe("jevguard-rules SKILL.md contract", () => {
     expect(text).toMatch(/Never edit `\.jev\/config\.yaml`/);
     expect(text).toMatch(/never call Jev\/TypeSafe inference/i);
   });
+
+  test("requires a channel checklist before writing a security rule", () => {
+    expect(flat).toMatch(/Before drafting a security-shaped rule/i);
+    expect(flat).toMatch(/enumerate the concrete channels a violation can travel through/i);
+    expect(flat).toMatch(/process environment variables/i);
+    expect(flat).toMatch(/subprocess environment/i);
+    expect(flat).toMatch(/`env=`/);
+    expect(flat).toMatch(/command-line arguments; logs;/i);
+    expect(flat).toMatch(/error messages and stack traces/i);
+    expect(flat).toMatch(/LLM\/agent context/i);
+    expect(flat).toMatch(/generated reports and artifacts/i);
+    expect(flat).toMatch(/the reviewed diff itself/i);
+    expect(flat).toMatch(/name the channels that apply in the rule text/i);
+  });
+
+  test("states that Jev judges the rule text literally", () => {
+    expect(flat).toMatch(/Jev judges the rule text literally/i);
+    expect(flat).toMatch(/a channel the rule does not name is a channel it cannot catch/i);
+  });
+
+  test("requires a scope choice for contract and API rules", () => {
+    expect(flat).toMatch(/For a contract or API rule/i);
+    expect(flat).toMatch(/explicit `scope:` choice/i);
+    expect(flat).toMatch(/repository-wide/i);
+  });
+
+  test("documents the repeated scope and evidence syntax", () => {
+    expect(flat).toMatch(/`scope:` may repeat/i);
+    expect(flat).toMatch(/leading `!` marks an exclusion/i);
+    expect(flat).toMatch(/scope: !src\/generated\/\*\*/);
+    expect(flat).toMatch(/`evidence:` selects which extension class/i);
+    expect(flat).toMatch(/`code` \(default\)/i);
+    expect(flat).toMatch(/`evidence: docs`/);
+    expect(flat).toMatch(/`evidence: any`/);
+  });
 });
 
 describe("jev-init SKILL.md contract", () => {
