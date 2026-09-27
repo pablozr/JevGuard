@@ -18,8 +18,10 @@ export type {
   ReviewResult,
   ReviewResultKind,
   RuleEvidence,
+  RuleEvidenceClass,
   RuleReviewContext,
   RuleReviewResult,
+  RuleScope,
   RuleSeverity,
   SemanticVerdict,
   SkippedReason,
@@ -85,7 +87,7 @@ export type {
 } from "./evidence/types";
 export { DEFAULT_EVIDENCE_POLICY } from "./evidence/defaults";
 export { checkFilePath } from "./evidence/safety";
-export { matchesScope } from "./evidence/scope";
+export { matchesRuleScope, matchesScope } from "./evidence/scope";
 export { selectRuleEvidence, selectTurnEvidence } from "./evidence/select-evidence";
 export type {
   BuiltInBatchReview,

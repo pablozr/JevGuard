@@ -46,6 +46,7 @@ function makeRule(overrides: Partial<ParsedRule> = {}): ParsedRule {
     id: "ARCH-001",
     severity: "error",
     scope: null,
+    evidence: "code",
     description: "HTTP controllers must not contain business logic.",
     violation: "A controller performs domain decisions directly.",
     allowed: null,
@@ -188,7 +189,7 @@ describe("evaluateRule short-circuits", () => {
   test("skips without calling the port when the scope matches no changed file", async () => {
     const port = new FakeJevPort(evaluated(0.1));
     const turn = makeTurn({ files: [file("docs/readme.md", "patch-docs")] });
-    const rule = makeRule({ scope: "src/**" });
+    const rule = makeRule({ scope: { include: ["src/**"], exclude: [] } });
 
     const result = await evaluateRule(makeInput({ turn, rule }), { jev: port });
 
@@ -268,7 +269,10 @@ describe("evaluateRule context", () => {
     const turn = makeTurn({
       files: [file("src/a.ts", "patch-src"), file("docs/readme.md", "patch-docs")],
     });
-    const rule = makeRule({ scope: "src/**", severity: "warning" });
+    const rule = makeRule({
+      scope: { include: ["src/**"], exclude: [] },
+      severity: "warning",
+    });
 
     const result = await evaluateRule(makeInput({ turn, rule }), { jev: port });
 

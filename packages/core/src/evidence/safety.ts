@@ -28,11 +28,15 @@ export function checkFilePath(path: string, policy: EvidencePolicy): PathSafety 
     return DENIED_SENSITIVE;
   }
 
-  if (!policy.allowedExtensions.includes(extension)) {
+  if (!isAllowlistedExtension(extension, policy)) {
     return DENIED_EXTENSION;
   }
 
   return { allowed: true };
+}
+
+function isAllowlistedExtension(extension: string, policy: EvidencePolicy): boolean {
+  return policy.codeExtensions.includes(extension) || policy.docsExtensions.includes(extension);
 }
 
 function matchesDeniedFileName(basename: string, policy: EvidencePolicy): boolean {

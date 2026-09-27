@@ -21,13 +21,30 @@ export interface Turn {
 export type RuleSeverity = "error" | "warning";
 
 /**
+ * Extension class a rule's evidence may include. `code` covers source, config, and
+ * data formats; `docs` covers prose documentation; `any` covers both.
+ */
+export type RuleEvidenceClass = "code" | "docs" | "any";
+
+/**
+ * Rule scope: inclusion globs plus `!`-prefixed exclusion globs. A path is in scope
+ * when it matches at least one inclusion and no exclusion.
+ */
+export interface RuleScope {
+  readonly include: readonly string[];
+  readonly exclude: readonly string[];
+}
+
+/**
  * A validated rule. `allowed` belongs to the same violation judgment and never
- * creates a separate model decision.
+ * creates a separate model decision; `evidence` selects which extension class the
+ * rule's applicable files may draw from.
  */
 export interface ParsedRule {
   readonly id: string;
   readonly severity: RuleSeverity;
-  readonly scope: string | null;
+  readonly scope: RuleScope | null;
+  readonly evidence: RuleEvidenceClass;
   readonly description: string;
   readonly violation: string;
   readonly allowed: string | null;

@@ -6,10 +6,14 @@ export const DEFAULT_MAX_DIFF_LENGTH = 100_000;
  * Conservative defaults: only common textual/code extensions are accepted, and
  * environment files, private keys, credential files, and credential directories are
  * always rejected. A file without a listed extension is rejected rather than guessed.
+ *
+ * The allowlist is split so a rule can choose its evidence class: `codeExtensions`
+ * covers source, config, and data formats (so config rules keep their coverage) and
+ * `docsExtensions` covers prose documentation.
  */
 export const DEFAULT_EVIDENCE_POLICY: EvidencePolicy = {
   maxDiffLength: DEFAULT_MAX_DIFF_LENGTH,
-  allowedExtensions: [
+  codeExtensions: [
     ".ts",
     ".tsx",
     ".mts",
@@ -20,9 +24,6 @@ export const DEFAULT_EVIDENCE_POLICY: EvidencePolicy = {
     ".cjs",
     ".json",
     ".jsonc",
-    ".md",
-    ".mdx",
-    ".txt",
     ".yaml",
     ".yml",
     ".toml",
@@ -78,6 +79,7 @@ export const DEFAULT_EVIDENCE_POLICY: EvidencePolicy = {
     ".diff",
     ".patch",
   ],
+  docsExtensions: [".md", ".mdx", ".txt"],
   deniedFileNames: [
     ".env",
     ".envrc",

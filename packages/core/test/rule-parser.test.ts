@@ -64,7 +64,8 @@ describe("parseRule", () => {
     expect(expectParsed(validRule)).toEqual({
       id: "ARCH-001",
       severity: "error",
-      scope: "backend/**",
+      scope: { include: ["backend/**"], exclude: [] },
+      evidence: "code",
       description: "HTTP controllers must not contain business logic.",
       violation:
         "A controller performs domain decisions, calculations, or state mutations directly.",
@@ -203,6 +204,55 @@ describe("parseRule", () => {
     const text = validRule.replace("scope: backend/**", "scope:");
 
     expectInvalid(text, "MALFORMED_METADATA");
+  });
+
+  test("accumulates repeated scope lines into inclusions and exclusions", () => {
+    const text = validRule.replace(
+      "scope: backend/**",
+      "scope: backend/**\nscope: src/**\nscope: !src/generated/**",
+    );
+
+    expect(expectParsed(text).scope).toEqual({
+      include: ["backend/**", "src/**"],
+      exclude: ["src/generated/**"],
+    });
+  });
+
+  test("rejects a scope declaration with no inclusion pattern", () => {
+    const text = validRule.replace("scope: backend/**", "scope: !docs/**");
+
+    expectInvalid(text, "MALFORMED_METADATA");
+  });
+
+  test("rejects an exclusion scope with no pattern", () => {
+    const text = validRule.replace("scope: backend/**", "scope: !");
+
+    expectInvalid(text, "MALFORMED_METADATA");
+  });
+
+  test("defaults evidence to code when the key is absent", () => {
+    expect(expectParsed(validRule).evidence).toBe("code");
+  });
+
+  test.each(["code", "docs", "any"] as const)("accepts evidence: %s", (value) => {
+    const text = validRule.replace("scope: backend/**", `scope: backend/**\nevidence: ${value}`);
+
+    expect(expectParsed(text).evidence).toBe(value);
+  });
+
+  test("rejects an unknown evidence value", () => {
+    const text = validRule.replace("scope: backend/**", "scope: backend/**\nevidence: prose");
+
+    expectInvalid(text, "MALFORMED_METADATA");
+  });
+
+  test("rejects duplicate evidence keys", () => {
+    const text = validRule.replace(
+      "scope: backend/**",
+      "scope: backend/**\nevidence: docs\nevidence: any",
+    );
+
+    expectInvalid(text, "DUPLICATE_METADATA");
   });
 
   test("rejects a missing Rule section", () => {

@@ -14,11 +14,15 @@ export type PathSafety =
 /**
  * Deterministic evidence-safety policy. `maxDiffLength` counts JavaScript string
  * length in UTF-16 code units; a diff exactly at the limit is accepted and a longer
- * diff is never truncated.
+ * diff is never truncated. `codeExtensions` is the code/config/data class used by
+ * `evidence: code`, and `docsExtensions` is the prose-documentation class used by
+ * `evidence: docs`; their union is the full allowlist used by `evidence: any` and by
+ * the turn-level built-ins.
  */
 export interface EvidencePolicy {
   readonly maxDiffLength: number;
-  readonly allowedExtensions: readonly string[];
+  readonly codeExtensions: readonly string[];
+  readonly docsExtensions: readonly string[];
   readonly deniedFileNames: readonly string[];
   readonly deniedExtensions: readonly string[];
   readonly deniedDirectoryNames: readonly string[];

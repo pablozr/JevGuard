@@ -95,6 +95,7 @@ function buildParsedRule(id: string, metadata: RuleMetadata, sections: RuleSecti
     id,
     severity: metadata.severity,
     scope: metadata.scope,
+    evidence: metadata.evidence,
     description: sections.rule,
     violation: sections.violation,
     allowed: sections.allowed,

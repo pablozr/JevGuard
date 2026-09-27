@@ -1,15 +1,16 @@
-import type { ParsedRule, Turn, TurnFile } from "../domain/types";
+import type { ParsedRule, RuleEvidenceClass, RuleScope, Turn, TurnFile } from "../domain/types";
 import { DEFAULT_EVIDENCE_POLICY } from "./defaults";
+import { fileExtension } from "./paths";
 import { checkFilePath } from "./safety";
-import { matchesScope } from "./scope";
+import { matchesRuleScope } from "./scope";
 import type { EvidencePolicy, EvidenceSelection, TurnEvidenceSelection } from "./types";
 
 /**
  * Selects the complete evidence for one rule from the turn's attributed file
- * patches. Only files matching the rule scope contribute paths and patches, the
- * assembled diff is never truncated, and the safety policy is evaluated against
- * exactly those applicable files. A blocked applicable file yields `BLOCKED_EVIDENCE`
- * rather than partial evidence.
+ * patches. Only files matching the rule scope and the rule's evidence class
+ * contribute paths and patches, the assembled diff is never truncated, and the
+ * safety policy is evaluated against exactly those applicable files. A blocked
+ * applicable file yields `BLOCKED_EVIDENCE` rather than partial evidence.
  */
 export function selectRuleEvidence(
   turn: Turn,
@@ -20,7 +21,7 @@ export function selectRuleEvidence(
     return { status: "SKIPPED", reason: "NO_ATTRIBUTED_PATCH" };
   }
 
-  const applicableFiles = selectApplicableFiles(turn.files, rule.scope);
+  const applicableFiles = selectApplicableFiles(turn.files, rule.scope, rule.evidence, policy);
 
   if (applicableFiles.length === 0) {
     return { status: "SKIPPED", reason: "NO_SCOPE_MATCH" };
@@ -74,13 +75,42 @@ function hasNoAttributedPatch(turn: Turn): boolean {
 
 function selectApplicableFiles(
   files: readonly TurnFile[],
-  scope: string | null,
+  scope: RuleScope | null,
+  evidenceClass: RuleEvidenceClass,
+  policy: EvidencePolicy,
 ): readonly TurnFile[] {
-  if (scope === null) {
-    return files;
+  const scoped =
+    scope === null ? files : files.filter((file) => matchesRuleScope(file.path, scope));
+
+  return scoped.filter((file) => isInEvidenceClass(file.path, evidenceClass, policy));
+}
+
+/**
+ * Class filtering removes a file only when its extension belongs to the other
+ * evidence class. A denied sensitive path is always kept, and a file whose extension
+ * is in neither class (unknown or denied-extension) is kept too, so the existing
+ * blocked-evidence check still rejects them instead of silently omitting them from
+ * the diff.
+ */
+function isInEvidenceClass(
+  path: string,
+  evidenceClass: RuleEvidenceClass,
+  policy: EvidencePolicy,
+): boolean {
+  if (evidenceClass === "any") {
+    return true;
   }
 
-  return files.filter((file) => matchesScope(file.path, scope));
+  const safety = checkFilePath(path, policy);
+
+  if (!safety.allowed && safety.reason === "DENIED_SENSITIVE_PATH") {
+    return true;
+  }
+
+  const extension = fileExtension(path);
+  const otherClass = evidenceClass === "code" ? policy.docsExtensions : policy.codeExtensions;
+
+  return !otherClass.includes(extension);
 }
 
 function assembleDiff(files: readonly TurnFile[]): string {

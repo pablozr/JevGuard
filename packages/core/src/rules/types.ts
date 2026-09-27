@@ -1,4 +1,10 @@
-import type { ParsedRule, RuleSeverity, UnavailableReason } from "../domain/types";
+import type {
+  ParsedRule,
+  RuleEvidenceClass,
+  RuleScope,
+  RuleSeverity,
+  UnavailableReason,
+} from "../domain/types";
 
 /**
  * Deterministic structural reason a rule document cannot become a validated rule.
@@ -72,7 +78,8 @@ export interface MetadataEntry {
 
 export interface RuleMetadata {
   readonly severity: RuleSeverity;
-  readonly scope: string | null;
+  readonly scope: RuleScope | null;
+  readonly evidence: RuleEvidenceClass;
 }
 
 export interface RuleSections {

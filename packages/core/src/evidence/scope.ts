@@ -1,11 +1,27 @@
+import type { RuleScope } from "../domain/types";
 import { normalizePath } from "./paths";
 
 /**
- * Matches a changed path against a rule scope glob. Both Windows and POSIX
+ * Matches a changed path against a single rule scope glob. Both Windows and POSIX
  * separators are normalized; `*`, `**`, and `?` are supported.
  */
 export function matchesScope(path: string, scope: string): boolean {
   return globToRegExp(scope).test(normalizePath(path));
+}
+
+/**
+ * Matches a changed path against a parsed rule scope. The path is in scope when it
+ * matches at least one inclusion glob and no exclusion glob.
+ */
+export function matchesRuleScope(path: string, scope: RuleScope): boolean {
+  const normalized = normalizePath(path);
+  const included = scope.include.some((pattern) => globToRegExp(pattern).test(normalized));
+
+  if (!included) {
+    return false;
+  }
+
+  return !scope.exclude.some((pattern) => globToRegExp(pattern).test(normalized));
 }
 
 function globToRegExp(glob: string): RegExp {

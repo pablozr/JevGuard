@@ -20,7 +20,8 @@ const turn: Turn = {
 const rule: ParsedRule = {
   id: "ARCH-001",
   severity: "error",
-  scope: "src/**",
+  scope: { include: ["src/**"], exclude: [] },
+  evidence: "code",
   description: "HTTP controllers must not contain business logic.",
   violation: "A controller performs domain decisions, calculations, or state mutations directly.",
   allowed: "Validation, HTTP mapping and delegation to services.",
@@ -75,7 +76,7 @@ describe("core domain contracts", () => {
 
   test("constructs a rule whose allowed section stays in the same judgment", () => {
     expect(rule.severity).toBe("error");
-    expect(rule.scope).toBe("src/**");
+    expect(rule.scope).toEqual({ include: ["src/**"], exclude: [] });
     expect(rule.allowed).toContain("delegation");
   });
 

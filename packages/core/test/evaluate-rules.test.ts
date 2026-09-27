@@ -58,6 +58,7 @@ function makeRule(overrides: Partial<ParsedRule> = {}): ParsedRule {
     id: "R-1",
     severity: "error",
     scope: null,
+    evidence: "code",
     description: "A rule.",
     violation: "A violation.",
     allowed: null,
@@ -82,8 +83,8 @@ describe("evaluateRules", () => {
       files: [file("src/a.ts", "src-patch"), file("docs/readme.md", "docs-patch")],
     });
     const rules: readonly RuleCandidateResult[] = [
-      parsed({ id: "SRC-1", scope: "src/**" }),
-      parsed({ id: "DOCS-1", scope: "docs/**" }),
+      parsed({ id: "SRC-1", scope: { include: ["src/**"], exclude: [] } }),
+      parsed({ id: "DOCS-1", scope: { include: ["docs/**"], exclude: [] }, evidence: "docs" }),
     ];
     const port = new SequencedJevPort([evaluated(0.1), evaluated(0.9)]);
 
@@ -110,8 +111,8 @@ describe("evaluateRules", () => {
   test("keeps a scope miss independent from evaluated siblings", async () => {
     const turn = makeTurn({ files: [file("src/a.ts", "src-patch")] });
     const rules: readonly RuleCandidateResult[] = [
-      parsed({ id: "SRC-1", scope: "src/**" }),
-      parsed({ id: "DOCS-1", scope: "docs/**" }),
+      parsed({ id: "SRC-1", scope: { include: ["src/**"], exclude: [] } }),
+      parsed({ id: "DOCS-1", scope: { include: ["docs/**"], exclude: [] }, evidence: "docs" }),
     ];
     const port = new SequencedJevPort([evaluated(0.1)]);
 
@@ -145,8 +146,8 @@ describe("evaluateRules", () => {
       files: [file("src/.env", "SECRET=1"), file("docs/readme.md", "docs-patch")],
     });
     const rules: readonly RuleCandidateResult[] = [
-      parsed({ id: "SRC-1", scope: "src/**" }),
-      parsed({ id: "DOCS-1", scope: "docs/**" }),
+      parsed({ id: "SRC-1", scope: { include: ["src/**"], exclude: [] } }),
+      parsed({ id: "DOCS-1", scope: { include: ["docs/**"], exclude: [] }, evidence: "docs" }),
     ];
     const port = new SequencedJevPort([evaluated(0.1)]);
 
@@ -173,8 +174,8 @@ describe("evaluateRules", () => {
       files: [file("src/a.ts", "x".repeat(64)), file("docs/readme.md", "short")],
     });
     const rules: readonly RuleCandidateResult[] = [
-      parsed({ id: "SRC-1", scope: "src/**" }),
-      parsed({ id: "DOCS-1", scope: "docs/**" }),
+      parsed({ id: "SRC-1", scope: { include: ["src/**"], exclude: [] } }),
+      parsed({ id: "DOCS-1", scope: { include: ["docs/**"], exclude: [] }, evidence: "docs" }),
     ];
     const port = new SequencedJevPort([evaluated(0.1)]);
     const evidencePolicy = { ...DEFAULT_EVIDENCE_POLICY, maxDiffLength: 16 };

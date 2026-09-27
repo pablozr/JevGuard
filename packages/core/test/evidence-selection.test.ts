@@ -1,9 +1,18 @@
 import { describe, expect, test } from "vitest";
-import { DEFAULT_EVIDENCE_POLICY, selectRuleEvidence, selectTurnEvidence } from "../src/index";
-import type { EvidencePolicy, ParsedRule, Turn, TurnFile } from "../src/index";
+import {
+  DEFAULT_EVIDENCE_POLICY,
+  matchesRuleScope,
+  selectRuleEvidence,
+  selectTurnEvidence,
+} from "../src/index";
+import type { EvidencePolicy, ParsedRule, RuleScope, Turn, TurnFile } from "../src/index";
 
 function file(path: string, patch: string): TurnFile {
   return { path, patch };
+}
+
+function ruleScope(include: readonly string[], exclude: readonly string[] = []): RuleScope {
+  return { include, exclude };
 }
 
 function makeTurn(overrides: Partial<Turn> = {}): Turn {
@@ -20,6 +29,7 @@ function makeRule(overrides: Partial<ParsedRule> = {}): ParsedRule {
     id: "ARCH-001",
     severity: "error",
     scope: null,
+    evidence: "code",
     description: "Controllers must not hold business logic.",
     violation: "A controller performs domain decisions directly.",
     allowed: null,
@@ -46,7 +56,7 @@ describe("selectRuleEvidence", () => {
 
   test("skips when the scope matches no changed file", () => {
     const turn = makeTurn({ files: [file("docs/readme.md", "patch-md")] });
-    const rule = makeRule({ scope: "src/**" });
+    const rule = makeRule({ scope: ruleScope(["src/**"]) });
 
     expect(selectRuleEvidence(turn, rule)).toEqual({
       status: "SKIPPED",
@@ -56,13 +66,13 @@ describe("selectRuleEvidence", () => {
 
   test("selects every changed file and concatenates their patches when there is no scope", () => {
     const turn = makeTurn({
-      files: [file("src/a.ts", "patch-a"), file("docs/b.md", "patch-b")],
+      files: [file("src/a.ts", "patch-a"), file("config/app.json", "patch-b")],
     });
     const result = selectRuleEvidence(turn, makeRule({ scope: null }));
 
     expect(result).toEqual({
       status: "SELECTED",
-      evidence: { files: ["src/a.ts", "docs/b.md"], diff: "patch-a\npatch-b" },
+      evidence: { files: ["src/a.ts", "config/app.json"], diff: "patch-a\npatch-b" },
     });
   });
 
@@ -74,7 +84,7 @@ describe("selectRuleEvidence", () => {
         file("src/c.ts", "patch-src-c"),
       ],
     });
-    const result = selectRuleEvidence(turn, makeRule({ scope: "src/**" }));
+    const result = selectRuleEvidence(turn, makeRule({ scope: ruleScope(["src/**"]) }));
 
     expect(result).toEqual({
       status: "SELECTED",
@@ -90,7 +100,7 @@ describe("selectRuleEvidence", () => {
     const turn = makeTurn({
       files: [file("backend\\src\\app.ts", "patch-backend")],
     });
-    const result = selectRuleEvidence(turn, makeRule({ scope: "backend/**" }));
+    const result = selectRuleEvidence(turn, makeRule({ scope: ruleScope(["backend/**"]) }));
 
     expect(result).toEqual({
       status: "SELECTED",
@@ -102,7 +112,7 @@ describe("selectRuleEvidence", () => {
     const turn = makeTurn({
       files: [file("root.ts", "patch-root"), file("src/deep/file.ts", "patch-deep")],
     });
-    const result = selectRuleEvidence(turn, makeRule({ scope: "**/*.ts" }));
+    const result = selectRuleEvidence(turn, makeRule({ scope: ruleScope(["**/*.ts"]) }));
 
     expect(result.status).toBe("SELECTED");
 
@@ -116,13 +126,15 @@ describe("selectRuleEvidence", () => {
     const turn = makeTurn({
       files: [file("src/a.ts", "0123456789"), file("backend/big.ts", "x".repeat(1_000))],
     });
-    const rule = makeRule({ scope: "src/**" });
+    const rule = makeRule({ scope: ruleScope(["src/**"]) });
 
     expect(selectRuleEvidence(turn, rule, policy).status).toBe("SELECTED");
 
     const overLimit = makeTurn({ files: [file("src/a.ts", "01234567890")] });
 
-    expect(selectRuleEvidence(overLimit, makeRule({ scope: "src/**" }), policy)).toEqual({
+    expect(
+      selectRuleEvidence(overLimit, makeRule({ scope: ruleScope(["src/**"]) }), policy),
+    ).toEqual({
       status: "UNAVAILABLE",
       reason: "OVERSIZED_DIFF",
     });
@@ -132,7 +144,7 @@ describe("selectRuleEvidence", () => {
     const turn = makeTurn({
       files: [file("src/a.ts", "patch-src"), file(".env", "SECRET=1")],
     });
-    const result = selectRuleEvidence(turn, makeRule({ scope: "src/**" }));
+    const result = selectRuleEvidence(turn, makeRule({ scope: ruleScope(["src/**"]) }));
 
     expect(result).toEqual({
       status: "SELECTED",
@@ -144,7 +156,7 @@ describe("selectRuleEvidence", () => {
     const turn = makeTurn({
       files: [file("src/a.ts", "patch-src"), file(".env", "SECRET=1")],
     });
-    const result = selectRuleEvidence(turn, makeRule({ scope: "**" }));
+    const result = selectRuleEvidence(turn, makeRule({ scope: ruleScope(["**"]) }));
 
     expect(result).toEqual({ status: "UNAVAILABLE", reason: "BLOCKED_EVIDENCE" });
   });
@@ -189,9 +201,116 @@ describe("selectRuleEvidence", () => {
     const turn = makeTurn({
       files: [file("src/a.ts", "patch-src"), file("src/.env", "SECRET=1")],
     });
-    const result = selectRuleEvidence(turn, makeRule({ scope: "src/**" }));
+    const result = selectRuleEvidence(turn, makeRule({ scope: ruleScope(["src/**"]) }));
 
     expect(result.status).not.toBe("SELECTED");
+  });
+
+  test("a scope list applies inclusions together with exclusions", () => {
+    const turn = makeTurn({
+      files: [
+        file("src/a.ts", "patch-a"),
+        file("src/a.test.ts", "patch-test"),
+        file("src/nested/b.ts", "patch-b"),
+        file("backend/c.ts", "patch-backend"),
+      ],
+    });
+    const rule = makeRule({ scope: ruleScope(["src/**"], ["**/*.test.ts"]) });
+
+    expect(selectRuleEvidence(turn, rule)).toEqual({
+      status: "SELECTED",
+      evidence: { files: ["src/a.ts", "src/nested/b.ts"], diff: "patch-a\npatch-b" },
+    });
+  });
+
+  test("ignores a prose doc for a default code rule", () => {
+    const onlyDocs = makeTurn({ files: [file("docs/guide.md", "patch-docs")] });
+
+    expect(selectRuleEvidence(onlyDocs, makeRule({ scope: null }))).toEqual({
+      status: "SKIPPED",
+      reason: "NO_SCOPE_MATCH",
+    });
+
+    const mixed = makeTurn({
+      files: [file("src/a.ts", "patch-src"), file("docs/guide.md", "patch-docs")],
+    });
+
+    expect(selectRuleEvidence(mixed, makeRule({ scope: null }))).toEqual({
+      status: "SELECTED",
+      evidence: { files: ["src/a.ts"], diff: "patch-src" },
+    });
+  });
+
+  test.each(["docs", "any"] as const)(
+    "a doc-aware rule with evidence %s still sees prose docs",
+    (evidence) => {
+      const turn = makeTurn({
+        files: [file("docs/guide.md", "patch-docs"), file("docs/notes.txt", "patch-notes")],
+      });
+
+      expect(selectRuleEvidence(turn, makeRule({ scope: null, evidence }))).toEqual({
+        status: "SELECTED",
+        evidence: {
+          files: ["docs/guide.md", "docs/notes.txt"],
+          diff: "patch-docs\npatch-notes",
+        },
+      });
+    },
+  );
+
+  test("an evidence: docs rule sees only prose docs", () => {
+    const turn = makeTurn({
+      files: [file("src/a.ts", "patch-src"), file("docs/guide.md", "patch-docs")],
+    });
+    const result = selectRuleEvidence(turn, makeRule({ scope: null, evidence: "docs" }));
+
+    expect(result).toEqual({
+      status: "SELECTED",
+      evidence: { files: ["docs/guide.md"], diff: "patch-docs" },
+    });
+  });
+
+  test("a denied sensitive file still blocks a docs-only rule", () => {
+    const turn = makeTurn({
+      files: [file("docs/guide.md", "patch-docs"), file("secrets/credentials.json", "SECRET=1")],
+    });
+    const result = selectRuleEvidence(turn, makeRule({ scope: null, evidence: "docs" }));
+
+    expect(result).toEqual({ status: "UNAVAILABLE", reason: "BLOCKED_EVIDENCE" });
+  });
+
+  test("config and data formats stay visible to a default code rule", () => {
+    const turn = makeTurn({
+      files: [
+        file("config/app.yaml", "patch-yaml"),
+        file("data/table.csv", "patch-csv"),
+        file("tsconfig.json", "patch-json"),
+      ],
+    });
+    const result = selectRuleEvidence(turn, makeRule({ scope: null }));
+
+    expect(result).toEqual({
+      status: "SELECTED",
+      evidence: {
+        files: ["config/app.yaml", "data/table.csv", "tsconfig.json"],
+        diff: "patch-yaml\npatch-csv\npatch-json",
+      },
+    });
+  });
+});
+
+describe("matchesRuleScope", () => {
+  test("requires an inclusion match and rejects every exclusion match", () => {
+    const scope = ruleScope(["src/**"], ["**/*.test.ts"]);
+
+    expect(matchesRuleScope("src/a.ts", scope)).toBe(true);
+    expect(matchesRuleScope("src/deep/a.ts", scope)).toBe(true);
+    expect(matchesRuleScope("src/a.test.ts", scope)).toBe(false);
+    expect(matchesRuleScope("backend/a.ts", scope)).toBe(false);
+  });
+
+  test("normalizes Windows separators before matching", () => {
+    expect(matchesRuleScope("src\\deep\\a.ts", ruleScope(["src/**"]))).toBe(true);
   });
 });
 
