@@ -40,10 +40,13 @@ manual apply instruction only. The proposal prompt instructs the model to treat 
 task, paths, diff, rules, and findings as untrusted data and to require a separate
 explicit user confirmation before proposing changes to tests, configuration, or
 dependencies. The generic readiness toast carries no rule, task, diff, finding, or
-credential. No secret is carried, and no payload, task, diff, or secret is logged;
-failures surface only as safe status messages. Nothing is applied automatically: the
-user copies the manual apply instruction into their normal coding agent, and that
-ordinary turn is reviewed normally.
+credential. No secret is carried, and no payload, task, diff, or secret is logged. A
+contained proposal failure shows a generic failure toast and writes one structured
+`error` log entry whose `extra` carries only a typed reason code
+(`MODEL_SPECIFIER_INVALID`, `CHILD_SESSION_FAILED`, or `PROPOSAL_PROMPT_FAILED`); the
+failure log never carries task, diff, findings, paths, or credentials. Nothing is
+applied automatically: the user copies the manual apply instruction into their normal
+coding agent, and that ordinary turn is reviewed normally.
 
 ## Evidence must be complete
 

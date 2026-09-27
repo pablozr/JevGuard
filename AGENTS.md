@@ -62,8 +62,12 @@ the current repository diff when host attribution fails.
   review with any `FAIL`, and only when remediation is enabled (the default), the
   plugin sends the task, the complete safe attributed patch, and every `FAIL` finding
   (rules and built-ins) to a hidden `jevguard-proposer` subagent in an isolated child
-  session parented to the source session, then shows a generic toast. The proposer has
-  no tools and returns a strategy only; it never edits code or applies anything. The
+  session parented to the source session, using the configured `remediation.model` when
+  present and otherwise inheriting the host's model, then shows a generic toast. A
+  contained proposal failure shows a generic error toast and writes only one typed
+  reason code to the log — never task, diff, findings, paths, or credentials. The
+  proposer has no tools and returns a strategy only; it never edits code or applies
+  anything. The
   user reviews the proposal and copies its manual apply instruction into their normal
   coding agent, and that ordinary turn is reviewed normally. Do not broaden it: no
   parent injection, no repository or global diff fallback, no retry or re-evaluation

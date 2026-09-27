@@ -151,10 +151,12 @@ subagent with wildcard-disabled tools and wildcard-deny permissions
 `proposeForTurn` claims the evaluated turn (`messageID`), creates one child session
 parented to the source session, registers it so its own idle events are excluded from
 review for the plugin lifetime, and prompts the proposer subagent with the configured
-model and a fixed system prompt. The subagent cannot call a tool, edit a file, or
-produce a patch: it returns a strategy and one manual apply instruction. A generic
-toast reports that the proposal is ready. Every host, model, or toast failure is
-contained and never affects the review or later turns.
+model when present and otherwise the host's model, plus a fixed system prompt. The
+subagent cannot call a tool, edit a file, or produce a patch: it returns a strategy and
+one manual apply instruction. A generic toast reports that the proposal is ready, and a
+contained child-session or prompt failure shows a generic error toast and writes one
+safe structured log entry carrying only a typed reason code. Every host, model, or
+toast failure is contained and never affects the review or later turns.
 
 The full attributed patch must pass the same safety policy as the review. A blocked or
 oversized patch records no proposal, even when a rule-scoped `FAIL` exists, and there

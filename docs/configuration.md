@@ -205,7 +205,8 @@ remediation:
   auto_propose: true
   propose_on:
     - FAIL
-  model: opencode/gpt-5.6-luna
+  # model is optional; when absent the proposer inherits the host model.
+  # model: provider/model
 ```
 
 Validation rules:
@@ -218,8 +219,10 @@ Validation rules:
 - `remediation.auto_propose` must be a boolean.
 - `remediation.propose_on` must be a non-empty list whose only accepted value is
   `FAIL`.
-- `remediation.model` must be exactly one non-empty provider and one non-empty model
-  separated by `/` (`provider/model`), with no whitespace and no additional `/`.
+- `remediation.model` is optional. When absent, the proposer inherits the host's
+  model. When present it must be exactly one non-empty provider and one non-empty
+  model separated by `/` (`provider/model`), with no whitespace and no additional
+  `/`.
 - Any other key inside `remediation` is invalid.
 
 A present but invalid configuration — including an invalid `remediation` section — is
@@ -341,10 +344,17 @@ truncating evidence.
 The plugin `config` hook registers the hidden `jevguard-proposer` subagent with
 wildcard-disabled tools and wildcard-deny permissions (`{"*": "deny"}`), so it cannot
 call a tool, edit a file, or produce a patch. The proposal is sent in an isolated child
-session parented to the source session, with the configured `remediation.model`; the
-child session is excluded from review for the plugin lifetime, so a proposal can never
+session parented to the source session. When `remediation.model` is present it selects
+the proposer model; when it is absent the proposer inherits the host's model. The child
+session is excluded from review for the plugin lifetime, so a proposal can never
 recurse or trigger a second one. The generic toast carries no rule, task, diff, finding,
 or credential.
+
+A contained proposal failure — an invalid model specifier, a child-session creation
+failure, or a prompt failure — surfaces a generic error toast and one structured
+`error` log entry whose `extra` carries only a typed reason code
+(`MODEL_SPECIFIER_INVALID`, `CHILD_SESSION_FAILED`, or `PROPOSAL_PROMPT_FAILED`).
+Neither carries any task, diff, rule, finding, path, or credential.
 
 At most one proposal is created per evaluated turn. There is no retry, loop, or
 re-evaluation, and no automatic apply. The user reads the proposal, copies its manual

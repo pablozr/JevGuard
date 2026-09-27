@@ -166,13 +166,18 @@ proposal request to a hidden `jevguard-proposer` subagent:
   `jevguard-proposer` subagent has wildcard-deny permissions and wildcard-disabled
   tools, so it cannot call a tool, edit a file, or produce a patch. It returns a
   strategy and one manual apply instruction only.
+- `remediation.model` is optional. When set in `.jev/config.yaml`, it selects the
+  proposer model; when it is absent, the proposer inherits the host's model.
 - A generic toast reports that the proposal is ready in the child session. It carries
   no rule, task, diff, finding, or credential.
 
 The plugin creates at most one proposal per evaluated turn, and the child session is
 excluded from review for the plugin lifetime, so a proposal can never recurse or
 trigger a second one. A host, model, or toast failure is contained and never changes
-the review.
+the review. A contained proposal failure — an invalid model specifier, a child-session
+failure, or a prompt failure — shows a generic error toast and writes one structured
+`error` log entry carrying only a typed reason code, never any task, diff, finding,
+path, or credential.
 
 The proposer is a strategy step, not an apply step: it never edits code, and nothing
 is applied automatically. You read the proposal, copy its manual apply instruction
