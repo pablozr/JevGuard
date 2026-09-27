@@ -101,8 +101,14 @@ A single README sentence, an isolated code sample, personal preference, or an
 aspiration the repository does not already follow is **not** strong evidence. Exclude
 speculative rules and say which candidates you dropped and why.
 
-Each rule block keeps the document grammar; `severity` and `scope` remain the only
-accepted metadata. Provenance is **never** written inside a rule block.
+Each rule block keeps the document grammar. The accepted metadata is `severity`,
+repeatable `scope` (a leading `!` excludes), and optional `evidence` (`code`, the
+default, `docs`, or `any`). Provenance is **never** written inside a rule block.
+
+Prefer a bounded `scope:` over a repository-wide rule: a convention that only holds under
+particular paths must say so, or it will fire where it does not apply. Add
+`evidence: docs` or `evidence: any` only when the rule genuinely inspects documentation,
+because the default `code` class excludes prose.
 
 ### 5. Write the provenance preamble before the rules
 
