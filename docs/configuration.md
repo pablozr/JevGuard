@@ -364,6 +364,18 @@ does not inject messages into the agent context, does not modify the source sess
 and does not block a turn. A separate, configurable workflow can turn a review that
 contains a `FAIL` into a proposal, as described below.
 
+### Local review history
+
+Every review is also appended to a bounded local history at
+`~/.local/share/jevguard/reviews.jsonl`, or at
+`<XDG_DATA_HOME>/jevguard/reviews.jsonl` when `XDG_DATA_HOME` is a non-empty absolute
+path (a relative `XDG_DATA_HOME` is ignored). It stores only the structured-log
+allowlist plus a timestamp, is local-only, rewrites itself once it passes 5 MB keeping
+the newest records, and is safe to delete at any time. `jevguard report` and
+`jevguard report --json` aggregate it into outcome totals, reason breakdowns,
+per-rule counts, and slice coverage; a missing or empty file is a normal empty report.
+See the [security model](./security.md) for exactly what it stores.
+
 ## Safe auto-propose remediation
 
 The review remains observe-only unless remediation is enabled, and the server plugin

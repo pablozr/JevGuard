@@ -124,6 +124,27 @@ Structured logs may record a rejected path and reason. They must never record th
 rejected file contents, and a rejected file is never replaced by the repository
 diff or by another file's patch.
 
+## Local review history
+
+The server plugin also appends every review to a local, bounded JSON Lines history so
+operators can aggregate outcomes without parsing the host's log file. Each record is
+exactly the structured-log projection allowlist plus an ISO 8601 timestamp: the
+aggregate counts, each result's rule or check ID, its outcome, its severity, its
+scoped paths, its raw probability or typed reason, and its slice metadata. It stores
+no task, diff, prompt, model output, credential, API key, or environment value.
+
+The file lives at `<XDG_DATA_HOME>/jevguard/reviews.jsonl` when `XDG_DATA_HOME` is set
+to a non-empty absolute path, and otherwise at `~/.local/share/jevguard/reviews.jsonl`
+on every platform, including Windows. A relative `XDG_DATA_HOME` is ignored. It is
+local-only, never uploaded, and bounded: once it passes 5 MB it is rewritten atomically
+(a temporary file renamed in place) keeping only the newest records. You can delete it
+at any time; the next review recreates it.
+
+A write failure is contained and never affects a review, presentation, or a later
+turn. `jevguard report` reads and aggregates this file and prints aggregated counts,
+rule IDs, check IDs, and reason codes only — never a file path, task, diff, or
+credential.
+
 ## Rule authoring skill
 
 The package ships two OpenCode skills with private validators: `jevguard-rules` to

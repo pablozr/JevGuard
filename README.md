@@ -399,6 +399,34 @@ synthetic entry a review-level failure produces.
 rule had no applicable change to evaluate. `UNAVAILABLE` means JevGuard could not
 safely or completely evaluate that rule.
 
+## Review history
+
+JevGuard keeps a bounded, local, content-free history of your reviews so you can see
+how turns fared without grepping the host log. Every review appends the same safe
+structured-log projection plus an ISO 8601 timestamp to one JSON Lines file:
+
+```text
+<XDG_DATA_HOME or ~/.local/share>/jevguard/reviews.jsonl
+```
+
+The file holds the aggregate counts, each result's rule or check ID, its outcome, and
+its typed reason or raw probability — the same allowlist as the structured log. It
+never holds a task, diff, prompt, model output, credential, or environment value. It
+is local-only, bounded (it rewrites itself once it passes 5 MB, keeping the newest
+records), and safe to delete at any time; the next review recreates it.
+
+```sh
+# human-readable summary
+jevguard report
+
+# the same aggregation as JSON
+jevguard report --json
+```
+
+The report prints aggregated counts, rule IDs, check IDs, and reason codes only —
+never file paths, tasks, diffs, or credentials. A missing or empty history is a
+normal empty report, not an error.
+
 ## Implemented behavior
 
 The current release implements the full local review path:
