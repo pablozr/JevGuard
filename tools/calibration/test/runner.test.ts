@@ -3,6 +3,8 @@ import {
   type JevEvaluationPort,
   type JevEvaluationResult,
   type JevRequest,
+  type JevRuleEvaluationResult,
+  type JevRuleRequest,
 } from "@jevguard/core";
 import { describe, expect, test } from "vitest";
 import type { TypeSafeSystemOneRequest } from "@jevguard/opencode-adapter";
@@ -66,6 +68,18 @@ class FakePort implements JevEvaluationPort {
     } finally {
       this.active -= 1;
     }
+  }
+
+  async evaluateRuleBatch(
+    requests: readonly JevRuleRequest[],
+  ): Promise<readonly JevRuleEvaluationResult[]> {
+    const results = await Promise.all(requests.map((request) => this.evaluate(request)));
+
+    return results.map((result) =>
+      result.kind === "RULE"
+        ? result
+        : { kind: "RULE", status: "FAILED", reason: "INVALID_RESPONSE" },
+    );
   }
 }
 

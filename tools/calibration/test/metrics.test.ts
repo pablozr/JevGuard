@@ -3,6 +3,8 @@ import {
   evaluateBuiltIns,
   type JevEvaluationPort,
   type JevEvaluationResult,
+  type JevRuleEvaluationResult,
+  type JevRuleRequest,
   type Turn,
 } from "@jevguard/core";
 import { describe, expect, test } from "vitest";
@@ -67,6 +69,12 @@ class FixedBatchPort implements JevEvaluationPort {
         complexity: { status: "EVALUATED", noul: { violationProbability: this.complexity } },
       },
     };
+  }
+
+  async evaluateRuleBatch(
+    requests: readonly JevRuleRequest[],
+  ): Promise<readonly JevRuleEvaluationResult[]> {
+    return requests.map(() => ({ kind: "RULE", status: "FAILED", reason: "API_ERROR" }));
   }
 }
 

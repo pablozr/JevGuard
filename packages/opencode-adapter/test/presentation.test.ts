@@ -714,3 +714,80 @@ describe("OpenCode sinks", () => {
     ).toBe("FAILED");
   });
 });
+
+function slicedRuleResult(): RuleReviewResult {
+  return {
+    kind: "RULE",
+    turnId: TURN_ID,
+    ruleId: "ARCH-001",
+    severity: "error",
+    scopedPaths: ["src/a.ts", "src/b.ts"],
+    outcome: "PASS",
+    violationProbability: 0.2,
+    evidence: {
+      mode: "SLICED",
+      plannedSliceCount: 2,
+      evaluatedSliceCount: 2,
+      failedSliceCount: 0,
+      notEvaluatedSliceCount: 0,
+      slices: [
+        { index: 0, path: "src/a.ts", kind: "FILE", hunkOrdinal: null },
+        { index: 1, path: "src/b.ts", kind: "HUNK", hunkOrdinal: 0 },
+      ],
+      sliceJudgments: [
+        { index: 0, probability: 0.1, outcome: "PASS" },
+        { index: 1, probability: 0.2, outcome: "PASS" },
+      ],
+      failingSliceIndex: null,
+      failureReason: null,
+    },
+  };
+}
+
+describe("slice metadata presentation", () => {
+  test("projects slice metadata into the log allowlist without diff content", () => {
+    const entry = toReviewLogEntry(reviewOf([slicedRuleResult()]));
+
+    expect(entry.results[0]).toEqual({
+      kind: "RULE",
+      ruleId: "ARCH-001",
+      severity: "error",
+      scopedPaths: ["src/a.ts", "src/b.ts"],
+      outcome: "PASS",
+      violationProbability: 0.2,
+      evidence: {
+        mode: "SLICED",
+        plannedSliceCount: 2,
+        evaluatedSliceCount: 2,
+        failedSliceCount: 0,
+        notEvaluatedSliceCount: 0,
+        slices: [
+          { index: 0, path: "src/a.ts", kind: "FILE", hunkOrdinal: null },
+          { index: 1, path: "src/b.ts", kind: "HUNK", hunkOrdinal: 0 },
+        ],
+        sliceJudgments: [
+          { index: 0, probability: 0.1, outcome: "PASS" },
+          { index: 1, probability: 0.2, outcome: "PASS" },
+        ],
+        failingSliceIndex: null,
+        failureReason: null,
+      },
+    });
+
+    const serialized = JSON.stringify(entry);
+
+    expect(serialized).not.toMatch(/diff|task|description|api[-_]?key|secret/i);
+  });
+
+  test("adds the sliced-rule and slice-judgment counts to the aggregate toast", () => {
+    expect(toReviewToast(reviewOf([slicedRuleResult()])).message).toBe(
+      "pass 1 · warn 0 · fail 0 · skipped 0 · unavailable 0 · sliced 1 rules · slices 2",
+    );
+  });
+
+  test("keeps the toast message unchanged when no rule was sliced", () => {
+    expect(toReviewToast(reviewOf([semanticResult("PASS", 0.1)])).message).toBe(
+      "pass 1 · warn 0 · fail 0 · skipped 0 · unavailable 0",
+    );
+  });
+});

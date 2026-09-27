@@ -1,4 +1,4 @@
-import type { ReviewCounts, ReviewOutcome, TurnReview } from "@jevguard/core";
+import type { ReviewCounts, ReviewOutcome, ReviewResult, TurnReview } from "@jevguard/core";
 import { displayOutcome } from "./display";
 import type { ReviewToast, ToastVariant } from "./types";
 
@@ -7,9 +7,37 @@ export function toReviewToast(review: TurnReview): ReviewToast {
 
   return {
     title: `JevGuard ${outcome}`,
-    message: countSummary(review.summary.counts),
+    message: `${countSummary(review.summary.counts)}${slicedSummary(review.results)}`,
     variant: toastVariantFor(outcome),
   };
+}
+
+/**
+ * Appends the number of sliced rules and their evaluated slice judgments when either
+ * is non-zero. The suffix carries counts only, never probabilities, paths, or diff.
+ */
+function slicedSummary(results: readonly ReviewResult[]): string {
+  let slicedRules = 0;
+  let sliceJudgments = 0;
+
+  for (const result of results) {
+    if (result.kind !== "RULE" || result.evidence === undefined) {
+      continue;
+    }
+
+    if (result.evidence.mode !== "SLICED") {
+      continue;
+    }
+
+    slicedRules += 1;
+    sliceJudgments += result.evidence.evaluatedSliceCount;
+  }
+
+  if (slicedRules === 0 && sliceJudgments === 0) {
+    return "";
+  }
+
+  return ` · sliced ${slicedRules} rules · slices ${sliceJudgments}`;
 }
 
 export function toastVariantFor(outcome: ReviewOutcome): ToastVariant {

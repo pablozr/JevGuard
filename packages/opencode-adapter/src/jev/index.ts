@@ -3,6 +3,7 @@ export {
   createJevTransport,
   createTypeSafeJevTransport,
   createTypeSafeSystemOneClient,
+  RULE_BATCH_CONCURRENCY,
 } from "./transport";
 export { JEV_MODEL } from "./types";
 export type {

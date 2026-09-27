@@ -1,6 +1,7 @@
 import type {
   OperationalStatus,
   ReviewCounts,
+  RuleEvidenceMetadata,
   RuleSeverity,
   SemanticVerdict,
   SkippedReason,
@@ -17,6 +18,7 @@ interface RuleLogIdentity {
   readonly ruleId: string | null;
   readonly severity: RuleSeverity | null;
   readonly scopedPaths: readonly string[];
+  readonly evidence?: RuleEvidenceMetadata;
 }
 
 interface BuiltInLogIdentity {

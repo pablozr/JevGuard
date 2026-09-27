@@ -51,6 +51,7 @@ export {
   createTypeSafeJevTransport,
   createTypeSafeSystemOneClient,
   JEV_MODEL,
+  RULE_BATCH_CONCURRENCY,
 } from "./jev";
 export type {
   JevTransport,

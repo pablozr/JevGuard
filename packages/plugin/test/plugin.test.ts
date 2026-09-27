@@ -8,6 +8,8 @@ import {
   type JevEvaluationPort,
   type JevEvaluationResult,
   type JevRequest,
+  type JevRuleEvaluationResult,
+  type JevRuleRequest,
   type RemediationProposalRequest,
   type RemediationProposalStore,
   type ReviewLevelResult,
@@ -429,6 +431,28 @@ class FakeJev implements JevEvaluationPort {
   private readonly activationWaiters: Array<{ count: number; resolve: () => void }> = [];
 
   async evaluate(request: JevRequest): Promise<JevEvaluationResult> {
+    return this.evaluateRequest(request);
+  }
+
+  async evaluateRuleBatch(
+    requests: readonly JevRuleRequest[],
+  ): Promise<readonly JevRuleEvaluationResult[]> {
+    const results: JevRuleEvaluationResult[] = [];
+
+    for (const request of requests) {
+      const result = await this.evaluateRequest(request);
+
+      results.push(
+        result.kind === "RULE"
+          ? result
+          : { kind: "RULE", status: "FAILED", reason: "INVALID_RESPONSE" },
+      );
+    }
+
+    return results;
+  }
+
+  private async evaluateRequest(request: JevRequest): Promise<JevEvaluationResult> {
     const label = requestCallLabel(request);
 
     this.requests.push(request);
@@ -623,6 +647,10 @@ function loadRules(policy: FakePolicyLoader, rules: string, config: string | nul
   policy.result = { status: "LOADED", source: { rules, config } };
 }
 
+function wholeSlicePath(scopedPaths: readonly string[]): string | null {
+  return scopedPaths.length === 1 ? (scopedPaths[0] ?? null) : null;
+}
+
 function ruleEvaluated(
   ruleId: string,
   severity: "error" | "warning",
@@ -638,6 +666,17 @@ function ruleEvaluated(
     scopedPaths,
     outcome,
     violationProbability: probability,
+    evidence: {
+      mode: "WHOLE",
+      plannedSliceCount: 1,
+      evaluatedSliceCount: 1,
+      failedSliceCount: 0,
+      notEvaluatedSliceCount: 0,
+      slices: [{ index: 0, path: wholeSlicePath(scopedPaths), kind: "WHOLE", hunkOrdinal: null }],
+      sliceJudgments: [{ index: 0, probability, outcome }],
+      failingSliceIndex: null,
+      failureReason: null,
+    },
   };
 }
 
@@ -672,6 +711,28 @@ function ruleUnavailable(
     scopedPaths,
     outcome: "UNAVAILABLE",
     reason,
+    ...(reason === "JEV_FAILURE" && scopedPaths.length > 0
+      ? {
+          evidence: {
+            mode: "WHOLE" as const,
+            plannedSliceCount: 1,
+            evaluatedSliceCount: 0,
+            failedSliceCount: 1,
+            notEvaluatedSliceCount: 0,
+            slices: [
+              {
+                index: 0,
+                path: wholeSlicePath(scopedPaths),
+                kind: "WHOLE" as const,
+                hunkOrdinal: null,
+              },
+            ],
+            sliceJudgments: [],
+            failingSliceIndex: 0,
+            failureReason: reason,
+          },
+        }
+      : {}),
   };
 }
 

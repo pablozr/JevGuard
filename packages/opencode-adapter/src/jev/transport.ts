@@ -30,14 +30,20 @@ import {
 
 const DEFAULT_ALLOWED_CRITERION = "The change does not violate the rule's Violation.";
 
+/** Bounded concurrency the adapter owns for one turn's rule-slice batch. */
+export const RULE_BATCH_CONCURRENCY = 4;
+
 /** Builds the TypeSafe client options for an explicitly resolved credential. */
 export function buildTypeSafeClientConfig(apiKey: string): TypeSafeClientConfiguration {
   return { apiKey, defaultModel: JEV_MODEL, logLevel: "off" };
 }
 
 /**
- * Concrete TypeSafe transport for Jev judgments. The credential is resolved on
- * every `evaluate`; a request rejection or an invalid external response is typed
+ * Concrete TypeSafe transport for Jev judgments. A single `evaluate` resolves the
+ * credential and creates one client for that request. A whole turn's rule slices go
+ * through one `evaluateRuleBatch`: the credential is resolved once, one client is
+ * created, and the slices are dispatched with the adapter's bounded concurrency cap and
+ * returned in input order. A request rejection or an invalid external response is typed
  * and never thrown, and no error, response body, task, diff, or key is exposed.
  */
 export function createJevTransport(dependencies: JevTransportDependencies): JevEvaluationPort {
@@ -59,7 +65,74 @@ export function createJevTransport(dependencies: JevTransportDependencies): JevE
 
       return evaluateWithClient(client, request);
     },
+    async evaluateRuleBatch(
+      requests: readonly JevRuleRequest[],
+    ): Promise<readonly JevRuleEvaluationResult[]> {
+      if (requests.length === 0) {
+        return [];
+      }
+
+      const credential = await resolveCredential(dependencies.credentials);
+
+      if (credential.status === "UNAVAILABLE") {
+        const reason = toFailureReason(credential.reason);
+        return requests.map(() => ruleFailed(reason));
+      }
+
+      let client: TypeSafeSystemOneClient;
+
+      try {
+        client = dependencies.createClient(credential.apiKey);
+      } catch {
+        return requests.map(() => ruleFailed("API_ERROR"));
+      }
+
+      return runWithConcurrency(requests, RULE_BATCH_CONCURRENCY, (request) =>
+        evaluateRuleWithClient(client, request),
+      );
+    },
   };
+}
+
+/**
+ * Runs one worker per available slot; each worker pulls the next input index, so at
+ * most `cap` requests are in flight and wall-clock scales with `ceil(total / cap)`.
+ * Results are written at their input index and returned in input order regardless of
+ * completion order. There is no retry.
+ */
+async function runWithConcurrency<T, R>(
+  items: readonly T[],
+  cap: number,
+  worker: (item: T) => Promise<R>,
+): Promise<readonly R[]> {
+  const results: R[] = new Array(items.length);
+  let cursor = 0;
+
+  async function run(): Promise<void> {
+    while (true) {
+      const index = cursor;
+      cursor += 1;
+
+      if (index >= items.length) {
+        return;
+      }
+
+      const item = items[index];
+
+      if (item === undefined) {
+        continue;
+      }
+
+      results[index] = await worker(item);
+    }
+  }
+
+  const workerCount = Math.min(cap, items.length);
+  const workers = Array.from({ length: workerCount }, () => run());
+
+  await Promise.all(workers);
+
+  return results;
 }
 
 /** Wires the concrete TypeSafe SDK client factory for one credential provider. */

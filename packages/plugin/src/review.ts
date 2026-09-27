@@ -45,11 +45,12 @@ interface PolicyConfig {
  * Reviews one attributed turn: read the fixed policy paths once, then run the local
  * rule lane and the single built-in batch concurrently and present exactly one
  * aggregate. A rejected loader or rule/config failure degrades only the rule lane to a
- * review-level `UNAVAILABLE` and never suppresses the built-in batch. Rules stay
- * sequential inside their lane, so a turn submits one request per rule plus one batch
- * request to the shared Jev port, whose concurrency wrapper caps in-flight calls. The
- * final results are rules in source order, then scope creep, then complexity,
- * regardless of completion timing. After presentation, an enabled and valid
+ * review-level `UNAVAILABLE` and never suppresses the built-in batch. The rule lane
+ * plans every rule locally, then submits one batched request carrying all planned
+ * slices plus one built-in batch request to the shared Jev port; the adapter resolves
+ * the credential once and dispatches slices with bounded concurrency, while the FIFO
+ * wrapper caps in-flight entries. The final results are rules in source order, then
+ * scope creep, then complexity, regardless of completion timing. After presentation, an enabled and valid
  * remediation config builds one aggregate proposal request for the whole turn and
  * schedules at most one automatic proposal. This review never injects into agent
  * context.
