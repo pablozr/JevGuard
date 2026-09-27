@@ -8,12 +8,15 @@ import {
 /** Exactly one nonempty, whitespace-free provider and model, separated by `/`. */
 const MODEL_PATTERN = /^[^\s/]+\/[^\s/]+$/;
 const KNOWN_KEYS: ReadonlySet<string> = new Set(["auto_propose", "propose_on", "model"]);
+const INVALID_MODEL = Symbol("invalid-model");
 
 /**
  * Validates the optional `remediation` section of `.jev/config.yaml`. Absent config
- * or an absent section uses the documented defaults. A present section that does not
- * validate exactly is `INVALID_CONFIG` rather than guessed, so a typo can never
- * silently disable or broaden automatic proposals.
+ * or an absent section uses the documented defaults. An absent `model` resolves to
+ * `null`, which means the proposer inherits the host model; a present `model` must be
+ * exactly one `provider/model` specifier. A present section that does not validate
+ * exactly is `INVALID_CONFIG` rather than guessed, so a typo can never silently
+ * disable or broaden automatic proposals.
  */
 export function resolveRemediationConfig(value: unknown): RemediationConfigResult {
   if (value === null || value === undefined) {
@@ -46,9 +49,9 @@ export function resolveRemediationConfig(value: unknown): RemediationConfigResul
     return invalid();
   }
 
-  const model = remediation.model ?? DEFAULT_REMEDIATION_CONFIG.model;
+  const model = resolveModel(remediation.model);
 
-  if (typeof model !== "string" || !MODEL_PATTERN.test(model)) {
+  if (model === INVALID_MODEL) {
     return invalid();
   }
 
@@ -73,6 +76,19 @@ export function parseModelSpecifier(
     providerID: model.slice(0, separator),
     modelID: model.slice(separator + 1),
   };
+}
+
+/** Absent model inherits the host model (`null`); a present model must be well formed. */
+function resolveModel(value: unknown): string | null | typeof INVALID_MODEL {
+  if (value === undefined) {
+    return null;
+  }
+
+  if (typeof value !== "string" || !MODEL_PATTERN.test(value)) {
+    return INVALID_MODEL;
+  }
+
+  return value;
 }
 
 function readProposeOn(value: unknown): readonly ProposalTrigger[] | null {

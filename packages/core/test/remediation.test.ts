@@ -89,7 +89,7 @@ describe("resolveRemediationConfig", () => {
   test("uses the documented defaults when the config or section is absent", () => {
     const expected = {
       status: "VALID",
-      config: { autoPropose: true, proposeOn: ["FAIL"], model: "opencode/gpt-5.6-luna" },
+      config: { autoPropose: true, proposeOn: ["FAIL"], model: null },
     };
 
     expect(resolveRemediationConfig(null)).toEqual(expected);
@@ -121,6 +121,7 @@ describe("resolveRemediationConfig", () => {
     { label: "model without provider", value: { remediation: { model: "gpt-5" } } },
     { label: "model with extra segment", value: { remediation: { model: "a/b/c" } } },
     { label: "empty model", value: { remediation: { model: "" } } },
+    { label: "explicit null model", value: { remediation: { model: null } } },
     { label: "unknown remediation key", value: { remediation: { auto_propose: true, extra: 1 } } },
   ])("rejects $label as INVALID_CONFIG", ({ value }) => {
     expect(resolveRemediationConfig(value)).toEqual({
@@ -166,7 +167,7 @@ describe("buildProposalRequest", () => {
       evaluationId: "msg_1",
       sessionID: "ses_1",
       messageID: "msg_1",
-      model: "opencode/gpt-5.6-luna",
+      model: null,
       task: "Implement the thing.",
       paths: ["src/a.ts", "docs/readme.md", "outside.txt"],
       diff: [PATCH, DOCS_PATCH, OTHER_PATCH].join("\n"),

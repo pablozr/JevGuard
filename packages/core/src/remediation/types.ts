@@ -18,18 +18,20 @@ export type ProposalTrigger = "FAIL";
 
 /**
  * Strict remediation policy. Absent configuration uses the defaults: auto-propose is
- * enabled for `FAIL` with the bundled proposer model.
+ * enabled for `FAIL` and no model is pinned, so the proposer inherits the host's
+ * model. A `null` model always means "inherit the host model"; a present model must
+ * be one `provider/model` specifier.
  */
 export interface RemediationConfig {
   readonly autoPropose: boolean;
   readonly proposeOn: readonly ProposalTrigger[];
-  readonly model: string;
+  readonly model: string | null;
 }
 
 export const DEFAULT_REMEDIATION_CONFIG: RemediationConfig = {
   autoPropose: true,
   proposeOn: ["FAIL"],
-  model: "opencode/gpt-5.6-luna",
+  model: null,
 };
 
 export type RemediationConfigResult =
@@ -70,7 +72,7 @@ export interface RemediationProposalRequest {
   readonly evaluationId: string;
   readonly sessionID: string;
   readonly messageID: string;
-  readonly model: string;
+  readonly model: string | null;
   readonly task: string;
   readonly paths: readonly string[];
   readonly diff: string;
