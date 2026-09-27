@@ -51,10 +51,15 @@ the current repository diff when host attribution fails.
 
 - One evaluated turn is one completed assistant message, its direct parent user
   message, and the assistant-attributed patch.
-- One applicable rule maps to one Jev Noul. `Allowed` belongs in that Noul's
-  criteria; never create a second model decision for it.
-- Do not emit semantic results from partial evidence. Oversized, missing, blocked,
-  invalid, or otherwise incomplete evidence is `UNAVAILABLE`.
+- One applicable repository rule maps to exactly one Jev Noul for each complete
+  evidence slice produced for it; `Allowed` belongs in every such Noul's criteria and
+  never creates a separate model decision. A rule-level semantic verdict exists only
+  after every planned slice has a valid Jev judgment and is the deterministic maximum
+  of those slice judgments.
+- Do not emit semantic results from partial evidence. Oversized evidence is sliced by
+  file and unified-diff hunk; missing, blocked, invalid, or otherwise incomplete
+  evidence is `UNAVAILABLE`, and a rule whose slices do not fit the per-rule or
+  per-turn slice budget is `UNAVAILABLE/SLICE_LIMIT_EXCEEDED`.
 - No patch or no scope match is `SKIPPED` without calling Jev.
 - The default review is background and observe-only: it never alters agent context,
   prompts a session, blocks a turn, or edits code. A separate, configurable

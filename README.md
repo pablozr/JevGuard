@@ -97,11 +97,18 @@ applicable rules
 one semantic judgment per rule
 ```
 
-If complete attributed evidence is unavailable, too large, invalid, or contains a
-blocked sensitive file, JevGuard marks the affected rule `UNAVAILABLE`. It never
-turns incomplete evidence into a reassuring verdict. Evidence problems are scoped
-to the rules they affect: a rule whose applicable files are all safe still runs
-even when another rule's evidence is blocked.
+If complete attributed evidence is unavailable, invalid, or contains a blocked
+sensitive file, JevGuard marks the affected rule `UNAVAILABLE`. It never turns
+incomplete evidence into a reassuring verdict. Evidence problems are scoped to the
+rules they affect: a rule whose applicable files are all safe still runs even when
+another rule's evidence is blocked.
+
+Oversized evidence is no longer refused outright. A scoped diff above
+`maxDiffLength` is split, in attributed file order, into one slice per file; an
+individually oversized file is split into its ordered unified-diff hunks with the file
+preamble repeated in every slice. Nothing is truncated, summarized, or dropped: an
+unparseable oversized file or an indivisible oversized hunk makes the whole rule
+`UNAVAILABLE/OVERSIZED_DIFF`.
 
 Some failures happen before any policy rule is evaluated. If the attributed diff
 cannot be built, the review is a single synthetic `UNAVAILABLE` entry with no rule
@@ -125,7 +132,15 @@ policy that translates it into an outcome.
 | `warning` | `< 60%` | `≥ 60%` | never |
 
 Those thresholds are per repository rule and locally configurable in
-`.jev/config.yaml`.
+`.jev/config.yaml`. Slicing does not change them: each slice is gated independently,
+the rule outcome is the highest slice outcome (`FAIL > WARN > PASS`), and the rule's
+`violationProbability` is the maximum across its slices. `PASS` requires every planned
+slice to pass. A rule may produce at most 16 slices, and slicing may add at most 32
+repository-rule Jev calls per turn beyond one per applicable rule; a rule that does not
+fit is `UNAVAILABLE/SLICE_LIMIT_EXCEEDED` with no Jev call and later rules still use the
+remaining budget. Any failed, blocked, or out-of-range slice makes the whole rule
+`UNAVAILABLE`, and no sibling probability is presented as a verdict. The built-ins do
+not slice.
 
 JevGuard also runs two product-owned built-ins on every attributed turn,
 `SCOPE-CREEP` and `COMPLEXITY`. Both receive the turn's complete, safe attributed
@@ -394,10 +409,13 @@ The current release implements the full local review path:
 - Every `## <RULE-ID>` block in `.jev/rules.md` is parsed in source order. Each
   block is validated independently, so one invalid block does not suppress its
   valid siblings, and every occurrence of a duplicated ID is invalid.
-- Each valid rule is processed independently. It asks Jev at most once, and only
-  when the gate config is valid, the rule is applicable, and its scoped evidence is
-  complete and safe; it produces one typed violation probability or an operational
-  outcome.
+- Each valid rule is processed independently. Its complete scoped evidence is planned
+  locally, then every planned slice across all rules is dispatched through one batched
+  Jev entry that resolves the credential once and uses bounded concurrency; each slice
+  asks one Noul. The rule result is the deterministic maximum of its slice judgments,
+  and a fitting rule still issues exactly one call. The rule asks Jev only when the
+  gate config is valid, the rule is applicable, and its scoped evidence is complete and
+  safe; it produces one typed violation probability or an operational outcome.
 - A failure before rule evaluation — no attributed diff, unreadable policy files, or
   a missing `.jev/rules.md` — is reported by the rule lane as one synthetic
   `UNAVAILABLE` entry with no rule ID, not one result per declared rule. When the
@@ -412,12 +430,14 @@ The current release implements the full local review path:
 - Both built-ins are sent as one batch request with two independent named answers.
   One malformed or missing answer fails only its own check; the valid sibling still
   gates. A failed or malformed batch envelope makes both checks `UNAVAILABLE`.
-- The built-in batch runs concurrently with the sequential rule lane. One shared FIFO
-  concurrency limit allows at most two Jev requests in flight across the plugin
-  instance, counting the batch as one request. With no attributed patch a built-in is
-  `SKIPPED`; blocked or oversized evidence is `UNAVAILABLE`; a rule, policy-load, or
-  config failure never suppresses the batch, and one built-in's answer never
-  suppresses the other.
+- The built-in batch runs concurrently with the rule lane. The rule lane dispatches
+  one batched request for all of the turn's planned slices with a bounded adapter
+  concurrency cap of four; the built-in batch keeps its own single request. One shared
+  FIFO concurrency limit allows at most two Jev entries in flight across the plugin
+  instance, counting the rule batch and the built-in batch as one entry each. With no
+  attributed patch a built-in is `SKIPPED`; blocked or oversized evidence is
+  `UNAVAILABLE`; a rule, policy-load, or config failure never suppresses the batch, and
+  one built-in's answer never suppresses the other.
 - Reviews run in the background. The idle event resolves as soon as the serialized
   attribution step is scheduled, so policy reads, Jev calls, and presentation do not
   block the agent.

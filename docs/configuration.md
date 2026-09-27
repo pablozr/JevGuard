@@ -263,11 +263,21 @@ absent or invalid.
 ## Evidence
 
 The evidence policy is fixed in core, not read from `.jev/`. For each rule it
-assembles a diff only from that rule's applicable files, caps that diff at `100000`
-characters, sends only common code and text extensions, and rejects sensitive
-names, extensions, and directories. Oversized or blocked evidence makes only the
-affected matching rule `UNAVAILABLE` (never a partial judgment for that rule);
-rules whose applicable files are all safe still run.
+assembles a diff only from that rule's applicable files, caps every rendered slice at
+`100000` characters, sends only common code and text extensions, and rejects sensitive
+names, extensions, and directories. A scoped diff at or below the cap is one whole
+slice; a larger diff is split, in attributed file order, into one slice per file, and
+an individually oversized file is split into its ordered unified-diff hunks with the
+file preamble repeated in every slice. A slice exactly at the cap is valid; nothing is
+truncated, summarized, or dropped. A blocked applicable path still makes the whole rule
+`UNAVAILABLE/BLOCKED_EVIDENCE` with no slice sent, and an unparseable oversized file or
+an indivisible oversized hunk makes the whole rule `UNAVAILABLE/OVERSIZED_DIFF`. A
+rule may produce at most 16 slices, and slicing may add at most 32 repository-rule Jev
+calls per turn beyond one per applicable rule, reserved in policy source order; a rule
+that does not fit is `UNAVAILABLE/SLICE_LIMIT_EXCEEDED` with no Jev call, and later
+rules still use the remaining budget. Every problem is scoped to the affected matching
+rule (never a partial judgment for that rule); rules whose applicable files are all
+safe still run.
 
 The extension allowlist is split into a code/data class and a prose-docs class, and
 a rule's `evidence:` key selects which class it evaluates; the default `code`
@@ -289,9 +299,20 @@ Outcomes are per result: a repository rule or one of the built-ins.
 | `UNAVAILABLE` | That result's evaluation could not safely or completely happen. |
 
 `UNAVAILABLE` reasons: `INVALID_RULE`, `INVALID_CONFIG`, `MISSING_ATTRIBUTED_DIFF`,
-`OVERSIZED_DIFF`, `BLOCKED_EVIDENCE`, and `JEV_FAILURE`. A built-in result can only
-carry `OVERSIZED_DIFF`, `BLOCKED_EVIDENCE`, or `JEV_FAILURE`. `SKIPPED` and
-`UNAVAILABLE` are operational states, never semantic verdicts.
+`OVERSIZED_DIFF`, `BLOCKED_EVIDENCE`, `SLICE_LIMIT_EXCEEDED`, and `JEV_FAILURE`. A
+built-in result can only carry `OVERSIZED_DIFF`, `BLOCKED_EVIDENCE`, or `JEV_FAILURE`.
+`SKIPPED` and `UNAVAILABLE` are operational states, never semantic verdicts.
+
+A repository rule evaluated from several slices aggregates deterministically: each
+slice is gated on its own, the rule outcome is the highest slice outcome
+(`FAIL > WARN > PASS`), and the rule's `violationProbability` is the maximum across its
+slices. `PASS` requires every planned slice to pass and is never inferred from missing
+work. Any failed, blocked, oversized, over-budget, or out-of-range slice makes the whole
+rule `UNAVAILABLE`, and no successfully evaluated sibling probability is presented as a
+partial verdict. The result records `evidenceMode` (`WHOLE`/`SLICED`), planned and
+evaluated/failed/not-evaluated slice counts, ordered slice summaries, and per-slice
+probabilities and gate outcomes for a complete result, without any diff content. The
+built-ins never slice.
 
 Not every `UNAVAILABLE` is a policy-rule result. A failure before any rule is
 evaluated is reported by the rule lane as one synthetic aggregate entry with
@@ -314,19 +335,24 @@ presentation are never on the agent's critical path.
   The display precedence is `FAIL > UNAVAILABLE > WARN > PASS > SKIPPED`: any
   `FAIL` shows `FAIL`, otherwise any `UNAVAILABLE` shows `UNAVAILABLE`, and so on
   down to a review where every rule is `SKIPPED`. The message is a count summary
-  such as `pass 1 · warn 1 · fail 1 · skipped 0 · unavailable 0`. `PASS`/`WARN`/
-  `FAIL` use `success`/`warning`/`error` variants; `SKIPPED` uses `info`;
-  `UNAVAILABLE` uses `error`. Toasts last 5 seconds.
+  such as `pass 1 · warn 1 · fail 1 · skipped 0 · unavailable 0`; when any rule was
+  sliced it appends `· sliced <n> rules · slices <m>`. `PASS`/`WARN`/`FAIL` use
+  `success`/`warning`/`error` variants; `SKIPPED` uses `info`; `UNAVAILABLE` uses
+  `error`. Toasts last 5 seconds.
 - Log: one entry with service `jevguard`. Its level follows the same aggregate
   display outcome: `info` for `PASS`/`SKIPPED`, `warn` for `WARN`, and `error` for
   `FAIL`/`UNAVAILABLE`. The entry carries the turn ID, the aggregate summary
   (highest verdict, whether any result was unavailable, and per-outcome counts), and
   the full result list. Each result carries its identity — `ruleId` for a rule or
   `checkId` for a built-in — its severity, scoped paths, and either the raw
-  violation probability or the typed reason. Results have a fixed order: the rules in
-  source order, then the `SCOPE-CREEP` built-in, then the `COMPLEXITY` built-in. A
-  review-level failure contributes its single synthetic entry (null rule ID and
-  severity). All of them are included in the counts.
+  violation probability or the typed reason. A sliced rule result also carries its
+  slice metadata: `evidenceMode`, planned and evaluated/failed/not-evaluated counts,
+  ordered slice summaries (index, path, `FILE`/`HUNK`, hunk ordinal), and per-slice
+  probabilities and gate outcomes for a complete result. The log never carries diff
+  content. Results have a fixed order: the rules in source order, then the
+  `SCOPE-CREEP` built-in, then the `COMPLEXITY` built-in. A review-level failure
+  contributes its single synthetic entry (null rule ID and severity). All of them are
+  included in the counts.
 
 The toast is intentionally compact and never includes probabilities or paths. A
 generic count summary does not mean every rule was evaluated: an `UNAVAILABLE`

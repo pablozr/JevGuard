@@ -50,17 +50,28 @@ coding agent, and that ordinary turn is reviewed normally.
 
 ## Evidence must be complete
 
-JevGuard never truncates a relevant diff. The assembled diff for the rule's
-applicable files is capped at `100000` characters; a larger diff is
-`UNAVAILABLE` with reason `OVERSIZED_DIFF`.
+JevGuard never truncates a relevant diff. The scoped diff for a rule's applicable
+files is capped at `100000` characters per rendered slice. A scoped diff at or below
+the cap is one whole slice; a larger diff is split, in attributed file order, into
+per-file slices, and an individually oversized file is split into its ordered
+unified-diff hunks with the file preamble repeated in each slice. Every slice passes
+the same allowlist and sensitive-path denylist as the whole diff, and slice content is
+drawn only from files that already passed the safety preflight, so blocked content
+never appears in any slice. Nothing is truncated or summarized.
 
 It also does not evaluate a rule from a subset of its relevant files. If any
-applicable file is rejected by the safety policy, that rule is `UNAVAILABLE` with
-reason `BLOCKED_EVIDENCE`.
+applicable file is rejected by the safety policy, the whole rule is `UNAVAILABLE` with
+reason `BLOCKED_EVIDENCE` and no slice is sent.
 
-The same cap and rejection apply to each built-in over the whole attributed patch: an
-oversized or blocked file makes the built-in `UNAVAILABLE` rather than evaluating it
-on partial evidence.
+A rule may produce at most 16 slices, and slicing may add at most 32 repository-rule
+Jev calls per turn beyond one per applicable rule, reserved in policy source order. A
+rule that does not fit is `UNAVAILABLE/SLICE_LIMIT_EXCEEDED` with no Jev call, and
+later rules still use the remaining budget. An unparseable oversized file or an
+indivisible oversized hunk makes the whole rule `UNAVAILABLE/OVERSIZED_DIFF`.
+
+The same cap and rejection apply to each built-in over the whole attributed patch.
+Built-ins never slice, so an oversized or blocked file makes the built-in `UNAVAILABLE`
+rather than evaluating it on partial evidence.
 
 Rejections are scoped to the rules they affect. Evidence is selected per rule from
 that rule's applicable files, so an oversized or blocked file makes only the rules
