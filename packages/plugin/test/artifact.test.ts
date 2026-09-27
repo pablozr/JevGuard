@@ -154,7 +154,6 @@ const VALID_INIT_SKILL_CONFIG = [
   "  auto_propose: true",
   "  propose_on:",
   "    - FAIL",
-  "  model: opencode/gpt-5.6-luna",
   "",
 ].join("\n");
 

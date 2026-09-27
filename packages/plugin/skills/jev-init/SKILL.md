@@ -165,11 +165,12 @@ remediation:
   auto_propose: true
   propose_on:
     - FAIL
-  model: opencode/gpt-5.6-luna
 ```
 
-Do not invent thresholds, add keys, or change the model. The default configuration is
-valid and uses the documented defaults.
+Do not invent thresholds or add keys. The default configuration is valid and uses the
+documented defaults. Never pin `remediation.model`: when it is absent the proposer
+inherits the host model, which is the only portable choice. A hard-coded provider
+model can be absent on the user's machine and would make every proposal fail.
 
 ### 7. Preview both files and require explicit confirmation
 
