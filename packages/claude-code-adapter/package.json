@@ -1,0 +1,21 @@
+{
+  "name": "@jevguard/claude-code-adapter",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./hook": "./src/hook/index.ts"
+  },
+  "scripts": {
+    "format": "biome format --write .",
+    "lint": "biome lint .",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run --root ../.. packages/claude-code-adapter"
+  },
+  "dependencies": {
+    "@jevguard/core": "workspace:*",
+    "diff": "^9.0.0"
+  }
+}

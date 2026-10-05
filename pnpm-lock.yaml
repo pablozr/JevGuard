@@ -30,6 +30,15 @@ importers:
         specifier: ^3.0.0
         version: 3.2.7(@types/node@22.20.4)(yaml@2.9.1)
 
+  packages/claude-code-adapter:
+    dependencies:
+      '@jevguard/core':
+        specifier: workspace:*
+        version: link:../core
+      diff:
+        specifier: ^9.0.0
+        version: 9.0.0
+
   packages/core: {}
 
   packages/node-infra:
@@ -698,6 +707,10 @@ packages:
   detect-libc@2.1.2:
     resolution: {integrity: sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==}
     engines: {node: '>=8'}
+
+  diff@9.0.0:
+    resolution: {integrity: sha512-svtcdpS8CgJyqAjEQIXdb3OjhFVVYjzGAPO8WGCmRbrml64SPw/jJD4GoE98aR7r25A0XcgrK3F02yw9R/vhQw==}
+    engines: {node: '>=0.3.1'}
 
   effect@4.0.0-beta.83:
     resolution: {integrity: sha512-0wsak8RtgGAr9UWSbVDgJHZcUqMSvicHcvaZv1MbMM7MCGgW4Rn/137J1MHQbwYPcwYGxT/IqehFd+UbYuj78w==}
@@ -1378,6 +1391,8 @@ snapshots:
 
   detect-libc@2.1.2:
     optional: true
+
+  diff@9.0.0: {}
 
   effect@4.0.0-beta.83:
     dependencies:

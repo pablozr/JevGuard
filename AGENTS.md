@@ -15,6 +15,7 @@ is normative.
 
 ```text
 packages/
+├── claude-code-adapter/
 ├── core/
 ├── node-infra/
 ├── opencode-adapter/
@@ -27,6 +28,7 @@ Dependencies only point inward:
 ```text
 plugin → opencode-adapter → node-infra → core
 plugin ────────────────────→ node-infra
+claude-code-adapter ─────────→ node-infra → core
 testkit ──────────────────────────────→ core
 ```
 
@@ -43,6 +45,12 @@ testkit ────────────────────────
 - `opencode-adapter` owns OpenCode event handling, task/diff attribution,
   OpenCode-specific infrastructure, structured logging, TUI toasts, the proposal
   child session, and the safe remediation notifier.
+- `claude-code-adapter` owns Claude Code hook-event normalization, tool-attributed
+  quiescent-unit acquisition (ADR 0014) and the `Turn` mapping. It never imports
+  `opencode-adapter` or a host SDK. Its core (`hook-event/`, `acquisition/`, `turn/`)
+  is pure and imports no Node module; `capture/` and `hook/` add the Node hook
+  entrypoint and bounded local unit state (Node builtins only). Hooks never call Jev,
+  credentials or the network, and never write to stdout or stderr.
 - `plugin` is composition plus the single public OpenCode server plugin entrypoint.
   Its `config` hook registers the bundled `jevguard-rules` and `jev-init` skills and
   the hidden `jevguard-proposer` subagent; there is no command hook and no apply path.
