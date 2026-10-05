@@ -253,3 +253,40 @@ A policy-load or config failure does not suppress the built-in batch: when the t
 attributed, both built-ins still evaluate the complete safe patch with their fixed
 thresholds. `SCOPE-CREEP` can fail; `COMPLEXITY` is advisory and can only pass or
 warn. One malformed answer fails only its own check.
+
+## Claude Code plugin
+
+The Claude Code plugin keeps the same boundaries as the OpenCode plugin: review is
+background and observe-only, hooks exit 0 with no stdout or stderr and never use
+`async`, `asyncRewake`, `additionalContext`, `systemMessage`, or `decision`, and
+remediation is disabled.
+
+- **Where Jev and credentials run.** Never inside a hook. A hook only records evidence
+  and leaves a handoff; a detached worker process reads the credential (`jevguard login`
+  and the OS credential store; `TYPESAFE_API_KEY` only as a CI override), calls Jev, and
+  exits. The hook bundle does not contain the keyring, the Jev client, or any network
+  code.
+- **Sensitive handoffs.** A handoff holds the unit's prompt and patch, so it is local
+  only, created at mode `0600` in a `0700` directory under `${CLAUDE_PLUGIN_DATA}`,
+  deleted after its review is recorded, and removed after 24 hours if never consumed.
+  A handoff whose deletion fails is retried and logged as a code, never silently kept.
+- **No-read first.** Every path is checked against the file safety policy before any
+  byte is read. A blocked path, a link, or non-text content makes the unit
+  `UNAVAILABLE`; the content is never read, stored, or exported.
+- **Evidence limits.** Files ignored by Git are outside shell-write evidence. A
+  process that rewrites an attributed file and restores the exact attributed bytes
+  before the unit closes is undetectable. Writers outside the attributed files are not
+  part of the evidence.
+- **Logs.** The hook and worker logs hold only closed codes (for example
+  `REVIEW_RECORDED:PASS`), never prompts, patches, paths, findings, session ids, or
+  credentials.
+- **History.** Claude Code reviews are appended to the same local
+  `reviews.jsonl` as OpenCode ones, identified by a `claude-code:` turn id. The history
+  is owner-only: the file is created with mode `0600` and its directory with `0700` on
+  POSIX, and the user-profile ACL applies on Windows. A `reviews.jsonl` created by an
+  earlier version keeps its old mode until it is rotated or deleted; delete it or
+  `chmod 600` it to tighten it now.
+- **Native dependency.** The only external runtime dependency is `@napi-rs/keyring`,
+  pinned and installed with `--ignore-scripts`; its per-platform binaries are optional
+  dependencies with no install script. If it is missing, reviews degrade to
+  `UNAVAILABLE` and nothing else is affected.

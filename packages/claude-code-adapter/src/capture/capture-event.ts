@@ -179,7 +179,7 @@ function crossCheckBashEditDiff(
   gitDiff: StoredGitDiff,
   context: CaptureContext,
 ): void {
-  if (event.tool.category !== "BASH") return;
+  if (event.tool.category !== "BASH" || event.shellDiff.status === "ABSENT") return;
 
   if (event.shellDiff.status !== "PRESENT" || gitDiff.status !== "AVAILABLE") {
     context.report("SHELL_CROSS_CHECK_UNAVAILABLE");

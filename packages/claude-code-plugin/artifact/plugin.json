@@ -1,0 +1,5 @@
+{
+  "name": "jevguard",
+  "version": "0.1.0",
+  "description": "Background, observe-only semantic review of Claude Code work units against repository rules, using Jev."
+}

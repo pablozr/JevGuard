@@ -1,13 +1,16 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { UNLIMITED_BUDGET } from "../src/capture/budget";
 import { createRepoPathResolver, sha256Hex } from "../src/capture/file-image";
 import { diffGitSnapshots, takeGitSnapshot } from "../src/capture/git-shell";
 import { createNodeFileReader, runGit } from "../src/capture/node-ports";
 import type { GitShellContext } from "../src/capture/types";
 import { causesOf, git, HookWorld, initRepository, ORIGINAL } from "./hook-world";
+
+// Real Git processes are slow under a loaded parallel run; keep these from timing out spuriously.
+vi.setConfig({ testTimeout: 20_000 });
 
 describe("Git shell diff", () => {
   let base: string;
@@ -340,11 +343,17 @@ describe("Bash host diff cross-check", () => {
   test.each([
     ["agrees", { bashEditDiff: { changedFiles: ["a.ts"] } }, "SHELL_CROSS_CHECK_AGREE"],
     ["disagrees", { bashEditDiff: { changedFiles: ["keep.ts"] } }, "SHELL_CROSS_CHECK_DISAGREE"],
-    ["is absent", { stdout: "" }, "SHELL_CROSS_CHECK_UNAVAILABLE"],
   ])("a host diff that %s is logged and never changes the outcome", (_label, response, code) => {
     bash(response);
 
     expect(codes()).toEqual([code]);
+    expect(world.onlyHandoff().resolution.status).toBe("TURN");
+  });
+
+  test("an absent host diff (setting off) logs nothing and never changes the outcome", () => {
+    bash({ stdout: "" });
+
+    expect(codes()).toEqual([]);
     expect(world.onlyHandoff().resolution.status).toBe("TURN");
   });
 });

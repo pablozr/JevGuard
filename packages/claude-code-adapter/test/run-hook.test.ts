@@ -5,6 +5,9 @@ import type { ClaudeReviewHandoff } from "../src/hook";
 import { createFileHandoffSink } from "../src/hook";
 import { backdate, causesOf, HookWorld, initRepository, SESSION } from "./hook-world";
 
+// Real Git processes are slow under a loaded parallel run; keep these from timing out spuriously.
+vi.setConfig({ testTimeout: 20_000 });
+
 const MARKER = "SECRET_MARKER_4821";
 
 let world: HookWorld;

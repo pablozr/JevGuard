@@ -1,0 +1,18 @@
+{
+  "name": "@jevguard/claude-code-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Claude Code plugin composition and artifact for JevGuard.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "format": "biome format --write .",
+    "lint": "biome lint .",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "build": "bun scripts/build-artifact.ts",
+    "test": "vitest run --root ../.. packages/claude-code-plugin"
+  },
+  "dependencies": {
+    "@jevguard/claude-code-adapter": "workspace:*"
+  }
+}

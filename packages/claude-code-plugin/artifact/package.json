@@ -1,0 +1,14 @@
+{
+  "name": "jevguard-claude-code",
+  "version": "0.1.0",
+  "private": true,
+  "description": "JevGuard Claude Code plugin: background, observe-only semantic review of completed work units.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "dependencies": {
+    "@napi-rs/keyring": "2.1.0"
+  }
+}

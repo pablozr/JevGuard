@@ -42,6 +42,12 @@ importers:
         specifier: ^9.0.0
         version: 9.0.0
 
+  packages/claude-code-plugin:
+    dependencies:
+      '@jevguard/claude-code-adapter':
+        specifier: workspace:*
+        version: link:../claude-code-adapter
+
   packages/core: {}
 
   packages/node-infra:

@@ -533,6 +533,8 @@ its runtime, which keeps the evaluation model portable to future adapters.
 ```text
 packages/
 ├── core/                 domain, policy, evaluation, gate
+├── claude-code-adapter/  Claude Code tool-attributed units, hook and review worker
+├── claude-code-plugin/   Claude Code plugin composition and artifact
 ├── node-infra/           shared Node infra: credentials, Jev transport, policy, history
 ├── opencode-adapter/     OpenCode attribution and presentation
 ├── plugin/               OpenCode composition root and CLI

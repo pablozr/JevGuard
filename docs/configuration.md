@@ -419,3 +419,78 @@ apply instruction into their normal coding agent, and applies it there. That app
 an ordinary completed assistant turn, so the server plugin reviews it normally on the
 next idle, exactly like any other turn. No secret is carried, and no payload, task,
 diff, or secret is logged.
+
+## Claude Code
+
+JevGuard also reviews work done in Claude Code through a separate plugin. It is
+background and observe-only like the OpenCode plugin: it never changes what Claude
+sees, never prompts, blocks, or edits, and shows nothing inside the session. Its only
+output is the [local review history](#local-review-history), which `jevguard report`
+reads. Remediation proposals are not available on Claude Code.
+
+### Install
+
+The plugin is a directory built from this repository with
+`bun packages/claude-code-plugin/scripts/build-artifact.ts` (output:
+`packages/claude-code-plugin/dist/`). For local testing, load that directory directly:
+
+```sh
+cd packages/claude-code-plugin/dist
+npm ci --omit=dev
+claude --plugin-dir <absolute path to that dist directory>
+```
+
+`npm ci --omit=dev` installs the one native dependency, `@napi-rs/keyring`, which
+reads the credential. Claude Code does not install dependencies for a directory
+loaded with `--plugin-dir`; a plugin copied into its cache from a marketplace gets an
+automatic `npm install` when the plugin ships a lockfile, which this one does. How the
+plugin will be distributed is an open decision and is not published.
+
+Requirements:
+
+- `node` on `PATH`, version 22.13 or newer. The hook and the review worker run with
+  `node`. Claude Code's native installer does not necessarily provide Node. Without
+  Node the hook cannot run, so nothing is reviewed and the Claude Code session is
+  unaffected.
+- A credential from `jevguard login` (stored in the OS credential store). In CI, set
+  `TYPESAFE_API_KEY` in the process environment. Without a credential, or without the
+  keyring binary, a review is recorded as `UNAVAILABLE` (`JEV_FAILURE`); the hook is
+  never affected.
+- Rules in `.jev/rules.md` and optional `.jev/config.yaml`, exactly as for OpenCode.
+
+### What is reviewed
+
+Claude Code does not expose a complete, attributed historical diff, so the plugin
+reviews a smaller set of work that it can prove:
+
+- **Unit of work.** A unit opens at the first user prompt after the previous unit
+  closed and closes at the first main `Stop` with no active background tasks. It may
+  contain several prompts, and all of them are the task. Delegated subagents and
+  background subagents count as part of the unit. Work interrupted without a closing
+  `Stop` is not reviewed.
+- **Evidence.** Only files named by `Write`, `Edit`, `MultiEdit`, and `NotebookEdit`
+  calls (including those of subagents), plus files a shell command changed. The patch
+  is each file's net change from its state before the unit to its final state. No
+  repository-wide diff is ever used.
+- **Shell.** Each foreground shell call (Bash or PowerShell) is bracketed by a
+  read-only Git status diff. A Git-ignored file written by a shell command is outside
+  the evidence, by design. Set `JEVGUARD_CLAUDE_SHELL_GIT_DIFF=0` to turn this
+  capture off; shell calls then make the unit `UNAVAILABLE`.
+- **Refused evidence.** A blocked path (see the [security model](./security.md)), a
+  link, a file that is not UTF-8 text without NUL, or a file over 1 MiB makes the unit
+  `UNAVAILABLE`, and its content is never read or stored.
+- **Not provable.** A shell call in the background, a file already modified before the
+  unit that a shell call then changed, an MCP or unknown tool that may write, a prompt
+  that is not text, or a write by a process that is not attributed to the unit all make
+  the unit `UNAVAILABLE`. A unit with no changed file and no write-capable tool is
+  `SKIPPED` without calling Jev.
+
+### Local state
+
+The hook keeps bounded state under `${CLAUDE_PLUGIN_DATA}/claude-code/`, with
+directories at mode `0700` and files at `0600` on POSIX (the user-profile ACL applies
+on Windows). When a unit closes it leaves one handoff in `handoff/`; a detached worker
+reviews it, appends the result to `reviews.jsonl`, and deletes it. State and handoffs
+unconsumed for 24 hours are removed, and ending a session deletes its open state. The
+hook and worker write only closed codes to `hook-log.jsonl` and `worker-log.jsonl`
+(each bounded to 256 KiB), never a task, patch, path, finding, or credential.

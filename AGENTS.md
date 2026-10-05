@@ -16,6 +16,7 @@ is normative.
 ```text
 packages/
 ├── claude-code-adapter/
+├── claude-code-plugin/
 ├── core/
 ├── node-infra/
 ├── opencode-adapter/
@@ -28,6 +29,7 @@ Dependencies only point inward:
 ```text
 plugin → opencode-adapter → node-infra → core
 plugin ────────────────────→ node-infra
+claude-code-plugin → claude-code-adapter → node-infra → core
 claude-code-adapter ─────────→ node-infra → core
 testkit ──────────────────────────────→ core
 ```
@@ -54,6 +56,12 @@ testkit ────────────────────────
   only module that may import `node-infra`: a detached, observe-only review worker
   that drains the handoffs the hook leaves, runs core `reviewTurn` (remediation off)
   and records the result in the local review history.
+- `claude-code-plugin` is composition plus the Claude Code artifact (`hook.js`,
+  `worker.js`, `hooks/hooks.json`, `.claude-plugin/plugin.json`, a pinned
+  `package.json` and `package-lock.json` for the native keyring, the only external
+  dependency). The hook bundle never contains the keyring or the Jev client; the
+  worker loads the keyring lazily. Direction: remediation stays off and presentation
+  is the local history only, until a user-only path is approved separately.
 - `plugin` is composition plus the single public OpenCode server plugin entrypoint.
   Its `config` hook registers the bundled `jevguard-rules` and `jev-init` skills and
   the hidden `jevguard-proposer` subagent; there is no command hook and no apply path.
