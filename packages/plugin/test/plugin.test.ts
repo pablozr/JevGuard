@@ -17,6 +17,8 @@ import {
   type RuleReviewResult,
   type SemanticVerdict,
   type SkippedReason,
+  type PolicyLoader,
+  type PolicyLoadResult,
   type TurnReview,
   type UnavailableReason,
 } from "@jevguard/core";
@@ -26,8 +28,6 @@ import {
   type OpenCodeFileDiff,
   type OpenCodeMessageRecord,
   type OpenCodeSessionFacade,
-  type PolicyLoader,
-  type PolicyLoadResult,
   type PresentationDelivery,
   type ProposalFailureReason,
   type ProposalPromptInput,

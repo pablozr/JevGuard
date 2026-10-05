@@ -1,7 +1,6 @@
-import type { JevEvaluationPort, RemediationProposalStore } from "@jevguard/core";
+import type { JevEvaluationPort, PolicyLoader, RemediationProposalStore } from "@jevguard/core";
 import type {
   OpenCodeSessionFacade,
-  PolicyLoader,
   ProposalSessionFacade,
   ProposalSessionNavigator,
   RemediationFailureLogSink,

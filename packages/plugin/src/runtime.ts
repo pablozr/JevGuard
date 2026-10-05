@@ -1,8 +1,8 @@
+import { unavailableReview } from "@jevguard/core";
 import { attributeTurn } from "@jevguard/opencode-adapter";
 import { idleSessionID } from "./idle-event";
 import { presentReview } from "./present";
 import { reviewAttributedTurn } from "./review";
-import { unavailableReview } from "./review-result";
 import type { PluginEventInput, PluginRuntime, PluginRuntimeDependencies } from "./types";
 
 /**
