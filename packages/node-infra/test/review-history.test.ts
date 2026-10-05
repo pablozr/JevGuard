@@ -1,8 +1,11 @@
+import { mkdtempSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import {
   createLocalReviewHistory,
   createMirroredReviewLogSink,
+  createNodeReviewHistoryFileSystem,
   resolveHistoryFilePath,
 } from "../src/index";
 import type {
@@ -281,5 +284,26 @@ describe("mirrored review log sink", () => {
 
     await expect(sink.write(entry())).resolves.toBe("DELIVERED");
     expect(host.entries).toHaveLength(1);
+  });
+});
+
+describe.skipIf(process.platform === "win32")("node review history file system", () => {
+  test("creates the history directory and files as owner-only", async () => {
+    const root = mkdtempSync(join(tmpdir(), "jevguard-history-"));
+    const fileSystem = createNodeReviewHistoryFileSystem();
+    const appended = join(root, "jevguard", "reviews.jsonl");
+    const rewritten = join(root, "jevguard", "rewritten.jsonl");
+
+    try {
+      await fileSystem.ensureParentDirectory(appended);
+      await fileSystem.appendFile(appended, "{}\n");
+      await fileSystem.writeFileAtomic(rewritten, "{}\n");
+
+      expect(statSync(join(root, "jevguard")).mode & 0o777).toBe(0o700);
+      expect(statSync(appended).mode & 0o777).toBe(0o600);
+      expect(statSync(rewritten).mode & 0o777).toBe(0o600);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
