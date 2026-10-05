@@ -49,6 +49,12 @@ export type {
   JevRuleCriteria,
   JevRuleEvaluationResult,
   JevRuleRequest,
+  PolicyConfigParser,
+  PolicyLoader,
+  PolicyLoadFailureReason,
+  PolicyLoadResult,
+  ConfigParseFailureReason,
+  ConfigParseResult,
   PolicySource,
   PolicySourcePort,
 } from "./ports/types";
@@ -80,8 +86,16 @@ export type {
 } from "./rules/types";
 export { parseRule } from "./rules/parse-rule";
 export { parseRules } from "./rules/parse-rules";
-export type { ReviewCounts, ReviewSummary, TurnReview } from "./review/types";
+export type {
+  ReviewCounts,
+  ReviewSummary,
+  ReviewTurnDependencies,
+  TurnReview,
+  TurnReviewOutcome,
+} from "./review/types";
 export { aggregateReview } from "./review/aggregate";
+export { reviewTurn } from "./review/review-turn";
+export { reviewLevelUnavailable, unavailableReview } from "./review/unavailable";
 export type {
   ReportBuiltInCount,
   ReportEvaluationCoverage,
