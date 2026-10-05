@@ -46,16 +46,20 @@ and `docs/adr/` remain authoritative for scope and contracts.
 ### Package dependency direction
 
 ```text
-plugin → opencode-adapter → core
-testkit ───────────────────┘
+plugin → opencode-adapter → node-infra → core
+plugin ────────────────────→ node-infra
+testkit ──────────────────────────────→ core
 ```
 
 - `core` is pure domain logic: rules, scope, evidence policy, gates, Jev ports,
   and use cases. It must not import OpenCode, Bun, Node filesystem/environment, HTTP,
   or TUI APIs.
-- `opencode-adapter` owns host integration and I/O: event handling, turn
-  attribution, policy file reads, concrete Jev transport, credentials, logging,
-  toasts, and the proposal child session.
+- `node-infra` owns host-independent Node infrastructure: policy file reads and
+  strict YAML config parsing, the concrete Jev transport, credentials, the review-log
+  allowlist projection, and the bounded local review history. It never imports a host
+  SDK or TUI API.
+- `opencode-adapter` owns OpenCode integration and I/O: event handling, turn
+  attribution, logging sinks, toasts, and the proposal child session.
 - `plugin` is composition only: it constructs dependencies and exposes the OpenCode
   entrypoint. No policy logic belongs here.
 - `testkit` provides fixtures and fakes; production packages must never import it.
@@ -178,8 +182,8 @@ server idle evaluation — there is no separate verifier and no automatic apply.
   - `.../attribution/deduplicator.ts` — per-assistant-message dedupe.
 - Parser and policy
   - `packages/core/src/rules/` — rule parsing, blocks, headings, metadata.
-  - `packages/opencode-adapter/src/policy/file-source.ts` — fixed `.jev/` paths.
-  - `packages/opencode-adapter/src/policy/config-yaml.ts` — strict YAML parsing.
+  - `packages/node-infra/src/policy/file-source.ts` — fixed `.jev/` paths.
+  - `packages/node-infra/src/policy/config-yaml.ts` — strict YAML parsing.
 - Evidence and gate
   - `packages/core/src/evidence/select-evidence.ts` — scope, size, and assembly.
   - `.../evidence/safety.ts` — sensitive path and extension policy.
@@ -194,16 +198,17 @@ server idle evaluation — there is no separate verifier and no automatic apply.
   - `packages/core/src/builtins/complexity.ts` — `COMPLEXITY` question and fixed
     `0.50` advisory gate that never fails.
   - `packages/core/src/concurrency/fifo-port.ts` — shared FIFO Jev concurrency limit.
-  - `packages/plugin/src/review.ts` — runs the rule lane and the built-in batch concurrently.
+  - `packages/core/src/review/review-turn.ts` — loads policy, runs the rule lane and the
+    built-in batch concurrently.
 - Jev and credential
-  - `packages/opencode-adapter/src/jev/transport.ts` — TypeSafe transport and response reading.
+  - `packages/node-infra/src/jev/transport.ts` — TypeSafe transport and response reading.
   - `packages/core/src/ports/types.ts` — the Jev port contract.
-  - `packages/opencode-adapter/src/credentials/provider.ts` — override/store precedence.
+  - `packages/node-infra/src/credentials/provider.ts` — override/store precedence.
   - `.../credentials/environment.ts`, `.../credentials/keyring-store.ts` — stores.
   - `packages/plugin/src/cli/` — `jevguard login` dispatch and messages.
 - Presentation
   - `packages/plugin/src/present.ts` — non-throwing delivery.
-  - `packages/plugin/src/review-result.ts` — synthetic pre-evaluation `UNAVAILABLE`.
+  - `packages/core/src/review/unavailable.ts` — synthetic pre-evaluation `UNAVAILABLE`.
   - `packages/opencode-adapter/src/presentation/opencode.ts` — SDK log/toast sinks.
   - `.../presentation/display.ts`, `.../presentation/log.ts`, `.../presentation/toast.ts`
     — outcome precedence and safe aggregate messages.
@@ -226,7 +231,7 @@ server idle evaluation — there is no separate verifier and no automatic apply.
     prompts the proposer, and notifies.
 - Composition and artifact
   - `packages/plugin/src/plugin.ts` — composition root.
-  - `packages/plugin/src/review.ts` — policy load + evaluate + present.
+  - `packages/plugin/src/review.ts` — core review, present, then proposal.
   - `packages/plugin/scripts/build-artifact.ts`, `pack-artifact.ts` — packaging.
 
 ### Non-negotiable invariants

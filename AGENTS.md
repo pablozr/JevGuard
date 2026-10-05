@@ -16,6 +16,7 @@ is normative.
 ```text
 packages/
 ├── core/
+├── node-infra/
 ├── opencode-adapter/
 ├── plugin/
 └── testkit/
@@ -24,23 +25,30 @@ packages/
 Dependencies only point inward:
 
 ```text
-plugin → opencode-adapter → core
-testkit ───────────────────┘
+plugin → opencode-adapter → node-infra → core
+plugin ────────────────────→ node-infra
+testkit ──────────────────────────────→ core
 ```
 
 - `core` owns domain types, rules/config validation, scope filtering, evidence
-  policy, Jev ports, use cases, gates, and the remediation config/proposal-request
-  encoding. Do not import OpenCode, Bun, Node filesystem/environment APIs, HTTP
-  clients, or TUI APIs here.
-- `opencode-adapter` owns OpenCode event handling, task/diff attribution, concrete
-  infrastructure implementations, structured logging, TUI toasts, the proposal child
-  session, and the safe remediation notifier.
+  policy, Jev ports, use cases (including the host-independent turn review), gates,
+  and the remediation config/proposal-request encoding. Do not import OpenCode, Bun,
+  Node filesystem/environment APIs, HTTP clients, or TUI APIs here.
+- `node-infra` owns host-independent Node infrastructure shared by host adapters:
+  the OS credential store, the `TYPESAFE_API_KEY` override and `jevguard login`
+  primitives, the TypeSafe Jev transport, fixed-path `.jev` policy loading and strict
+  YAML config parsing, the review-log allowlist projection, and the bounded local
+  review history. It never imports a host SDK or TUI API; host adapters never depend
+  on each other.
+- `opencode-adapter` owns OpenCode event handling, task/diff attribution,
+  OpenCode-specific infrastructure, structured logging, TUI toasts, the proposal
+  child session, and the safe remediation notifier.
 - `plugin` is composition plus the single public OpenCode server plugin entrypoint.
   Its `config` hook registers the bundled `jevguard-rules` and `jev-init` skills and
   the hidden `jevguard-proposer` subagent; there is no command hook and no apply path.
 - `testkit` provides fixtures and fakes; never make production packages depend on it.
 
-The credential CLI and OS credential-store integration are adapter/infrastructure
+The credential CLI and OS credential-store integration are `node-infra`
 concerns. Core code receives a credential through an explicit port and never reads
 the environment or a system credential store directly.
 
