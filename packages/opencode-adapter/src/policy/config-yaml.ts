@@ -1,5 +1,5 @@
+import type { ConfigParseResult } from "@jevguard/core";
 import { type Document, parseDocument, visit } from "yaml";
-import type { ConfigParseResult } from "./types";
 
 /**
  * Parses optional policy config without trusting its shape. Multi-document,

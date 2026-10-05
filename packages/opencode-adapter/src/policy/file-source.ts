@@ -1,11 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import type {
-  PolicyFileSystem,
-  PolicyLoader,
-  PolicyLoaderDependencies,
-  PolicyLoadResult,
-} from "./types";
+import type { PolicyLoader, PolicyLoadResult } from "@jevguard/core";
+import type { PolicyFileSystem, PolicyLoaderDependencies } from "./types";
 
 type OptionalFileRead =
   | { readonly status: "READ"; readonly value: string | null }
