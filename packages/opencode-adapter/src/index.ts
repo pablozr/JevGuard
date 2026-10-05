@@ -41,8 +41,6 @@ export type {
   InstallTarget,
   PluginEntryMutation,
 } from "./opencode-config";
-export { createNodePolicyFileSystem, createPolicyFileLoader, parsePolicyConfig } from "./policy";
-export type { PolicyFileSystem, PolicyLoaderDependencies } from "./policy";
 export {
   createLocalReviewHistory,
   createMirroredReviewLogSink,

@@ -46,6 +46,9 @@ importers:
       '@typesafe-ai/sdk':
         specifier: 0.6.0
         version: 0.6.0
+      yaml:
+        specifier: 2.9.1
+        version: 2.9.1
 
   packages/opencode-adapter:
     dependencies:
@@ -55,9 +58,6 @@ importers:
       '@opencode-ai/sdk':
         specifier: 1.18.32
         version: 1.18.32
-      yaml:
-        specifier: 2.9.1
-        version: 2.9.1
 
   packages/plugin:
     dependencies:

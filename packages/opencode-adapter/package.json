@@ -6,8 +6,7 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./attribution": "./src/attribution/index.ts",
-    "./policy": "./src/policy/index.ts"
+    "./attribution": "./src/attribution/index.ts"
   },
   "scripts": {
     "format": "biome format --write .",
@@ -17,7 +16,6 @@
   },
   "dependencies": {
     "@jevguard/core": "workspace:*",
-    "@opencode-ai/sdk": "1.18.32",
-    "yaml": "2.9.1"
+    "@opencode-ai/sdk": "1.18.32"
   }
 }

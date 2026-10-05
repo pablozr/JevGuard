@@ -1,7 +1,7 @@
 import { lstatSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseRules, resolveGateConfig, resolveRemediationConfig } from "@jevguard/core";
-import { parsePolicyConfig } from "@jevguard/opencode-adapter/policy";
+import { parsePolicyConfig } from "@jevguard/node-infra/policy";
 import type {
   InitValidationCode,
   InitValidatorErrorCode,

@@ -5,7 +5,7 @@ import {
   type Turn,
   type TurnReviewOutcome,
 } from "@jevguard/core";
-import { parsePolicyConfig } from "@jevguard/opencode-adapter";
+import { parsePolicyConfig } from "@jevguard/node-infra";
 import { presentReview } from "./present";
 import { proposeForTurn } from "./remediation/propose";
 import type { ReviewDependencies } from "./types";

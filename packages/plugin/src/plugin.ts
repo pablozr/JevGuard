@@ -2,13 +2,14 @@ import { createFifoJevPort, createRemediationProposalStore } from "@jevguard/cor
 import {
   createCredentialProvider,
   createKeyringCredentialStore,
+  createNodePolicyFileSystem,
+  createPolicyFileLoader,
   createProcessEnvironment,
   createTypeSafeJevTransport,
 } from "@jevguard/node-infra";
 import {
   createLocalReviewHistory,
   createMirroredReviewLogSink,
-  createNodePolicyFileSystem,
   createNodeReviewHistoryFileSystem,
   createOpenCodeLogSink,
   createOpenCodePresentationClient,
@@ -16,7 +17,6 @@ import {
   createOpenCodeSessionFacade,
   createOpenCodeSessionNavigator,
   createOpenCodeToastSink,
-  createPolicyFileLoader,
   createProcessReviewHistoryContext,
   createRemediationFailureLogSink,
   createRemediationNotifier,

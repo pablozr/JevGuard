@@ -5,7 +5,8 @@
   "type": "module",
   "types": "./src/index.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./policy": "./src/policy/index.ts"
   },
   "scripts": {
     "format": "biome format --write .",
@@ -17,6 +18,7 @@
     "@inquirer/password": "^5.2.2",
     "@jevguard/core": "workspace:*",
     "@napi-rs/keyring": "2.1.0",
-    "@typesafe-ai/sdk": "0.6.0"
+    "@typesafe-ai/sdk": "0.6.0",
+    "yaml": "2.9.1"
   }
 }
