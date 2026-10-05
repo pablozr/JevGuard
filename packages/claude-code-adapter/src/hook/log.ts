@@ -25,10 +25,13 @@ function newestLines(contents: string): string {
   return kept.length === 0 ? "" : `${kept.join("\n")}\n`;
 }
 
-/** Appends one entry and bounds the file by rewriting its newest lines; never throws. */
+/** Appends one hook-log entry; never throws. */
 export function appendHookLog(stateDirectory: string, entry: HookLogEntry): void {
-  const file = hookLogFileOf(stateDirectory);
+  appendBoundedLog(hookLogFileOf(stateDirectory), entry);
+}
 
+/** Appends one JSON line and bounds the file by rewriting its newest lines; never throws. */
+export function appendBoundedLog(file: string, entry: object): void {
   try {
     mkdirSync(dirname(file), { recursive: true, mode: DIR_MODE });
     appendFileSync(file, `${JSON.stringify(entry)}\n`, { mode: FILE_MODE });

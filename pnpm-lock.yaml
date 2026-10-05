@@ -35,6 +35,9 @@ importers:
       '@jevguard/core':
         specifier: workspace:*
         version: link:../core
+      '@jevguard/node-infra':
+        specifier: workspace:*
+        version: link:../node-infra
       diff:
         specifier: ^9.0.0
         version: 9.0.0

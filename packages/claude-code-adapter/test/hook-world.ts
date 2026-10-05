@@ -15,7 +15,7 @@ import { join } from "node:path";
 import { createNodeFileReader, removeTree, runGit } from "../src/capture/node-ports";
 import type { RemovePath } from "../src/capture/types";
 import { keyOf, sessionDirectoryOf } from "../src/capture/unit-state";
-import type { ClaudeReviewHandoff, HookDependencies } from "../src/hook";
+import type { ClaudeReviewHandoff, HookDependencies, WorkerSpawnResult } from "../src/hook";
 import { createFileHandoffSink, runHook } from "../src/hook";
 
 export const SESSION = "session-1";
@@ -48,6 +48,12 @@ export class HookWorld {
   readonly reads: string[] = [];
   /** Paths whose content was read, as opposed to merely inspected. */
   readonly byteReads: string[] = [];
+  spawns = 0;
+  spawnWorker: () => WorkerSpawnResult = () => {
+    this.spawns += 1;
+
+    return "STARTED";
+  };
   removePath: RemovePath = removeTree;
   monotonicNow: () => number = () => performance.now();
   clock = new Date("2026-10-05T12:00:00.000Z");
@@ -81,6 +87,7 @@ export class HookWorld {
       monotonicNow: () => this.monotonicNow(),
       removePath: (path) => this.removePath(path),
       createHandoffSink: createFileHandoffSink,
+      spawnWorker: () => this.spawnWorker(),
     };
   }
 

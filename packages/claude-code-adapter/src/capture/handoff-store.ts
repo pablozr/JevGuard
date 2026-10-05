@@ -1,12 +1,13 @@
 import { randomUUID } from "node:crypto";
 import {
   closeSync,
+  existsSync,
   fsyncSync,
   linkSync,
   mkdirSync,
   openSync,
+  renameSync,
   rmSync,
-  writeFileSync,
   writeSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -22,26 +23,22 @@ function errorCode(error: unknown): string | null {
   return typeof error === "object" && error !== null && "code" in error ? String(error.code) : null;
 }
 
-function createExclusively(finalPath: string, content: string): HandoffDelivery {
-  let descriptor: number;
-
-  try {
-    descriptor = openSync(finalPath, "wx", FILE_MODE);
-  } catch (error) {
-    return errorCode(error) === "EEXIST" ? "EXISTS" : "FAILED";
-  }
+function writeDurably(path: string, content: string): void {
+  const descriptor = openSync(path, "wx", FILE_MODE);
 
   try {
     writeSync(descriptor, content);
     fsyncSync(descriptor);
-  } catch {
+  } finally {
     closeSync(descriptor);
-    rmSync(finalPath, { force: true });
-
-    return "FAILED";
   }
+}
 
-  closeSync(descriptor);
+/** Publishes by rename after an existence check; used only where hard links are unsupported. */
+function publishByRename(temporaryPath: string, finalPath: string): HandoffDelivery {
+  if (existsSync(finalPath)) return "EXISTS";
+
+  renameSync(temporaryPath, finalPath);
 
   return "CREATED";
 }
@@ -49,7 +46,8 @@ function createExclusively(finalPath: string, content: string): HandoffDelivery 
 /**
  * File-backed handoff sink. Each handoff is written completely to a temporary file and
  * then hard-linked to its final name, so it appears whole and exactly once per unit.
- * Where the file system cannot hard-link, an exclusive create keeps the same guarantee.
+ * Where the file system cannot hard-link, an existence-checked rename publishes it. A
+ * partial `.json` is never visible: the temporary name does not end in `.json`.
  */
 export function createFileHandoffSink(directory: string, link: LinkFile = linkSync): HandoffSink {
   return {
@@ -61,18 +59,23 @@ export function createFileHandoffSink(directory: string, link: LinkFile = linkSy
 
       try {
         mkdirSync(directory, { recursive: true, mode: DIR_MODE });
-        writeFileSync(temporaryPath, content, { mode: FILE_MODE });
-        link(temporaryPath, finalPath);
+        writeDurably(temporaryPath, content);
 
-        return "CREATED";
-      } catch (error) {
-        const code = errorCode(error);
+        try {
+          link(temporaryPath, finalPath);
 
-        if (code === "EEXIST") return "EXISTS";
+          return "CREATED";
+        } catch (error) {
+          const code = errorCode(error);
 
-        return code !== null && LINK_UNSUPPORTED.has(code)
-          ? createExclusively(finalPath, content)
-          : "FAILED";
+          if (code === "EEXIST") return "EXISTS";
+
+          return code !== null && LINK_UNSUPPORTED.has(code)
+            ? publishByRename(temporaryPath, finalPath)
+            : "FAILED";
+        }
+      } catch {
+        return "FAILED";
       } finally {
         rmSync(temporaryPath, { force: true });
       }

@@ -5,10 +5,13 @@ import { describe, expect, test } from "vitest";
 const SOURCE_ROOT = join(import.meta.dirname, "..", "src");
 const PURE_DIRECTORIES = ["hook-event", "acquisition", "turn"];
 const IO_DIRECTORIES = ["capture", "hook"];
+const WORKER_DIRECTORIES = ["worker"];
 const PURE_FORBIDDEN =
   /^(node:|@opencode-ai\/|@jevguard\/(opencode-adapter|node-infra|plugin|testkit)($|\/)|bun($|:))/;
 const IO_FORBIDDEN =
   /^(@opencode-ai\/|@jevguard\/(opencode-adapter|node-infra|plugin|testkit)($|\/)|bun($|:))/;
+const WORKER_FORBIDDEN =
+  /^(@opencode-ai\/|@jevguard\/(opencode-adapter|plugin|testkit)($|\/)|bun($|:))/;
 const IMPORT_SPECIFIER = /\bfrom\s+["']([^"']+)["']|\bimport\s*\(\s*["']([^"']+)["']\s*\)/g;
 const FORBIDDEN_OUTPUT = /\bconsole\.|process\.(stdout|stderr)/;
 
@@ -52,9 +55,24 @@ describe("claude-code-adapter package boundary", () => {
     expect(files.flatMap((file) => forbiddenImports(file, IO_FORBIDDEN))).toEqual([]);
   });
 
-  test("capture and hook never write to the console, stdout or stderr", () => {
-    const offenders = filesOf(IO_DIRECTORIES).filter((file) =>
+  test("only the worker may import node-infra, and it adds no other host or sibling", () => {
+    const files = filesOf(WORKER_DIRECTORIES);
+
+    expect(files.length).toBeGreaterThan(0);
+    expect(files.flatMap((file) => forbiddenImports(file, WORKER_FORBIDDEN))).toEqual([]);
+  });
+
+  test("capture, hook and worker never write to the console, stdout or stderr", () => {
+    const offenders = filesOf([...IO_DIRECTORIES, ...WORKER_DIRECTORIES]).filter((file) =>
       FORBIDDEN_OUTPUT.test(readFileSync(file, "utf8")),
+    );
+
+    expect(offenders).toEqual([]);
+  });
+
+  test("capture and hook never import the worker", () => {
+    const offenders = filesOf(IO_DIRECTORIES).flatMap((file) =>
+      forbiddenImports(file, /^\.\.?\/(\.\.\/)?worker($|\/)/),
     );
 
     expect(offenders).toEqual([]);

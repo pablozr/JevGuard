@@ -50,7 +50,10 @@ testkit ────────────────────────
   `opencode-adapter` or a host SDK. Its core (`hook-event/`, `acquisition/`, `turn/`)
   is pure and imports no Node module; `capture/` and `hook/` add the Node hook
   entrypoint and bounded local unit state (Node builtins only). Hooks never call Jev,
-  credentials or the network, and never write to stdout or stderr.
+  credentials or the network, and never write to stdout or stderr. `worker/` is the
+  only module that may import `node-infra`: a detached, observe-only review worker
+  that drains the handoffs the hook leaves, runs core `reviewTurn` (remediation off)
+  and records the result in the local review history.
 - `plugin` is composition plus the single public OpenCode server plugin entrypoint.
   Its `config` hook registers the bundled `jevguard-rules` and `jev-init` skills and
   the hidden `jevguard-proposer` subagent; there is no command hook and no apply path.

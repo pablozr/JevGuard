@@ -15,4 +15,10 @@ export type {
 export { createProcessDependencies } from "./process-dependencies";
 export { MAX_STDIN_BYTES, readLimitedStdin } from "./read-stdin";
 export { runHook } from "./run-hook";
-export type { HookDependencies, HookLogCode, HookLogEntry } from "./types";
+export { spawnDetachedWorker } from "./spawn-worker";
+export type {
+  HookDependencies,
+  HookLogCode,
+  HookLogEntry,
+  WorkerSpawnResult,
+} from "./types";

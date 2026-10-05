@@ -1,6 +1,8 @@
 import type { CaptureDependencies, HandoffSink, RemovePath } from "../capture/types";
 import type { HookEventName, HookEventParseReason } from "../hook-event";
 
+export type WorkerSpawnResult = "STARTED" | "ENTRY_MISSING";
+
 /** Everything one hook process needs from its host; tests substitute fakes. */
 export interface HookDependencies extends CaptureDependencies {
   readonly now: () => Date;
@@ -10,6 +12,8 @@ export interface HookDependencies extends CaptureDependencies {
   readonly removePath: RemovePath;
   /** Builds the sink that receives each closed unit, given the handoff directory. */
   readonly createHandoffSink: (handoffDirectory: string) => HandoffSink;
+  /** Starts the detached review worker without waiting for it; throws when it cannot start. */
+  readonly spawnWorker: () => WorkerSpawnResult;
 }
 
 /** Closed set of hook-log codes: no payload, prompt, path, command or session id. */
@@ -24,6 +28,8 @@ export type HookLogCode =
   | "SHELL_CROSS_CHECK_DISAGREE"
   | "SHELL_CROSS_CHECK_UNAVAILABLE"
   | "HANDOFF_WRITE_FAILED"
+  | "WORKER_SPAWN_FAILED"
+  | "WORKER_ENTRY_MISSING"
   | "STATE_ROOT_MISSING"
   | "INTERNAL";
 

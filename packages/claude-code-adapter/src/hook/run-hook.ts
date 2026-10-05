@@ -3,7 +3,7 @@ import { BudgetExceededError, createBudget } from "../capture/budget";
 import { captureAfterAppend, captureBeforeAppend } from "../capture/capture-event";
 import { closeUnit } from "../capture/close-unit";
 import { createRepoPathResolver } from "../capture/file-image";
-import type { Budget, CaptureContext, LineCapture, UnitState } from "../capture/types";
+import type { Budget, CaptureContext, HandoffSink, LineCapture, UnitState } from "../capture/types";
 import {
   appendLine,
   handoffDirectoryOf,
@@ -28,6 +28,7 @@ interface EventScope {
   readonly budget: Budget;
   readonly stateDirectory: string;
   readonly log: (code: HookLogCode) => void;
+  readonly onHandoffCreated: () => void;
 }
 
 function captureOrFail(event: HookEvent, context: CaptureContext): LineCapture | null {
@@ -50,6 +51,20 @@ function captureAfterOrReport(event: HookEvent, context: CaptureContext): void {
       error instanceof BudgetExceededError ? "HOOK_BUDGET_EXCEEDED" : "CAPTURE_READ_FAILED",
     );
   }
+}
+
+function notifyingSink(scope: EventScope): HandoffSink {
+  const sink = scope.dependencies.createHandoffSink(handoffDirectoryOf(scope.stateDirectory));
+
+  return {
+    deliver(handoff) {
+      const delivery = sink.deliver(handoff);
+
+      if (delivery === "CREATED") scope.onHandoffCreated();
+
+      return delivery;
+    },
+  };
 }
 
 function contextFor(scope: EventScope, unit: UnitState, projectRoot: string): CaptureContext {
@@ -107,7 +122,7 @@ function recordEvent(event: HookEvent, scope: EventScope): void {
     now: dependencies.now(),
     budget: scope.budget,
     removePath: dependencies.removePath,
-    sink: dependencies.createHandoffSink(handoffDirectoryOf(scope.stateDirectory)),
+    sink: notifyingSink(scope),
     environment: dependencies.environment,
     files: dependencies.files,
     git: dependencies.git,
@@ -190,12 +205,33 @@ export function runHook(stdin: string, dependencies: HookDependencies): void {
     return;
   }
 
+  const log = logFor(parsed.name);
+  let workerWanted = parsed.name === "SessionStart";
+
   try {
     const budget = createBudget(dependencies.monotonicNow, HOOK_BUDGET_MS);
 
-    handleEvent(parsed, { dependencies, budget, stateDirectory, log: logFor(parsed.name) });
+    handleEvent(parsed, {
+      dependencies,
+      budget,
+      stateDirectory,
+      log,
+      onHandoffCreated: () => {
+        workerWanted = true;
+      },
+    });
   } catch (error) {
-    logFor(parsed.name)(isFileSystemError(error) ? "STATE_WRITE_FAILED" : "INTERNAL");
+    log(isFileSystemError(error) ? "STATE_WRITE_FAILED" : "INTERNAL");
     taintSession(stateDirectory, parsed.sessionId, dependencies.now());
+  }
+
+  if (workerWanted) spawnContained(dependencies, log);
+}
+
+function spawnContained(dependencies: HookDependencies, log: (code: HookLogCode) => void): void {
+  try {
+    if (dependencies.spawnWorker() === "ENTRY_MISSING") log("WORKER_ENTRY_MISSING");
+  } catch {
+    log("WORKER_SPAWN_FAILED");
   }
 }

@@ -5,6 +5,7 @@ import {
   removeTree,
   runGit,
 } from "../capture/node-ports";
+import { spawnDetachedWorker } from "./spawn-worker";
 import type { HookDependencies } from "./types";
 
 /** Real-process wiring of the hook: environment, filesystem, Git, clock and handoff files. */
@@ -19,5 +20,6 @@ export function createProcessDependencies(): HookDependencies {
     monotonicNow: () => performance.now(),
     removePath: removeTree,
     createHandoffSink: createFileHandoffSink,
+    spawnWorker: () => spawnDetachedWorker(process.argv[1], process.env),
   };
 }
