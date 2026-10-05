@@ -71,6 +71,7 @@ describe("plugin development manifest", () => {
 
     expect(manifest.dependencies).toEqual({
       "@jevguard/core": "workspace:*",
+      "@jevguard/node-infra": "workspace:*",
       "@jevguard/opencode-adapter": "workspace:*",
     });
     expect(manifest.devDependencies).toEqual({ "@opencode-ai/plugin": "1.18.32" });

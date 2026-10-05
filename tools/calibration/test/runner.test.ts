@@ -7,7 +7,7 @@ import {
   type JevRuleRequest,
 } from "@jevguard/core";
 import { describe, expect, test } from "vitest";
-import type { TypeSafeSystemOneRequest } from "@jevguard/opencode-adapter";
+import type { TypeSafeSystemOneRequest } from "@jevguard/node-infra";
 import { CALIBRATION_SEED } from "../fixture-catalog";
 import { createObservingClientFactory, createResponseObserver } from "../response-metadata";
 import {

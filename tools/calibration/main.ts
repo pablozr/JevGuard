@@ -4,7 +4,7 @@ import {
   createKeyringCredentialStore,
   createProcessEnvironment,
   JEV_MODEL,
-} from "@jevguard/opencode-adapter";
+} from "@jevguard/node-infra";
 import { type CalibrationCommand, parseArguments, type RunCommand } from "./args";
 import { CALIBRATION_SEED } from "./fixture-catalog";
 import {

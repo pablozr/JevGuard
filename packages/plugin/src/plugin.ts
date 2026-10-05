@@ -2,6 +2,10 @@ import { createFifoJevPort, createRemediationProposalStore } from "@jevguard/cor
 import {
   createCredentialProvider,
   createKeyringCredentialStore,
+  createProcessEnvironment,
+  createTypeSafeJevTransport,
+} from "@jevguard/node-infra";
+import {
   createLocalReviewHistory,
   createMirroredReviewLogSink,
   createNodePolicyFileSystem,
@@ -13,12 +17,10 @@ import {
   createOpenCodeSessionNavigator,
   createOpenCodeToastSink,
   createPolicyFileLoader,
-  createProcessEnvironment,
   createProcessReviewHistoryContext,
   createRemediationFailureLogSink,
   createRemediationNotifier,
   createReviewPresenter,
-  createTypeSafeJevTransport,
   InMemoryTurnDeduplicator,
 } from "@jevguard/opencode-adapter";
 import type { Plugin } from "@opencode-ai/plugin";

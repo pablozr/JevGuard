@@ -14,6 +14,9 @@ importers:
       '@jevguard/core':
         specifier: workspace:*
         version: link:packages/core
+      '@jevguard/node-infra':
+        specifier: workspace:*
+        version: link:packages/node-infra
       '@jevguard/opencode-adapter':
         specifier: workspace:*
         version: link:packages/opencode-adapter
@@ -29,7 +32,7 @@ importers:
 
   packages/core: {}
 
-  packages/opencode-adapter:
+  packages/node-infra:
     dependencies:
       '@inquirer/password':
         specifier: ^5.2.2
@@ -40,12 +43,18 @@ importers:
       '@napi-rs/keyring':
         specifier: 2.1.0
         version: 2.1.0
-      '@opencode-ai/sdk':
-        specifier: 1.18.32
-        version: 1.18.32
       '@typesafe-ai/sdk':
         specifier: 0.6.0
         version: 0.6.0
+
+  packages/opencode-adapter:
+    dependencies:
+      '@jevguard/core':
+        specifier: workspace:*
+        version: link:../core
+      '@opencode-ai/sdk':
+        specifier: 1.18.32
+        version: 1.18.32
       yaml:
         specifier: 2.9.1
         version: 2.9.1
@@ -55,6 +64,9 @@ importers:
       '@jevguard/core':
         specifier: workspace:*
         version: link:../core
+      '@jevguard/node-infra':
+        specifier: workspace:*
+        version: link:../node-infra
       '@jevguard/opencode-adapter':
         specifier: workspace:*
         version: link:../opencode-adapter

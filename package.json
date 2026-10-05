@@ -23,6 +23,7 @@
   "devDependencies": {
     "@biomejs/biome": "^2.0.0",
     "@jevguard/core": "workspace:*",
+    "@jevguard/node-infra": "workspace:*",
     "@jevguard/opencode-adapter": "workspace:*",
     "@types/node": "^22.20.4",
     "typescript": "^5.7.0",

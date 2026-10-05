@@ -13,7 +13,7 @@ import {
   createKeyringCredentialStore,
   createProcessEnvironment,
   createTypeSafeSystemOneClient,
-} from "@jevguard/opencode-adapter";
+} from "@jevguard/node-infra";
 import { MAX_PLANNED_CALLS } from "./args";
 import { hashFixtures, stableHash } from "./fixture-io";
 import { buildReport, renderMarkdown } from "./report";

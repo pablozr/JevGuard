@@ -58,6 +58,7 @@ const EXPECTED_RUNTIME_DEPENDENCIES = {
 };
 const FORBIDDEN_DEPENDENCIES = [
   "@jevguard/core",
+  "@jevguard/node-infra",
   "@jevguard/opencode-adapter",
   "@opencode-ai/plugin",
   "@opencode-ai/sdk",

@@ -41,6 +41,7 @@
   },
   "dependencies": {
     "@jevguard/core": "workspace:*",
+    "@jevguard/node-infra": "workspace:*",
     "@jevguard/opencode-adapter": "workspace:*"
   },
   "devDependencies": {

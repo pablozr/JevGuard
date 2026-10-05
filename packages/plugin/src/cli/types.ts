@@ -1,5 +1,6 @@
 import type { ReviewReport } from "@jevguard/core";
-import type { InstallOutcome, InstallTarget, LoginOutcome } from "@jevguard/opencode-adapter";
+import type { LoginOutcome } from "@jevguard/node-infra";
+import type { InstallOutcome, InstallTarget } from "@jevguard/opencode-adapter";
 
 export interface CliIO {
   readonly writeOut: (message: string) => void;

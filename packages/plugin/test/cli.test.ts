@@ -2,10 +2,10 @@ import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
 import { runCli } from "../src/cli/run-cli";
 import type { CliDependencies, CliIO } from "../src/cli/types";
+import type { LoginOutcome } from "@jevguard/node-infra";
 import type {
   InstallOutcome,
   InstallTarget,
-  LoginOutcome,
   ReviewHistoryRecord,
 } from "@jevguard/opencode-adapter";
 import { aggregateReviewHistory, type ReviewReport } from "@jevguard/core";

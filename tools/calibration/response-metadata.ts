@@ -1,4 +1,4 @@
-import type { TypeSafeSystemOneClient, TypeSafeSystemOneRequest } from "@jevguard/opencode-adapter";
+import type { TypeSafeSystemOneClient, TypeSafeSystemOneRequest } from "@jevguard/node-infra";
 
 const MAX_MODEL_ID_LENGTH = 64;
 const UNKNOWN_MODEL_ID = "unknown";
