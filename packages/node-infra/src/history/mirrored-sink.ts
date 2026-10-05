@@ -1,4 +1,4 @@
-import type { DeliveryStatus, ReviewLogEntry, StructuredLogSink } from "../presentation/types";
+import type { DeliveryStatus, ReviewLogEntry, StructuredLogSink } from "../review-log";
 import type { LocalReviewHistory } from "./types";
 
 /**

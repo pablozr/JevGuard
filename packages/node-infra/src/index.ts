@@ -48,3 +48,29 @@ export type {
   TypeSafeSystemOneClient,
   TypeSafeSystemOneRequest,
 } from "./jev";
+export {
+  createLocalReviewHistory,
+  createMirroredReviewLogSink,
+  createNodeReviewHistoryFileSystem,
+  createProcessReviewHistoryContext,
+  DEFAULT_HISTORY_MAX_BYTES,
+  DEFAULT_HISTORY_MAX_RECORDS,
+  resolveHistoryFilePath,
+} from "./history";
+export type {
+  HistoryEnvironment,
+  LocalReviewHistory,
+  LocalReviewHistoryDependencies,
+  ReviewHistoryFileSystem,
+  ReviewHistoryPathContext,
+  ReviewHistoryReadResult,
+  ReviewHistoryRecord,
+} from "./history";
+export { toReviewLogEntry, toReviewLogResult } from "./review-log";
+export type {
+  DeliveryStatus,
+  ReviewLogEntry,
+  ReviewLogResult,
+  ReviewLogSummary,
+  StructuredLogSink,
+} from "./review-log";

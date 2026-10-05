@@ -2,12 +2,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
 import { runCli } from "../src/cli/run-cli";
 import type { CliDependencies, CliIO } from "../src/cli/types";
-import type { LoginOutcome } from "@jevguard/node-infra";
-import type {
-  InstallOutcome,
-  InstallTarget,
-  ReviewHistoryRecord,
-} from "@jevguard/opencode-adapter";
+import type { LoginOutcome, ReviewHistoryRecord } from "@jevguard/node-infra";
+import type { InstallOutcome, InstallTarget } from "@jevguard/opencode-adapter";
 import { aggregateReviewHistory, type ReviewReport } from "@jevguard/core";
 
 const GLOBAL_PATH = "C:/home/.config/opencode/opencode.json";

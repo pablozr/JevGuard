@@ -55,6 +55,9 @@ importers:
       '@jevguard/core':
         specifier: workspace:*
         version: link:../core
+      '@jevguard/node-infra':
+        specifier: workspace:*
+        version: link:../node-infra
       '@opencode-ai/sdk':
         specifier: 1.18.32
         version: 1.18.32

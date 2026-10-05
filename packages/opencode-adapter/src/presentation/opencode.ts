@@ -1,15 +1,13 @@
+import type {
+  DeliveryStatus,
+  ReviewLogEntry,
+  ReviewLogResult,
+  StructuredLogSink,
+} from "@jevguard/node-infra";
 import type { OpencodeClient } from "@opencode-ai/sdk";
 import { displayOutcome } from "./display";
 import { logLevelFor, reviewLogMessage } from "./log";
-import type {
-  DeliveryStatus,
-  OpenCodePresentationClient,
-  ReviewLogEntry,
-  ReviewLogResult,
-  ReviewToast,
-  StructuredLogSink,
-  ToastSink,
-} from "./types";
+import type { OpenCodePresentationClient, ReviewToast, ToastSink } from "./types";
 
 const SERVICE_NAME = "jevguard";
 const TOAST_DURATION_MS = 5000;

@@ -1,4 +1,4 @@
-import type { ReviewLogEntry } from "../presentation/types";
+import type { ReviewLogEntry } from "../review-log";
 
 /**
  * One persisted local review-history record: the exact structured-log allowlist plus

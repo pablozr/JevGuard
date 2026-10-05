@@ -10,6 +10,12 @@ import type {
   UnavailableReason,
 } from "@jevguard/core";
 import { aggregateReview } from "@jevguard/core";
+import {
+  type DeliveryStatus,
+  type ReviewLogEntry,
+  type StructuredLogSink,
+  toReviewLogEntry,
+} from "@jevguard/node-infra";
 import { describe, expect, test } from "vitest";
 import {
   createOpenCodeLogSink,
@@ -17,11 +23,9 @@ import {
   createReviewPresenter,
   displayOutcome,
   logLevelFor,
-  toReviewLogEntry,
   toReviewToast,
 } from "../src/index";
 import type {
-  DeliveryStatus,
   OpenCodeLogInput,
   OpenCodeLogResult,
   OpenCodePresentationClient,
@@ -29,8 +33,6 @@ import type {
   OpenCodeSessionSelectResult,
   OpenCodeToastInput,
   OpenCodeToastResult,
-  ReviewLogEntry,
-  StructuredLogSink,
   ToastSink,
   ToastVariant,
 } from "../src/index";

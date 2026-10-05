@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@jevguard/core": "workspace:*",
+    "@jevguard/node-infra": "workspace:*",
     "@opencode-ai/sdk": "1.18.32"
   }
 }

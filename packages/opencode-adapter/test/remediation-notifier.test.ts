@@ -1,7 +1,7 @@
+import type { DeliveryStatus } from "@jevguard/node-infra";
 import { describe, expect, test } from "vitest";
 import { createRemediationFailureLogSink, createRemediationNotifier } from "../src/index";
 import type {
-  DeliveryStatus,
   OpenCodeLogInput,
   OpenCodeLogResult,
   OpenCodePresentationClient,

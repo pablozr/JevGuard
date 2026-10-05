@@ -1,5 +1,5 @@
+import type { DeliveryStatus } from "@jevguard/node-infra";
 import type {
-  DeliveryStatus,
   OpenCodePresentationClient,
   ProposalFailureReason,
   ProposalSessionNavigator,

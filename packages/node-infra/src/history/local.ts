@@ -1,5 +1,5 @@
 import { isAbsolute, join } from "node:path";
-import type { ReviewLogEntry } from "../presentation/types";
+import type { ReviewLogEntry } from "../review-log";
 import type {
   LocalReviewHistory,
   LocalReviewHistoryDependencies,

@@ -1,15 +1,17 @@
 import {
-  DEFAULT_EVIDENCE_POLICY,
   type BuiltInReviewResult,
   type BuiltInUnavailableReason,
   createFifoJevPort,
   createRemediationProposalStore,
+  DEFAULT_EVIDENCE_POLICY,
   type JevBuiltInAnswerResult,
   type JevEvaluationPort,
   type JevEvaluationResult,
   type JevRequest,
   type JevRuleEvaluationResult,
   type JevRuleRequest,
+  type PolicyLoader,
+  type PolicyLoadResult,
   type RemediationProposalRequest,
   type RemediationProposalStore,
   type ReviewLevelResult,
@@ -17,13 +19,11 @@ import {
   type RuleReviewResult,
   type SemanticVerdict,
   type SkippedReason,
-  type PolicyLoader,
-  type PolicyLoadResult,
   type TurnReview,
   type UnavailableReason,
 } from "@jevguard/core";
+import type { DeliveryStatus } from "@jevguard/node-infra";
 import {
-  type DeliveryStatus,
   InMemoryTurnDeduplicator,
   type OpenCodeFileDiff,
   type OpenCodeMessageRecord,

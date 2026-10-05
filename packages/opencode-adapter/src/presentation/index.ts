@@ -1,19 +1,21 @@
 import type { TurnReview } from "@jevguard/core";
-import { toReviewLogEntry } from "./log";
+import {
+  type DeliveryStatus,
+  type ReviewLogEntry,
+  type StructuredLogSink,
+  toReviewLogEntry,
+} from "@jevguard/node-infra";
 import { toReviewToast } from "./toast";
 import type {
-  DeliveryStatus,
   PresentationDelivery,
   PresentationPorts,
-  ReviewLogEntry,
   ReviewPresenter,
   ReviewToast,
-  StructuredLogSink,
   ToastSink,
 } from "./types";
 
 export { displayOutcome } from "./display";
-export { logLevelFor, reviewLogMessage, toReviewLogEntry, toReviewLogResult } from "./log";
+export { logLevelFor, reviewLogMessage } from "./log";
 export {
   createOpenCodeLogSink,
   createOpenCodePresentationClient,
@@ -26,7 +28,6 @@ export {
 } from "./remediation";
 export { countSummary, toReviewToast, toastVariantFor } from "./toast";
 export type {
-  DeliveryStatus,
   OpenCodeLogInput,
   OpenCodeLogResult,
   OpenCodePresentationClient,
@@ -40,12 +41,8 @@ export type {
   ProposalSessionNavigator,
   RemediationFailureLogSink,
   RemediationNotifier,
-  ReviewLogEntry,
-  ReviewLogResult,
-  ReviewLogSummary,
   ReviewPresenter,
   ReviewToast,
-  StructuredLogSink,
   ToastSink,
   ToastVariant,
 } from "./types";

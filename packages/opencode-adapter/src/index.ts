@@ -42,24 +42,6 @@ export type {
   PluginEntryMutation,
 } from "./opencode-config";
 export {
-  createLocalReviewHistory,
-  createMirroredReviewLogSink,
-  createNodeReviewHistoryFileSystem,
-  createProcessReviewHistoryContext,
-  DEFAULT_HISTORY_MAX_BYTES,
-  DEFAULT_HISTORY_MAX_RECORDS,
-  resolveHistoryFilePath,
-} from "./history";
-export type {
-  HistoryEnvironment,
-  LocalReviewHistory,
-  LocalReviewHistoryDependencies,
-  ReviewHistoryFileSystem,
-  ReviewHistoryPathContext,
-  ReviewHistoryReadResult,
-  ReviewHistoryRecord,
-} from "./history";
-export {
   countSummary,
   createOpenCodeLogSink,
   createOpenCodePresentationClient,
@@ -71,15 +53,12 @@ export {
   displayOutcome,
   logLevelFor,
   reviewLogMessage,
-  toReviewLogEntry,
-  toReviewLogResult,
   toReviewToast,
   toastVariantFor,
 } from "./presentation";
 export { createOpenCodeProposalSessionFacade } from "./remediation";
 export type { ProposalModel, ProposalPromptInput, ProposalSessionFacade } from "./remediation";
 export type {
-  DeliveryStatus,
   OpenCodeLogInput,
   OpenCodeLogResult,
   OpenCodePresentationClient,
@@ -93,12 +72,8 @@ export type {
   ProposalSessionNavigator,
   RemediationFailureLogSink,
   RemediationNotifier,
-  ReviewLogEntry,
-  ReviewLogResult,
-  ReviewLogSummary,
   ReviewPresenter,
   ReviewToast,
-  StructuredLogSink,
   ToastSink,
   ToastVariant,
 } from "./presentation";

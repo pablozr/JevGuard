@@ -3,7 +3,7 @@ import {
   createLocalReviewHistory,
   createNodeReviewHistoryFileSystem,
   createProcessReviewHistoryContext,
-} from "@jevguard/opencode-adapter";
+} from "@jevguard/node-infra";
 
 /**
  * Reads the bounded local review history and aggregates it for `jevguard report`. A
