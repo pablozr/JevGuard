@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
@@ -24,7 +24,7 @@ const BUILD_SENTINEL_VARIABLE = "JEVGUARD_ARTIFACT_BUILD_SENTINEL";
 const BUILD_SENTINEL_VALUE = "JEVGUARD_ARTIFACT_BUILD_SENTINEL_7f3c9d2a";
 
 const PLUGIN_PACKAGE_NAME = "@pablozrrrr/jevguard";
-const PLUGIN_VERSION = "0.2.2";
+const PLUGIN_VERSION = "0.2.3";
 const RULES_SKILL_PREFIX = "skills/jevguard-rules";
 const INIT_SKILL_PREFIX = "skills/jev-init";
 const EXPECTED_DIST_FILES = [
@@ -236,19 +236,29 @@ function buildAndPack(): void {
   tarballPath = join(packDir, archive);
   extractedDir = join(tempRoot, "extracted");
   mkdirSync(extractedDir, { recursive: true });
-  execFileSync("tar", ["-xzf", tarballPath, "-C", extractedDir], { stdio: "pipe" });
+  runTar(["-xzf", basename(tarballPath), "-C", extractedDir]);
+}
+
+/**
+ * Runs tar from the archive directory with a relative archive name, because GNU tar
+ * (Git for Windows) reads a drive-letter path such as `C:\...` as a remote host.
+ */
+function runTar(args: readonly string[]): string {
+  return execFileSync("tar", args, { cwd: dirname(tarballPath), encoding: "utf8" });
 }
 
 /**
  * Mirrors the supported pre-publication flow: the tarball is installed into the
  * consumer's `.opencode` directory and loaded through a local plugin shim, because
  * OpenCode resolves a bare `opencode.json` plugin entry from the registry or cache,
- * not from the consumer's `node_modules`.
+ * not from the consumer's `node_modules`. The consumer manifest anchors the install
+ * so Bun never walks up to an ancestor project such as the user's home directory.
  */
 function installLocalArtifact(): void {
   opencodeDir = join(tempRoot, "consumer", ".opencode");
   pluginsDir = join(opencodeDir, "plugins");
   mkdirSync(pluginsDir, { recursive: true });
+  writeFileSync(join(opencodeDir, "package.json"), "{}\n");
 
   execFileSync("bun", ["add", tarballPath], {
     cwd: opencodeDir,
@@ -257,6 +267,17 @@ function installLocalArtifact(): void {
   });
 
   writeFileSync(join(pluginsDir, "jevguard.ts"), LOCAL_SHIM);
+}
+
+/**
+ * Manifest warnings from `npm publish`, excluding the dry-run notice that only
+ * reflects whether the local machine is logged in to the registry.
+ */
+function publishWarnings(output: string): string[] {
+  return output
+    .split("\n")
+    .filter((line) => line.startsWith("npm warn publish"))
+    .filter((line) => !line.includes("requires you to be logged in"));
 }
 
 function npmCommand(args: readonly string[]): [string, readonly string[]] {
@@ -313,7 +334,7 @@ describe("local package artifact", () => {
   });
 
   test("packs only the runtime allowlist into the archive", () => {
-    const listed = execFileSync("tar", ["-tzf", tarballPath], { encoding: "utf8" })
+    const listed = runTar(["-tzf", basename(tarballPath)])
       .split("\n")
       .map((line) => line.trim())
       .filter((line) => line !== "")
@@ -323,7 +344,7 @@ describe("local package artifact", () => {
   });
 
   test("packs no TypeScript sources or source maps", () => {
-    const listed = execFileSync("tar", ["-tzf", tarballPath], { encoding: "utf8" })
+    const listed = runTar(["-tzf", basename(tarballPath)])
       .split("\n")
       .map((line) => line.trim())
       .filter((line) => line !== "");
@@ -503,7 +524,7 @@ describe("local package artifact", () => {
     // valid and that nothing was published.
     expect(output).toContain(`${PLUGIN_PACKAGE_NAME}@${PLUGIN_VERSION}`);
     expect(output).not.toContain("auto-corrected");
-    expect(output).not.toContain("npm warn publish");
+    expect(publishWarnings(output)).toEqual([]);
 
     if (result.status !== 0) {
       expect(output).toContain("previously published versions");
