@@ -2,6 +2,8 @@ import type { TurnReview } from "@jevguard/core";
 import { toReviewLogEntry } from "@jevguard/node-infra";
 import type { ClaudeReviewHandoff } from "../capture/types";
 import { parseHandoff } from "./parse-handoff";
+import { prepareProposal } from "./remediation/prepare-proposal";
+import type { ClaudeRemediationSettingsResult } from "./remediation/types";
 import { reviewHandoff } from "./review-handoff";
 import type { WorkerDependencies, WorkerLogCode } from "./types";
 
@@ -127,6 +129,40 @@ function logCauses(handoff: ClaudeReviewHandoff, dependencies: WorkerDependencie
   }
 }
 
+function presentSafely(present: () => void): void {
+  try {
+    present();
+  } catch {}
+}
+
+function recordedSafely(
+  handoff: ClaudeReviewHandoff,
+  review: TurnReview,
+  proposal: boolean,
+  dependencies: WorkerDependencies,
+): boolean {
+  try {
+    return dependencies.feed.recorded(handoff, review, proposal);
+  } catch {
+    return false;
+  }
+}
+
+const REMEDIATION_OFF: ClaudeRemediationSettingsResult = { status: "DISABLED" };
+
+function remediationSettingsOf(
+  handoff: ClaudeReviewHandoff,
+  dependencies: WorkerDependencies,
+): ClaudeRemediationSettingsResult {
+  if (handoff.resolution.status !== "TURN") return REMEDIATION_OFF;
+
+  const settings = dependencies.remediationFor(handoff.projectRoot);
+
+  if (settings.status === "INVALID") dependencies.log(`REMEDIATION_${settings.reason}`);
+
+  return settings;
+}
+
 async function processClaim(
   path: string,
   dependencies: WorkerDependencies,
@@ -143,12 +179,25 @@ async function processClaim(
   }
 
   const { handoff } = parsed;
-  const { review, deadlineExceeded } = await reviewHandoff(handoff, dependencies);
+
+  presentSafely(() => dependencies.feed.started(handoff));
+
+  const settings = remediationSettingsOf(handoff, dependencies);
+  const reviewed = await reviewHandoff(handoff, dependencies, {
+    proposals: settings.status === "ENABLED",
+  });
+  const { review, deadlineExceeded } = reviewed;
 
   if (deadlineExceeded) dependencies.log("REVIEW_DEADLINE_EXCEEDED");
 
   logCauses(handoff, dependencies);
   await dependencies.history.append(toReviewLogEntry(review));
+
+  const proposed = prepareProposal(handoff, reviewed, settings, dependencies);
+  const recorded = recordedSafely(handoff, review, proposed, dependencies);
+
+  if (proposed && !recorded) presentSafely(() => dependencies.proposals.remove(handoff));
+
   dependencies.log(aggregateOutcome(review));
   removeOrDefer(path, dependencies, leftovers);
 }
@@ -187,8 +236,9 @@ function retryLeftovers(dependencies: WorkerDependencies, leftovers: readonly st
  * atomic rename and deleted after it is recorded, so concurrent workers record each
  * unit at most once; a claim that outlives its worker is dropped, never re-reviewed.
  * One handoff's failure is logged as a code and never stops the next; deletions that
- * failed are retried at the end so prompt and patch do not linger. Observe-only:
- * nothing returns to the Claude session.
+ * failed are retried at the end so prompt and patch do not linger. Nothing returns to
+ * the Claude session except, when the user enabled remediation, a private proposal
+ * request that the in-session mod reads once.
  */
 export async function runWorker(dependencies: WorkerDependencies): Promise<void> {
   const leftovers: string[] = [];
@@ -197,6 +247,8 @@ export async function runWorker(dependencies: WorkerDependencies): Promise<void>
 
   try {
     dropAbandonedClaims(dependencies, leftovers);
+    presentSafely(() => dependencies.feed.sweep());
+    presentSafely(() => dependencies.proposals.sweep());
 
     let claimedAny = true;
 

@@ -20,8 +20,10 @@ const EXPECTED_FILES = [
   "LICENSE",
   "hook.js",
   "hooks/hooks.json",
+  "hooks/jevguard-ui.js",
   "package-lock.json",
   "package.json",
+  "types/index.d.ts",
   "worker.js",
 ];
 const EXPECTED_EVENTS = [
@@ -45,6 +47,9 @@ const FORBIDDEN_CONTENT = [
 ];
 const STATIC_KEYRING_IMPORT = /^import [^\n]* from ["']@napi-rs\/keyring["']/m;
 const WORKSPACE_IMPORT = /^import [^\n]* from ["']@jevguard\//m;
+const MOD_FORBIDDEN_TEXT = /import\(|require\(|node:|process\.|@jevguard\/|napi-rs|typesafe/;
+const MOD_FORBIDDEN_CALLS =
+  /\$\.(command|tool|agent|http|process|store|turn|audio|settings|mcp)\b|\$\.model\.(?!complete\b)|\$\.prompt\.(?!submit\b)|\$\.session\.(append|send|compact|authorize)|\$\.env\.set|\$\.fs\.(list|stat)|asUser/;
 
 interface HookCommand {
   readonly type?: string;
@@ -58,6 +63,7 @@ interface HookGroup {
 }
 
 interface HooksFile {
+  readonly modules?: readonly string[];
   readonly hooks?: Readonly<Record<string, readonly HookGroup[]>>;
 }
 
@@ -126,7 +132,9 @@ describe("claude code artifact", () => {
   });
 
   test("hooks.json registers every handled event without async delivery", () => {
-    const { hooks } = readJson<HooksFile>("hooks/hooks.json");
+    const { hooks, modules } = readJson<HooksFile>("hooks/hooks.json");
+
+    expect(modules).toEqual(["./jevguard-ui.js"]);
 
     expect(Object.keys(hooks ?? {}).sort()).toEqual([...EXPECTED_EVENTS].sort());
 
@@ -187,6 +195,20 @@ describe("claude code artifact", () => {
     expect(worker).toContain('await import("@napi-rs/keyring")');
     expect(worker).not.toMatch(STATIC_KEYRING_IMPORT);
     expect(worker).not.toMatch(WORKSPACE_IMPORT);
+  });
+
+  test("the UI mod presents to the user and only the opt-in remediation reaches a model or the agent", () => {
+    const mod = readFileSync(join(DIST_DIR, "hooks", "jevguard-ui.js"), "utf8");
+
+    expect(mod).toContain("function register(");
+    expect(mod).toContain("export {");
+    expect(mod).toContain("$.ui.log(");
+    expect(mod).toContain("$.fs.read(");
+    expect(mod).toContain("$.model.complete(");
+    expect(mod).toContain("$.ui.open(");
+    expect(mod).toContain("$.prompt.submit(");
+    expect(mod).not.toMatch(MOD_FORBIDDEN_TEXT);
+    expect(mod).not.toMatch(MOD_FORBIDDEN_CALLS);
   });
 
   test("contains no build secret, fixture or workspace specifier", () => {

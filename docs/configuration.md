@@ -378,6 +378,9 @@ See the [security model](./security.md) for exactly what it stores.
 
 ## Safe auto-propose remediation
 
+This section describes the OpenCode behavior. Claude Code has its own opt-in; see
+[Remediation proposals](#remediation-proposals) under Claude Code.
+
 The review remains observe-only unless remediation is enabled, and the server plugin
 delivers it inside the same plugin entrypoint. Remediation is controlled by
 `remediation.auto_propose` (default `true`) and `remediation.propose_on` (default
@@ -424,9 +427,12 @@ diff, or secret is logged.
 
 JevGuard also reviews work done in Claude Code through a separate plugin. It is
 background and observe-only like the OpenCode plugin: it never changes what Claude
-sees, never prompts, blocks, or edits, and shows nothing inside the session. Its only
-output is the [local review history](#local-review-history), which `jevguard report`
-reads. Remediation proposals are not available on Claude Code.
+sees, never prompts, blocks, or edits, unless you opt in to `delivery: agent` under
+[Remediation proposals](#remediation-proposals). Each reviewed unit is recorded in the
+[local review history](#local-review-history), which `jevguard report` reads, and its
+result is also shown to you only, inside the session (see
+[In-session results](#in-session-results)). Remediation proposals are off by default and
+strategy-only; see [Remediation proposals](#remediation-proposals).
 
 ### Install
 
@@ -491,6 +497,95 @@ reviews a smaller set of work that it can prove:
   the unit `UNAVAILABLE`. A unit with no changed file and no write-capable tool is
   `SKIPPED` without calling Jev.
 
+### In-session results
+
+A small user-interface module bundled with the plugin (`hooks/jevguard-ui.js`) shows
+the result of each reviewed unit in the Claude Code session. It is presentation only:
+it reads a small local feed, never calls Jev, never reads a credential, and adds
+nothing to the conversation the model sees. There is no slash command, because a
+command result is also read by the model.
+
+- While a unit is reviewed the status line shows `JevGuard reviewing unit N...`.
+- A faint transcript line (not sent to the model) shows the outcome, the rules that
+  failed or warned with the violation probability, typed reasons, and acquisition
+  causes. `SKIPPED` units only update the status line.
+- A `FAIL` also raises a toast naming the failing rule or check ids.
+- The status line keeps the latest result.
+
+Examples:
+
+```text
+JevGuard PASS · unit 2 · pass 3 · skipped 1
+JevGuard WARN · unit 3 · warn: TEST-001 47% · pass 3
+JevGuard FAIL · unit 4 · fail: ARCH-001 91% · warn: SCOPE-CREEP 52% · pass 2
+JevGuard UNAVAILABLE · unit 5 · unavailable: review MISSING_ATTRIBUTED_DIFF (SHELL_BACKGROUND)
+JevGuard UNAVAILABLE · unit 6 · unavailable: ARCH-001 JEV_FAILURE, COMPLEXITY JEV_FAILURE
+```
+
+The text is English only and carries ids, percentages, counts and closed codes, never
+file paths, rule text or findings. Jev returns a probability, not prose, so there is
+no explanation beyond the typed reason. At most five ids are listed per group, then
+`+N more`.
+
+After each main-loop turn the module polls the feed every 2 seconds for 45 seconds,
+extended while a review is pending (up to 150 seconds per review, at most 15 minutes
+in total). A review that finishes after that, or one that started more than 150
+seconds before the session was reloaded, is not shown; it is still in
+`jevguard report`, which remains the complete record. The
+terminal and desktop surfaces draw these lines; `claude -p` ends before a review
+finishes.
+
+### Remediation proposals
+
+Remediation is off. You turn it on in your own file, never in the repository:
+
+```yaml
+# <XDG_CONFIG_HOME | USERPROFILE | HOME/.config>/jevguard/claude-code.yaml
+remediation:
+  enabled: true      # default false
+  delivery: user     # user | agent
+  model: sonnet      # optional; Claude alias or id; default: the session's model
+```
+
+The file is read by the worker. `XDG_CONFIG_HOME` is used only when it is an absolute
+path; otherwise `USERPROFILE` and then `HOME` plus `.config`. It is refused when its
+real path is inside the project root or inside the Git working tree that contains it
+(letter case never matters). It is validated strictly: an unknown key, a wrong
+type, a `delivery` other than `user` or `agent`, or a `model` that is not a Claude alias
+or id (a `provider/model` specifier is invalid) makes the whole file invalid, and nothing
+is proposed. The worker log then holds one closed code:
+`REMEDIATION_USER_CONFIG_INVALID`, `REMEDIATION_USER_CONFIG_IN_PROJECT` or
+`REMEDIATION_USER_CONFIG_UNREADABLE`.
+
+When a review of a unit has a `FAIL` with complete safe evidence, the worker builds the
+same aggregate request as the OpenCode proposer (every `FAIL` finding, the task, the
+complete attributed patch; same limits) and the in-session module drafts a strategy with
+one call to the model, using the session's model unless you set `model`. It never edits
+code and never applies anything; there is no retry. The result is shown as follows.
+
+- **`delivery: user` (default).** A panel titled `JevGuard proposal` shows the strategy
+  and a button that copies the manual apply instruction; a toast announces it. The panel
+  and its text are not sent to the model. Where the terminal is narrower than 144 columns
+  the panel cannot be placed without your action, so the proposal is also written to the
+  transcript as faint lines of at most 1900 characters.
+- **`delivery: agent` (explicit opt-in).** The module also submits the proposal to the
+  agent as a visible message from the plugin (never as if you typed it), which starts a
+  turn once the session is idle. At most one such message follows a unit you started, at
+  most 3 are sent per session (the count survives a reload and a `/resume`), and the
+  turn they cause is reviewed normally but never triggers another. The fourth delivery in
+  a session is shown in the panel instead, with a line saying the limit was reached. The
+  panel opens as a record of what was sent. The proposal text is shown without control
+  characters and capped at 32768 characters.
+
+A failure shows a generic toast and one transcript line with a closed code
+(`REQUEST_UNREADABLE`, `REQUEST_INVALID`, `MODEL_REFUSED`, `MODEL_API_ERROR`,
+`MODEL_EMPTY_REPLY`, `MODEL_ABORTED` or `DELIVERY_FAILED`), never the task, patch or
+findings. In `.jev/config.yaml`, `remediation.auto_propose: false` still disables
+proposals for the project, but a `remediation.model` there is ignored on Claude Code
+(logged as `REMEDIATION_PROJECT_MODEL_IGNORED`). `delivery` is not accepted in
+`.jev/config.yaml`. There is no slash command to reopen the panel, because a command
+result is also read by the model.
+
 ### Local state
 
 The hook keeps bounded state under `${CLAUDE_PLUGIN_DATA}/claude-code/`, with
@@ -500,3 +595,17 @@ reviews it, appends the result to `reviews.jsonl`, and deletes it. State and han
 unconsumed for 24 hours are removed, and ending a session deletes its open state. The
 hook and worker write only closed codes to `hook-log.jsonl` and `worker-log.jsonl`
 (each bounded to 256 KiB), never a task, patch, path, finding, or credential.
+
+`reviews.jsonl` is the local history. For the in-session display the worker also
+appends to a small per-session feed at
+`<XDG_DATA_HOME or ~/.local/share>/jevguard/claude-code/feed/<sessionId>.jsonl`
+(`USERPROFILE` is used before `HOME` when both are set). It holds only ids, outcomes,
+probabilities, typed reasons, counts and slice counts, is bounded to 256 KiB, uses
+modes `0600`/`0700` on POSIX, and a file untouched for 24 hours is deleted. It can
+be deleted at any time; only the in-session display is lost.
+
+When remediation is on, the worker also writes one private request per proposal to
+`<XDG_DATA_HOME or ~/.local/share>/jevguard/claude-code/proposals/<sessionId>/`. It holds
+the task and the attributed patch, uses modes `0600`/`0700` on POSIX, is blanked by the
+module as soon as it reads it and removed by the worker when blank or older than 24
+hours (at the worker's next run).

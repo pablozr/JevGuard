@@ -1,13 +1,9 @@
 import { cp, mkdir, rm } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+import { DIST_DIR, MOD_ENTRY, MOD_FILENAME, PACKAGE_DIR, REPO_ROOT } from "./paths";
 
-const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
-const PACKAGE_DIR = resolve(SCRIPT_DIR, "..");
-const REPO_ROOT = resolve(PACKAGE_DIR, "..", "..");
 const ADAPTER_SOURCE = join(REPO_ROOT, "packages", "claude-code-adapter", "src");
 const TEMPLATE_DIR = join(PACKAGE_DIR, "artifact");
-const DIST_DIR = join(PACKAGE_DIR, "dist");
 
 /**
  * The only runtime dependency left external: the native keyring. The hook never
@@ -26,30 +22,70 @@ const TEMPLATE_FILES: readonly (readonly [string, string])[] = [
   ["hooks.json", "hooks/hooks.json"],
   ["package.json", "package.json"],
   ["package-lock.json", "package-lock.json"],
+  ["types/index.d.ts", "types/index.d.ts"],
 ];
+
+const MOD_FORBIDDEN = /\bimport\(|\brequire\(|\bnode:/;
+
+interface BundleSpec {
+  readonly label: string;
+  readonly entry: string;
+  readonly outdir: string;
+  readonly target: "node" | "browser";
+  readonly external: string[];
+  readonly naming: string;
+}
+
+async function bundleOrThrow(spec: BundleSpec): Promise<void> {
+  const result = await Bun.build({
+    entrypoints: [spec.entry],
+    outdir: spec.outdir,
+    target: spec.target,
+    format: "esm",
+    splitting: false,
+    sourcemap: "none",
+    minify: false,
+    env: "disable",
+    external: spec.external,
+    naming: spec.naming,
+  });
+
+  if (!result.success) {
+    for (const log of result.logs) {
+      console.error(log);
+    }
+
+    throw new Error(`${spec.label} bundle failed`);
+  }
+}
 
 async function bundleEntries(): Promise<void> {
   for (const entry of ENTRYPOINTS) {
-    const result = await Bun.build({
-      entrypoints: [entry.source],
+    await bundleOrThrow({
+      label: entry.name,
+      entry: entry.source,
       outdir: DIST_DIR,
       target: "node",
-      format: "esm",
-      splitting: false,
-      sourcemap: "none",
-      minify: false,
-      env: "disable",
       external: EXTERNAL_DEPENDENCIES,
       naming: `${entry.name}.js`,
     });
+  }
+}
 
-    if (!result.success) {
-      for (const log of result.logs) {
-        console.error(log);
-      }
+async function bundleMod(): Promise<void> {
+  await bundleOrThrow({
+    label: "mod",
+    entry: MOD_ENTRY,
+    outdir: join(DIST_DIR, "hooks"),
+    target: "browser",
+    external: ["claude-code"],
+    naming: MOD_FILENAME,
+  });
 
-      throw new Error(`${entry.name} bundle failed`);
-    }
+  const text = await Bun.file(join(DIST_DIR, "hooks", MOD_FILENAME)).text();
+
+  if (MOD_FORBIDDEN.test(text)) {
+    throw new Error("mod bundle contains a construct the mod loader refuses");
   }
 }
 
@@ -68,6 +104,7 @@ async function main(): Promise<void> {
   await rm(DIST_DIR, { recursive: true, force: true });
   await mkdir(DIST_DIR, { recursive: true });
   await bundleEntries();
+  await bundleMod();
   await copyTemplates();
 
   console.log(`claude code artifact built at ${DIST_DIR}`);

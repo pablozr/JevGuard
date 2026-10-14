@@ -14,6 +14,7 @@ import {
   writeSync,
 } from "node:fs";
 import { join } from "node:path";
+import { PROPOSAL_REQUEST_TTL_MS } from "../presentation/proposal-file";
 import { sha256Hex } from "./file-image";
 import { isMissingPathError } from "./node-ports";
 import { decodePreRecord, decodeShellPreRecord, decodeStateLine } from "./state-codec";
@@ -26,7 +27,7 @@ import type {
   UnitState,
 } from "./types";
 
-export const ORPHAN_TTL_MS = 24 * 60 * 60 * 1000;
+export const ORPHAN_TTL_MS = PROPOSAL_REQUEST_TTL_MS;
 
 /** State holds task text and file contents, so it is owner-only where the platform allows. */
 export const DIR_MODE = 0o700;

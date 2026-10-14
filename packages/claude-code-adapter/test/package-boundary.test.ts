@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 
 const SOURCE_ROOT = join(import.meta.dirname, "..", "src");
-const PURE_DIRECTORIES = ["hook-event", "acquisition", "turn"];
+const PURE_DIRECTORIES = ["hook-event", "acquisition", "turn", "presentation"];
 const IO_DIRECTORIES = ["capture", "hook"];
 const WORKER_DIRECTORIES = ["worker"];
 const PURE_FORBIDDEN =
@@ -76,6 +76,18 @@ describe("claude-code-adapter package boundary", () => {
     );
 
     expect(offenders).toEqual([]);
+  });
+
+  test("presentation imports core and acquisition as types only and no I/O sibling", () => {
+    const files = filesOf(["presentation"]);
+    const valueImport =
+      /\bimport\s+(?!type\b)[^;]*?from\s+["'](?:@jevguard\/core|\.\.\/acquisition)["']/;
+
+    expect(files.length).toBeGreaterThan(0);
+    expect(files.filter((file) => valueImport.test(readFileSync(file, "utf8")))).toEqual([]);
+    expect(
+      files.flatMap((file) => forbiddenImports(file, /^\.\.\/(worker|capture|hook)($|\/)/)),
+    ).toEqual([]);
   });
 
   test("the package root does not re-export capture or hook", () => {

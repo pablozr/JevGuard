@@ -1,5 +1,6 @@
 import type { Turn, TurnFile } from "@jevguard/core";
 import type { AcquiredUnit } from "../acquisition";
+import { sessionTurnPrefixOf } from "../presentation/turn-id";
 import { buildFilePatch } from "./build-patch";
 import type { TurnOptions } from "./types";
 
@@ -20,9 +21,9 @@ export function encodeTask(prompts: readonly string[]): string {
 export const DEFAULT_PATCH_BUDGET_MS = 2000;
 
 export function unitTurnId(sessionId: string, ordinal: number, epoch?: string): string {
-  return epoch === undefined
-    ? `claude-code:${sessionId}:${ordinal}`
-    : `claude-code:${sessionId}:${epoch}:${ordinal}`;
+  const prefix = sessionTurnPrefixOf(sessionId);
+
+  return epoch === undefined ? `${prefix}${ordinal}` : `${prefix}${epoch}:${ordinal}`;
 }
 
 export function turnId(unit: AcquiredUnit): string {

@@ -30,16 +30,23 @@ export function appendHookLog(stateDirectory: string, entry: HookLogEntry): void
   appendBoundedLog(hookLogFileOf(stateDirectory), entry);
 }
 
-/** Appends one JSON line and bounds the file by rewriting its newest lines; never throws. */
-export function appendBoundedLog(file: string, entry: object): void {
+/**
+ * Appends one JSON line and bounds the file by rewriting its newest lines; never throws.
+ * Returns whether the line was appended.
+ */
+export function appendBoundedLog(file: string, entry: object): boolean {
   try {
     mkdirSync(dirname(file), { recursive: true, mode: DIR_MODE });
     appendFileSync(file, `${JSON.stringify(entry)}\n`, { mode: FILE_MODE });
+  } catch {
+    return false;
+  }
 
+  try {
     if (statSync(file).size > MAX_HOOK_LOG_BYTES) {
       writeAtomic(file, newestLines(readFileSync(file, "utf8")));
     }
-  } catch {
-    return;
-  }
+  } catch {}
+
+  return true;
 }

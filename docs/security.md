@@ -257,9 +257,11 @@ warn. One malformed answer fails only its own check.
 ## Claude Code plugin
 
 The Claude Code plugin keeps the same boundaries as the OpenCode plugin: review is
-background and observe-only, hooks exit 0 with no stdout or stderr and never use
-`async`, `asyncRewake`, `additionalContext`, `systemMessage`, or `decision`, and
-remediation is disabled.
+background and observe-only, and hooks exit 0 with no stdout or stderr and never use
+`async`, `asyncRewake`, `additionalContext`, `systemMessage`, or `decision`.
+Remediation is off by default. Only the user can turn it on, in their own
+`claude-code.yaml` (never in the repository); it is strategy-only and works as described
+in "Proposal requests" and "Agent delivery" below.
 
 - **Where Jev and credentials run.** Never inside a hook. A hook only records evidence
   and leaves a handoff; a detached worker process reads the credential (`jevguard login`
@@ -292,6 +294,71 @@ remediation is disabled.
   POSIX, and the user-profile ACL applies on Windows. A `reviews.jsonl` created by an
   earlier version keeps its old mode until it is rotated or deleted; delete it or
   `chmod 600` it to tighten it now.
+- **In-session presentation.** The bundled UI module (`hooks/jevguard-ui.js`) uses
+  only `$.session.id`, `$.session.model`, `$.env.get`, `$.fs.read`, `$.fs.write`,
+  `$.clock.now`, `$.clock.every`, `$.clock.after`, `$.state.get`, `$.state.set`,
+  `$.ui.log`, `$.ui.status`, `$.ui.toast`, `$.ui.open`, `$.ui.close`, `$.ui.copy`,
+  `$.ui.resolve`, `$.model.complete` and `$.prompt.submit`. It never appends to the
+  session, runs a command or tool, calls the network or a process, or writes the
+  environment, and it contains no Jev client or credential. `$.fs.write` only blanks a
+  consumed proposal request, `$.model.complete` runs only for a request the worker wrote
+  after the user's opt-in, and `$.prompt.submit` runs only for `delivery: agent`. It
+  reads only the feed and the proposal requests below.
+- **Feed.** The worker writes one feed file per session under the user data
+  directory. It holds ids, outcomes, violation probabilities, typed reason and cause
+  codes, counts and slice counts; no task, patch, path, finding or credential. The
+  file name is the session id. Under `claude -p` or the SDK, the lines reach the host
+  as `ui_log` messages.
+- **Proposal requests (sensitive).** When the user enabled remediation and a review
+  has a `FAIL` with complete safe evidence, the worker writes the core's proposal request
+  (task, attributed patch and findings, the same text the OpenCode proposer receives) to
+  `proposals/<sessionId>/` under the user data directory, mode `0600` in a `0700`
+  directory, with a 24 hour expiry. The mod reads it once, overwrites it with an empty
+  string because `$.fs` cannot delete, validates it strictly (exact keys, bounded
+  sizes, Claude model alias or id, this unit only, not created in the future and not
+  valid for longer than 24 hours) and makes one `$.model.complete` call without retry,
+  using the session's model unless the user pinned one. If the file cannot be blanked,
+  the module fails with `REQUEST_UNREADABLE` and does not call the model. Residual risk:
+  reading and blanking are two steps, not one atomic rename, because `$.fs` has no
+  rename or delete, so two instances of the module reading the same request at the same
+  instant could both consume it. The worker never writes a request inside the project
+  root or its Git working tree (the write fails with
+  `PROPOSAL_REQUEST_WRITE_FAILED`), and removes the request if the feed line that
+  announces it could not be written. The worker
+  removes blank files and files older than 24 hours each time it runs, which is at every
+  session start and every closed unit; if Claude Code stays closed for days, an
+  unconsumed file can remain on disk past 24 hours, and the mod refuses it by its
+  expiry. Logs and toasts carry one typed code (for example `MODEL_API_ERROR`), never
+  the task, patch, findings, paths or credentials. The model call is the user's own
+  Claude Code session and sends this evidence to that session's provider.
+- **Where opt-in lives.** Only in the user's file
+  `<XDG_CONFIG_HOME | USERPROFILE | HOME/.config>/jevguard/claude-code.yaml`, read by the
+  worker. The file is refused when its real path is inside the project root or inside
+  the Git working tree that contains it (the nearest ancestor with a `.git` entry), on
+  every platform and without regard to letter case, because a cloned repository's
+  `.claude/settings.json` can change `XDG_CONFIG_HOME` through `env`. The content is
+  read through that same canonical path. A project inside a Git repository that also
+  contains the user's config directory (for example a dotfiles repository at the home
+  directory) is refused as well; that is the safe side.
+  Residual risk: a project setting that points `HOME` or `XDG_CONFIG_HOME` to a
+  directory outside the repository that the attacker also controls is not detected.
+  `.jev/config.yaml` can only veto (`remediation.auto_propose: false`); its `model` is
+  ignored on Claude Code.
+- **Agent delivery (opt-in exception).** With `delivery: agent` the mod submits the
+  proposal to the agent with `$.prompt.submit`, never as the user. The agent receives a
+  framed message that says it was sent by the plugin and was not typed by the user,
+  followed by the strategy-only proposal text (no tools, no code, no diff). The message is
+  visible in the transcript. It opens with a fixed marker: the worker detects the marker
+  in the next unit's task and downgrades that unit to the user panel, so at most one
+  automatic delivery follows a unit the user started, and at most 3 happen per session
+  (a fixed limit). The count is kept per session in the plugin state, so it survives a
+  reload of the module and a `/resume`; only the last 32 sessions are remembered. The
+  model's text is stripped of control characters (tabs and newlines stay), capped at
+  32768 characters, and placed between `--- proposal start ---` and
+  `--- proposal end ---` lines after the fixed notice, with any such line inside it
+  removed, so it cannot pass for the notice or for the user. The resulting turn is
+  reviewed normally. There is no apply path,
+  retry or forced re-evaluation.
 - **Native dependency.** The only external runtime dependency is `@napi-rs/keyring`,
   pinned and installed with `--ignore-scripts`; its per-platform binaries are optional
   dependencies with no install script. If it is missing, reviews degrade to

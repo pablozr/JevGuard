@@ -1,13 +1,23 @@
 import type { JevEvaluationPort, Turn, TurnReview } from "@jevguard/core";
 import {
   aggregateReview,
+  buildProposalRequest,
   DEFAULT_EVIDENCE_POLICY,
   evaluateBuiltIns,
   reviewTurn,
   unavailableReview,
 } from "@jevguard/core";
 import type { ClaudeReviewHandoff } from "../capture/types";
-import type { ReviewedHandoff, WorkerDependencies } from "./types";
+import type {
+  ResolvedReview,
+  ReviewedHandoff,
+  ReviewHandoffOptions,
+  WorkerDependencies,
+} from "./types";
+
+function withoutProposal(review: TurnReview): ResolvedReview {
+  return { review, proposal: null, projectModelIgnored: false };
+}
 
 export const DEFAULT_REVIEW_DEADLINE_MS = 120_000;
 
@@ -38,14 +48,15 @@ async function skippedReview(turnId: string): Promise<TurnReview> {
 async function reviewResolution(
   handoff: ClaudeReviewHandoff,
   dependencies: WorkerDependencies,
-): Promise<TurnReview> {
+  options: ReviewHandoffOptions,
+): Promise<ResolvedReview> {
   const { resolution } = handoff;
 
   if (resolution.status === "UNAVAILABLE") {
-    return unavailableReview(handoff.turnId, resolution.reason);
+    return withoutProposal(unavailableReview(handoff.turnId, resolution.reason));
   }
 
-  if (resolution.status === "SKIPPED") return skippedReview(handoff.turnId);
+  if (resolution.status === "SKIPPED") return withoutProposal(await skippedReview(handoff.turnId));
 
   const outcome = await reviewTurn(resolution.turn, {
     policy: dependencies.policyFor(handoff.projectRoot),
@@ -53,23 +64,43 @@ async function reviewResolution(
     jev: dependencies.jevFor(),
   });
 
-  return outcome.review;
+  if (!options.proposals || outcome.remediation.status !== "VALID") {
+    return withoutProposal(outcome.review);
+  }
+
+  const { config } = outcome.remediation;
+  const proposal = buildProposalRequest({
+    turn: resolution.turn,
+    sessionID: handoff.sessionId,
+    rules: outcome.rules,
+    results: outcome.review.results,
+    config,
+  });
+
+  return {
+    review: outcome.review,
+    proposal,
+    projectModelIgnored: proposal !== null && config.model !== null,
+  };
 }
 
 /**
- * Reviews one handoff without remediation. Every failure, including a spent deadline,
- * degrades to a review-level `UNAVAILABLE/JEV_FAILURE` so the unit is still recorded.
+ * Reviews one handoff. When proposals are enabled, a complete, safe review with a `FAIL`
+ * also yields the core's proposal request. Every failure, including a spent deadline,
+ * degrades to a review-level `UNAVAILABLE/JEV_FAILURE` with no proposal, so the unit is
+ * still recorded.
  */
 export async function reviewHandoff(
   handoff: ClaudeReviewHandoff,
   dependencies: WorkerDependencies,
+  options: ReviewHandoffOptions,
 ): Promise<ReviewedHandoff> {
-  const failure = unavailableReview(handoff.turnId, "JEV_FAILURE");
-  const work = reviewResolution(handoff, dependencies).catch(() => failure);
+  const failure = withoutProposal(unavailableReview(handoff.turnId, "JEV_FAILURE"));
+  const work = reviewResolution(handoff, dependencies, options).catch(() => failure);
   const limit = dependencies.reviewDeadlineMs ?? DEFAULT_REVIEW_DEADLINE_MS;
   const result = await dependencies.deadline.race(work, limit);
 
-  if (result.status === "DEADLINE") return { review: failure, deadlineExceeded: true };
+  if (result.status === "DEADLINE") return { ...failure, deadlineExceeded: true };
 
-  return { review: result.value, deadlineExceeded: false };
+  return { ...result.value, deadlineExceeded: false };
 }

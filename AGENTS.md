@@ -50,18 +50,24 @@ testkit ────────────────────────
 - `claude-code-adapter` owns Claude Code hook-event normalization, tool-attributed
   quiescent-unit acquisition (ADR 0014) and the `Turn` mapping. It never imports
   `opencode-adapter` or a host SDK. Its core (`hook-event/`, `acquisition/`, `turn/`)
-  is pure and imports no Node module; `capture/` and `hook/` add the Node hook
+  and `presentation/` (feed encoding, parsing and wording) is pure and imports no
+  Node module; `capture/` and `hook/` add the Node hook
   entrypoint and bounded local unit state (Node builtins only). Hooks never call Jev,
   credentials or the network, and never write to stdout or stderr. `worker/` is the
   only module that may import `node-infra`: a detached, observe-only review worker
-  that drains the handoffs the hook leaves, runs core `reviewTurn` (remediation off)
-  and records the result in the local review history.
+  that drains the handoffs the hook leaves, runs core `reviewTurn` (remediation only when the user enables it; see ADR 0014)
+  and records the result in the local review history plus a per-session user-only
+  presentation feed.
 - `claude-code-plugin` is composition plus the Claude Code artifact (`hook.js`,
   `worker.js`, `hooks/hooks.json`, `.claude-plugin/plugin.json`, a pinned
   `package.json` and `package-lock.json` for the native keyring, the only external
   dependency). The hook bundle never contains the keyring or the Jev client; the
-  worker loads the keyring lazily. Direction: remediation stays off and presentation
-  is the local history only, until a user-only path is approved separately.
+  worker loads the keyring lazily. It also ships `hooks/jevguard-ui.js`, a UI-only
+  mod that shows results to the user (`ui.log`, status, toast) from the feed; it
+  never touches Jev, credentials or the network. Remediation is opt-in and
+  strategy-only (ADR 0014): the worker writes a private proposal request, and the mod makes
+  one `$.model.complete` call and shows the result in a user-only panel; an explicit
+  user opt-in (`delivery: agent`) may also submit it to the agent once, visibly.
 - `plugin` is composition plus the single public OpenCode server plugin entrypoint.
   Its `config` hook registers the bundled `jevguard-rules` and `jev-init` skills and
   the hidden `jevguard-proposer` subagent; there is no command hook and no apply path.
@@ -104,6 +110,15 @@ the current repository diff when host attribution fails.
   coding agent, and that ordinary turn is reviewed normally. Do not broaden it: no
   parent injection, no repository or global diff fallback, no retry or re-evaluation
   loop, and no background session prompting beyond that single child-session proposal.
+  Claude Code exception (ADR 0014, 2026-10-14): when the user enables remediation in
+  their own config file (never in the repository), the in-session mod drafts the same
+  strategy-only proposal with one `$.model.complete` call and shows it in a panel only
+  the user sees. With the user's explicit `delivery: agent` it may also submit the
+  framed proposal to the agent through `$.prompt.submit` (never as the user), at most
+  once per user-initiated unit and three times per session; the resulting turn is reviewed
+  normally and never triggers another automatic delivery. No other parent injection, no
+  apply path, no retry or forced re-evaluation, and the request file that carries the
+  task and patch stays private, blanked on read and removed by the worker.
 - For local use, API credentials come from `jevguard login` and the OS credential
   store. `TYPESAFE_API_KEY` is a CI/automation-only process override. Never expose
   a key in repository configuration, arguments, logs, errors, toasts, fixtures, or

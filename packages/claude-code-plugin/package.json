@@ -10,6 +10,7 @@
     "lint": "biome lint .",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "build": "bun scripts/build-artifact.ts",
+    "check:mod": "bun scripts/check-mod.ts",
     "test": "vitest run --root ../.. packages/claude-code-plugin"
   },
   "dependencies": {

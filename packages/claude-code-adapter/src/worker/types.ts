@@ -2,11 +2,17 @@ import type {
   JevEvaluationPort,
   PolicyConfigParser,
   PolicyLoader,
+  RemediationProposalRequest,
   TurnReview,
 } from "@jevguard/core";
 import type { ReviewLogEntry } from "@jevguard/node-infra";
 import type { ClaudeAcquisitionReason } from "../acquisition";
 import type { ClaudeReviewHandoff } from "../capture/types";
+import type {
+  ClaudeRemediationInvalidReason,
+  ClaudeRemediationSettingsResult,
+  WorkerProposalStore,
+} from "./remediation/types";
 
 /** Synchronous file port over the handoff directory; tests substitute an in-memory fake. */
 export interface WorkerFileSystem {
@@ -16,6 +22,8 @@ export interface WorkerFileSystem {
   read(path: string): string | null;
   /** Last modification time in epoch milliseconds, or `null` when the file is gone. */
   modifiedMs(path: string): number | null;
+  /** Size in bytes, or `null` when the file is gone. */
+  sizeBytes(path: string): number | null;
   /** Atomically moves a file; only `LOST` (source already gone) is an expected race. */
   rename(from: string, to: string): RenameResult;
   /** Deletes a file, retrying transient failures; throws when it cannot. */
@@ -45,11 +53,24 @@ export type WorkerLogCode =
   | "HANDOFF_PROCESS_FAILED"
   | "HANDOFF_CLEANUP_FAILED"
   | "WORKER_CLAIM_FAILED"
-  | "WORKER_FAILED";
+  | "WORKER_FAILED"
+  | `REMEDIATION_${ClaudeRemediationInvalidReason}`
+  | "REMEDIATION_PROJECT_MODEL_IGNORED"
+  | "PROPOSAL_DELIVERY_DOWNGRADED"
+  | `PROPOSAL_REQUEST_WRITTEN:${"USER" | "AGENT"}`
+  | "PROPOSAL_REQUEST_WRITE_FAILED";
 
 export interface WorkerLogEntry {
   readonly timestamp: string;
   readonly code: WorkerLogCode;
+}
+
+/** User-only presentation feed; never throws. */
+export interface WorkerReviewFeed {
+  started(handoff: ClaudeReviewHandoff): void;
+  /** `true` when the record was written; `false` when the feed could not take it. */
+  recorded(handoff: ClaudeReviewHandoff, review: TurnReview, proposal: boolean): boolean;
+  sweep(): void;
 }
 
 export interface WorkerHistory {
@@ -62,8 +83,12 @@ export interface WorkerDependencies {
   readonly files: WorkerFileSystem;
   readonly now: () => Date;
   readonly history: WorkerHistory;
+  readonly feed: WorkerReviewFeed;
   readonly policyFor: (projectRoot: string) => PolicyLoader;
   readonly parseConfig: PolicyConfigParser;
+  /** The user's opt-in for remediation in one project; read only for a unit that can be reviewed. */
+  readonly remediationFor: (projectRoot: string) => ClaudeRemediationSettingsResult;
+  readonly proposals: WorkerProposalStore;
   /** Builds a fresh Jev port per handoff, so one stuck review never holds another's slots. */
   readonly jevFor: () => JevEvaluationPort;
   readonly deadline: ReviewDeadline;
@@ -78,4 +103,14 @@ export type HandoffParseResult =
 export interface ReviewedHandoff {
   readonly review: TurnReview;
   readonly deadlineExceeded: boolean;
+  /** The complete, safe proposal request, only when proposals were enabled and the review has a FAIL. */
+  readonly proposal: RemediationProposalRequest | null;
+  /** The project's `.jev` pinned a remediation model, which Claude Code ignores. */
+  readonly projectModelIgnored: boolean;
+}
+
+export type ResolvedReview = Omit<ReviewedHandoff, "deadlineExceeded">;
+
+export interface ReviewHandoffOptions {
+  readonly proposals: boolean;
 }

@@ -1,15 +1,7 @@
 import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync } from "node:fs";
+import { isMissingPathError } from "../capture/node-ports";
 import { DIR_MODE } from "../capture/unit-state";
 import type { ReviewDeadline, WorkerFileSystem } from "./types";
-
-function isMissing(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    (error.code === "ENOENT" || error.code === "ENOTDIR")
-  );
-}
 
 export function createNodeWorkerFileSystem(): WorkerFileSystem {
   return {
@@ -17,7 +9,7 @@ export function createNodeWorkerFileSystem(): WorkerFileSystem {
       try {
         return readdirSync(directory);
       } catch (error) {
-        if (isMissing(error)) return [];
+        if (isMissingPathError(error)) return [];
 
         throw error;
       }
@@ -26,7 +18,7 @@ export function createNodeWorkerFileSystem(): WorkerFileSystem {
       try {
         return readFileSync(path, "utf8");
       } catch (error) {
-        if (isMissing(error)) return null;
+        if (isMissingPathError(error)) return null;
 
         throw error;
       }
@@ -35,7 +27,16 @@ export function createNodeWorkerFileSystem(): WorkerFileSystem {
       try {
         return statSync(path).mtimeMs;
       } catch (error) {
-        if (isMissing(error)) return null;
+        if (isMissingPathError(error)) return null;
+
+        throw error;
+      }
+    },
+    sizeBytes(path) {
+      try {
+        return statSync(path).size;
+      } catch (error) {
+        if (isMissingPathError(error)) return null;
 
         throw error;
       }
@@ -46,7 +47,7 @@ export function createNodeWorkerFileSystem(): WorkerFileSystem {
 
         return "MOVED";
       } catch (error) {
-        return isMissing(error) ? "LOST" : "FAILED";
+        return isMissingPathError(error) ? "LOST" : "FAILED";
       }
     },
     remove(path) {

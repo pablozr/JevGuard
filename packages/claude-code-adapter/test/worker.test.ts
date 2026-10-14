@@ -10,7 +10,14 @@ import type { ReviewHistoryFileSystem, ReviewHistoryRecord } from "@jevguard/nod
 import { createLocalReviewHistory } from "@jevguard/node-infra";
 import { describe, expect, test } from "vitest";
 import type { ClaudeReviewHandoff } from "../src/hook";
+import {
+  AUTO_DELIVERY_MARKER,
+  type ProposalRequestFile,
+  toFeedRecorded,
+  toFeedStarted,
+} from "../src/presentation";
 import type {
+  ClaudeRemediationSettingsResult,
   DeadlineResult,
   RenameResult,
   WorkerDependencies,
@@ -48,6 +55,10 @@ class MemoryWorkerFiles implements WorkerFileSystem {
 
   modifiedMs(path: string): number | null {
     return this.files.has(path) ? (this.modified.get(path) ?? NOW.getTime() - 3_600_000) : null;
+  }
+
+  sizeBytes(path: string): number | null {
+    return this.files.get(path)?.length ?? null;
   }
 
   rename(from: string, to: string): RenameResult {
@@ -93,6 +104,7 @@ class FakeJev implements JevEvaluationPort {
   readonly requests: JevRequest[] = [];
   failure = false;
   hang = false;
+  probability = 0.1;
 
   async evaluate(request: JevRequest): Promise<JevEvaluationResult> {
     this.requests.push(request);
@@ -104,7 +116,10 @@ class FakeJev implements JevEvaluationPort {
         return { kind: "BUILT_IN_BATCH", status: "FAILED", reason: "MISSING_CREDENTIAL" };
       }
 
-      const answer = { status: "EVALUATED", noul: { violationProbability: 0.1 } } as const;
+      const answer = {
+        status: "EVALUATED",
+        noul: { violationProbability: this.probability },
+      } as const;
 
       return {
         kind: "BUILT_IN_BATCH",
@@ -115,7 +130,7 @@ class FakeJev implements JevEvaluationPort {
 
     return this.failure
       ? { kind: "RULE", status: "FAILED", reason: "MISSING_CREDENTIAL" }
-      : { kind: "RULE", status: "EVALUATED", noul: { violationProbability: 0.1 } };
+      : { kind: "RULE", status: "EVALUATED", noul: { violationProbability: this.probability } };
   }
 
   async evaluateRuleBatch(
@@ -191,11 +206,22 @@ class Harness {
   readonly historyFiles = new MemoryHistoryFiles();
   readonly logs: WorkerLogCode[] = [];
   readonly policyRoots: string[] = [];
+  readonly feedEvents: string[] = [];
+  readonly feedLines: string[] = [];
+  feedFailure = false;
   readonly jevQueue: FakeJev[] = [];
   jevCreations = 0;
   policyLoader: PolicyLoader = policy;
   expireDeadline = false;
   expiredDeadlines = Number.POSITIVE_INFINITY;
+  remediation: ClaudeRemediationSettingsResult = { status: "DISABLED" };
+  readonly remediationRoots: string[] = [];
+  readonly proposalWrites: ProposalRequestFile[] = [];
+  readonly proposalRemovals: string[] = [];
+  readonly feedProposalFlags: boolean[] = [];
+  proposalWriteResult: "WRITTEN" | "FAILED" = "WRITTEN";
+  proposalSweeps = 0;
+  parsedConfig: unknown = null;
 
   dependencies(): WorkerDependencies {
     return {
@@ -212,7 +238,25 @@ class Harness {
 
         return this.policyLoader;
       },
-      parseConfig: () => ({ status: "PARSED", value: null }),
+      parseConfig: () => ({ status: "PARSED", value: this.parsedConfig }),
+      remediationFor: (root) => {
+        this.remediationRoots.push(root);
+
+        return this.remediation;
+      },
+      proposals: {
+        write: (_handoff, file) => {
+          if (this.proposalWriteResult === "WRITTEN") this.proposalWrites.push(file);
+
+          return this.proposalWriteResult;
+        },
+        remove: (value) => {
+          this.proposalRemovals.push(value.turnId);
+        },
+        sweep: () => {
+          this.proposalSweeps += 1;
+        },
+      },
       jevFor: () => {
         this.jevCreations += 1;
 
@@ -227,6 +271,30 @@ class Harness {
           }
 
           return { status: "DONE", value: await work };
+        },
+      },
+      feed: {
+        started: (value) => {
+          if (this.feedFailure) throw new Error("EIO");
+
+          this.feedEvents.push(`started:${value.turnId}`);
+          this.feedLines.push(JSON.stringify(toFeedStarted(value.turnId, NOW.toISOString())));
+        },
+        recorded: (value, review, proposal) => {
+          if (this.feedFailure) throw new Error("EIO");
+
+          this.feedProposalFlags.push(proposal);
+          this.feedEvents.push(
+            `recorded:${value.turnId}:history=${this.historyFiles.records().length}`,
+          );
+          this.feedLines.push(
+            JSON.stringify(toFeedRecorded(review, [], NOW.toISOString(), proposal)),
+          );
+
+          return true;
+        },
+        sweep: () => {
+          this.feedEvents.push("sweep");
         },
       },
       log: (code) => this.logs.push(code),
@@ -542,6 +610,50 @@ describe("runWorker", () => {
     }
   });
 
+  test("feeds STARTED before the review and RECORDED after the history append, per handoff", async () => {
+    const harness = new Harness();
+
+    put(harness, handoff(0, turnResolution(0)));
+    put(harness, handoff(1, SKIPPED));
+    await harness.run();
+
+    expect(harness.feedEvents).toEqual([
+      "sweep",
+      "started:claude-code:s:e:0",
+      "recorded:claude-code:s:e:0:history=1",
+      "started:claude-code:s:e:1",
+      "recorded:claude-code:s:e:1:history=2",
+    ]);
+  });
+
+  test("a feed that throws never stops the history or the next unit", async () => {
+    const harness = new Harness();
+
+    harness.feedFailure = true;
+    put(harness, handoff(0, turnResolution(0)));
+    put(harness, handoff(1, turnResolution(1)));
+    await harness.run();
+
+    expect(harness.turnIds()).toEqual(["claude-code:s:e:0", "claude-code:s:e:1"]);
+    expect(harness.files.pending()).toEqual([]);
+    expect(harness.logs).not.toContain("HANDOFF_PROCESS_FAILED");
+  });
+
+  test("the feed never carries prompt, patch or path markers", async () => {
+    const harness = new Harness();
+
+    put(harness, handoff(0, turnResolution(0)));
+    await harness.run();
+
+    const feed = harness.feedLines.join("\n");
+
+    expect(feed).not.toBe("");
+
+    for (const marker of [PROMPT_MARKER, PATCH_MARKER, PATH_MARKER, "/project-0"]) {
+      expect(feed).not.toContain(marker);
+    }
+  });
+
   test("ignores temporary files when listing pending work", async () => {
     const harness = new Harness();
 
@@ -550,6 +662,218 @@ describe("runWorker", () => {
 
     expect(harness.historyFiles.records()).toEqual([]);
     expect(harness.logs).toEqual(["WORKER_STARTED"]);
+  });
+});
+
+const ENABLED_USER: ClaudeRemediationSettingsResult = {
+  status: "ENABLED",
+  settings: { delivery: "user", model: "sonnet" },
+};
+
+const ENABLED_AGENT: ClaudeRemediationSettingsResult = {
+  status: "ENABLED",
+  settings: { delivery: "agent", model: null },
+};
+
+function failingHarness(remediation: ClaudeRemediationSettingsResult): Harness {
+  const harness = new Harness();
+
+  harness.jev.probability = 0.95;
+  harness.remediation = remediation;
+
+  return harness;
+}
+
+function withProjectConfig(harness: Harness, remediation: object): void {
+  harness.parsedConfig = {
+    version: 1,
+    thresholds: { error: { warn: 0.4, fail: 0.7 }, warning: { warn: 0.6 } },
+    remediation,
+  };
+  harness.policyLoader = {
+    load: async () => ({ status: "LOADED", source: { rules: RULES, config: "remediation" } }),
+  };
+}
+
+describe("runWorker remediation", () => {
+  test("a FAIL with remediation enabled writes one private request and marks the feed", async () => {
+    const harness = failingHarness(ENABLED_USER);
+
+    put(harness, handoff(0, turnResolution(0)));
+    await harness.run();
+
+    const [file, ...rest] = harness.proposalWrites;
+
+    expect(rest).toEqual([]);
+    expect(file).toMatchObject({
+      kind: "PROPOSAL_REQUEST",
+      turnId: "claude-code:s:e:0",
+      delivery: "user",
+      model: "sonnet",
+    });
+    expect(file?.prompt).toContain(PATCH_MARKER);
+    expect(harness.feedProposalFlags).toEqual([true]);
+    expect(harness.remediationRoots).toEqual(["/project-0"]);
+    expect(harness.logs).toContain("PROPOSAL_REQUEST_WRITTEN:USER");
+    expect(harness.proposalSweeps).toBe(1);
+  });
+
+  test("remediation disabled writes nothing and leaves the feed flag false", async () => {
+    const harness = failingHarness({ status: "DISABLED" });
+
+    put(harness, handoff(0, turnResolution(0)));
+    await harness.run();
+
+    expect(harness.proposalWrites).toEqual([]);
+    expect(harness.feedProposalFlags).toEqual([false]);
+    expect(harness.logs.some((code) => code.startsWith("PROPOSAL_"))).toBe(false);
+  });
+
+  test("a spent deadline never produces a proposal", async () => {
+    const harness = failingHarness(ENABLED_USER);
+
+    harness.expireDeadline = true;
+    put(harness, handoff(0, turnResolution(0)));
+    await harness.run();
+
+    expect(harness.proposalWrites).toEqual([]);
+    expect(harness.feedProposalFlags).toEqual([false]);
+  });
+
+  test("SKIPPED and UNAVAILABLE handoffs never read the user config", async () => {
+    const harness = failingHarness(ENABLED_USER);
+
+    put(harness, handoff(0, SKIPPED));
+    put(
+      harness,
+      handoff(1, { status: "UNAVAILABLE", reason: "BLOCKED_EVIDENCE", causes: ["BLOCKED_PATH"] }),
+    );
+    await harness.run();
+
+    expect(harness.remediationRoots).toEqual([]);
+    expect(harness.proposalWrites).toEqual([]);
+  });
+
+  test("a review with no FAIL writes nothing", async () => {
+    const harness = new Harness();
+
+    harness.remediation = ENABLED_USER;
+    put(harness, handoff(0, turnResolution(0)));
+    await harness.run();
+
+    expect(harness.proposalWrites).toEqual([]);
+    expect(harness.feedProposalFlags).toEqual([false]);
+  });
+
+  test("auto_propose false in the project vetoes the proposal", async () => {
+    const harness = failingHarness(ENABLED_USER);
+
+    withProjectConfig(harness, { auto_propose: false });
+    put(harness, handoff(0, turnResolution(0)));
+    await harness.run();
+
+    expect(harness.historyFiles.records()[0]?.summary.highestVerdict).toBe("FAIL");
+    expect(harness.proposalWrites).toEqual([]);
+    expect(harness.feedProposalFlags).toEqual([false]);
+  });
+
+  test("a project model is ignored, logged, and the user's model is kept", async () => {
+    const harness = failingHarness(ENABLED_USER);
+
+    withProjectConfig(harness, { model: "anthropic/other" });
+    put(harness, handoff(0, turnResolution(0)));
+    await harness.run();
+
+    expect(harness.proposalWrites[0]?.model).toBe("sonnet");
+    expect(harness.logs).toContain("REMEDIATION_PROJECT_MODEL_IGNORED");
+  });
+
+  test("an agent delivery is downgraded when the task is itself an automatic delivery", async () => {
+    const harness = failingHarness(ENABLED_AGENT);
+    const resolution = turnResolution(0);
+
+    if (resolution.status !== "TURN") throw new Error("expected a TURN");
+
+    put(
+      harness,
+      handoff(0, {
+        status: "TURN",
+        turn: { ...resolution.turn, task: `${AUTO_DELIVERY_MARKER} · unit 3]` },
+      }),
+    );
+    await harness.run();
+
+    expect(harness.proposalWrites[0]?.delivery).toBe("user");
+    expect(harness.logs).toContain("PROPOSAL_DELIVERY_DOWNGRADED");
+    expect(harness.logs).toContain("PROPOSAL_REQUEST_WRITTEN:USER");
+  });
+
+  test("an agent delivery stays agent for an ordinary task", async () => {
+    const harness = failingHarness(ENABLED_AGENT);
+
+    put(harness, handoff(0, turnResolution(0)));
+    await harness.run();
+
+    expect(harness.proposalWrites[0]?.delivery).toBe("agent");
+    expect(harness.logs).toContain("PROPOSAL_REQUEST_WRITTEN:AGENT");
+  });
+
+  test("a failed write is logged and the review is still recorded", async () => {
+    const harness = failingHarness(ENABLED_USER);
+
+    harness.proposalWriteResult = "FAILED";
+    put(harness, handoff(0, turnResolution(0)));
+    await harness.run();
+
+    expect(harness.logs).toContain("PROPOSAL_REQUEST_WRITE_FAILED");
+    expect(harness.turnIds()).toEqual(["claude-code:s:e:0"]);
+    expect(harness.feedProposalFlags).toEqual([false]);
+  });
+
+  test("a request whose feed record was not written is removed", async () => {
+    const harness = failingHarness(ENABLED_USER);
+
+    harness.feedFailure = true;
+    put(harness, handoff(0, turnResolution(0)));
+    await harness.run();
+
+    expect(harness.proposalWrites).toHaveLength(1);
+    expect(harness.proposalRemovals).toEqual(["claude-code:s:e:0"]);
+    expect(harness.turnIds()).toEqual(["claude-code:s:e:0"]);
+  });
+
+  test("a request whose feed record was written is kept", async () => {
+    const harness = failingHarness(ENABLED_USER);
+
+    put(harness, handoff(0, turnResolution(0)));
+    await harness.run();
+
+    expect(harness.proposalWrites).toHaveLength(1);
+    expect(harness.proposalRemovals).toEqual([]);
+  });
+
+  test("an invalid user config is logged by code and writes nothing", async () => {
+    const harness = failingHarness({ status: "INVALID", reason: "USER_CONFIG_IN_PROJECT" });
+
+    put(harness, handoff(0, turnResolution(0)));
+    await harness.run();
+
+    expect(harness.logs).toContain("REMEDIATION_USER_CONFIG_IN_PROJECT");
+    expect(harness.proposalWrites).toEqual([]);
+    expect(harness.turnIds()).toEqual(["claude-code:s:e:0"]);
+  });
+
+  test("no log or feed line carries the task, the patch or a path", async () => {
+    const harness = failingHarness(ENABLED_USER);
+
+    put(harness, handoff(0, turnResolution(0)));
+    await harness.run();
+
+    const visible = JSON.stringify([harness.logs, harness.feedLines]);
+
+    for (const marker of [PROMPT_MARKER, PATCH_MARKER, PATH_MARKER, "/project-0"]) {
+      expect(visible).not.toContain(marker);
+    }
   });
 });
 
