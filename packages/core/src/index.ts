@@ -1,4 +1,14 @@
 export type {
+  EpisodeAttemptIdentity,
+  EpisodeClosureIdentity,
+  EpisodeFile,
+  EpisodePolicySnapshot,
+  EpisodeProvenance,
+  EpisodeRequest,
+  EpisodeUnavailableReason,
+  ReviewEpisode,
+} from "./episode/types";
+export type {
   BuiltInOperationalResult,
   BuiltInReviewContext,
   BuiltInReviewResult,

@@ -82,6 +82,31 @@ the current repository diff when host attribution fails.
   a key in repository configuration, arguments, logs, errors, toasts, fixtures, or
   agent context.
 
+## Approved V2 episode direction (not the shipped V1 runtime)
+
+SPEC §7.10 defines the ratified host-independent episode contract. The approved
+acquisition direction is strict host-owned native historical changesets, initially
+Git text only, queried read-only by exact durable closure with typed frozen coverage.
+Do not integrate the archived standalone J02 scanner or add an owned scanner,
+duplicate strict Git capturer, incremental framework or fallback. Ignored relevant
+omissions and unrepresented binary content remain explicit problems; unknown or
+incomplete coverage cannot yield semantic results. Safe disjoint rules require
+provable complete coverage; incomplete total evidence blocks built-ins/proposals.
+Classify sensitive paths before new opt-in native content acquisition: native reuse
+does not authorize secret reads or exports, nor certify unrelated legacy host reads.
+Public capability, native no-read and retention remain design gates, not shipped support.
+Keep V1 Turn,
+evaluation and remediation unchanged until their migration tasks. Episode evidence
+is complete observed net delta, not exclusive authorship or a write/revert audit.
+Known overlapping sessions on one root and unsettled known writers make evidence
+unavailable; never serialize sessions with a global lock. Recovery uses only frozen
+evidence and a verifiable durable closure, never the current tree. Freeze initial
+policy with the baseline for both review and proposal. Capture waits are bounded,
+including required persistence; timeout invalidates late results. Numeric budgets
+and host capabilities remain gated, not defaults. No Jev, credential, network or
+proposal work belongs in capture callbacks. All existing evidence safety,
+observe-only and strategy-only boundaries remain in force.
+
 ## Code standards
 
 - Use TypeScript strict; avoid `any`, unsafe assertions, and unvalidated external

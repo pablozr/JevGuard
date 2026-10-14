@@ -1,5 +1,52 @@
 # Security Model
 
+## Future native V2 acquisition (not shipped)
+
+The approved direction is host-owned historical changesets, initially Git text only,
+with exact closure-bound immutable extremes and typed retained coverage. Unknown
+coverage, relevant ignored omissions and binary content without representation
+are explicit incapacity, never a complete empty patch. A safe disjoint rule requires
+proof of complete coverage; incomplete total evidence blocks built-ins/proposal.
+No owned scanner or current-tree/session/global-diff fallback is planned.
+
+The opt-in JevGuard native acquisition must classify sensitive paths before new
+content reads, including seed/refresh, and never read or export blocked bytes.
+Simplification does not broaden permission to read secrets. The prototype violated
+no-read and its diagnostics were not persisted with closure; neither is certified.
+Unrelated legacy host snapshot behavior is not controlled/certified by this product.
+Meeting the native no-read gate may require substantial host design, not just a
+read-only diff endpoint. Policy freezes initially; history, retention/GC, recovery,
+overlap/settlement and bounded persistence remain gates. V1 below is unchanged.
+
+## Removed standalone V2 capture (historical record only)
+
+The standalone `createFileCapturer` implementation and its 39 tests were removed
+with explicit owner authorization on 2026-10-03. The following records its historical
+security profile, not an available adapter API or native certification.
+
+The former adapter's `createFileCapturer` produced local observations only, not patches,
+durable episode evidence or READY states. Its explicit `COOPERATIVE` profile assumes
+no hostile namespace replacement. Receipts declare `NON_ATOMIC`: parent checks and
+two inventory passes detect observable changes, not transient adversarial swaps.
+Static links and hardlinks are not read. Sensitive and unallowlisted files retain
+metadata only, with `METADATA_ONLY` uncertainty; matching metadata never proves
+unchanged content. File/subtree issues remain in the receipt for future downstream
+scope handling. Nothing is sent to Jev or a proposer by this API.
+
+Callers must supply capture budgets, coverage and a monotonic deadline. No numeric
+production defaults are ratified. Deadline/cancellation invalidates the invocation;
+pending OS I/O can continue, with late opened handles closed when it settles.
+
+Sensitive-directory blocking is inherited by descendants. Filesystem case semantics
+are explicit; unknown case behavior conservatively folds policy/exclusion checks.
+Original path spelling is retained. Scoped `problems` preserve initial and verification
+errors, additions, removals and changes even when initial bytes remain available.
+Consumers must not discard these problems to manufacture evaluable evidence.
+Directory names are consumed through a bounded async iterator and sorted only after
+collection within the entry limit. `retainedBytes` limits the exact UTF-8 JSON encoding
+of the receipt (including metadata, base64, coverage and diagnostics), not transient
+working memory; file/read/entry/depth budgets independently bound capture work.
+
 JevGuard sends code-change evidence to Jev, and — only in the configurable remediation
 path, and only when a review has a `FAIL` with complete safe evidence — to the hidden
 proposer subagent. Evidence safety is therefore a product boundary, not a best-effort

@@ -1,5 +1,16 @@
 # Configuration Reference
 
+## Future V2 direction (not shipped)
+
+The approved episode plan uses strict host-owned native historical changesets,
+initially Git text only, not an owned scanner or fallback. Initial rules/config
+(including absence) freeze with baseline and are shared by review/proposal; edits
+apply next episode. Unsupported or incomplete coverage is `UNAVAILABLE`; ignored
+relevant omissions are not silently excluded, and incomplete total evidence blocks
+built-ins/proposal. Only provably complete safe disjoint rules may run. Public native
+capability, safety, retention and budgets are still gates. No new YAML knobs or V2
+support are introduced. The remainder documents the shipped V1 behavior.
+
 JevGuard reads repository policy from `.jev/`:
 
 ```text
