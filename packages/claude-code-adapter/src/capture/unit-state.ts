@@ -16,8 +16,15 @@ import {
 import { join } from "node:path";
 import { sha256Hex } from "./file-image";
 import { isMissingPathError } from "./node-ports";
-import { decodeGitSnapshot, decodePreRecord, decodeStateLine } from "./state-codec";
-import type { GitSnapshot, PreRecord, RemovePath, StateLine, UnitState } from "./types";
+import { decodePreRecord, decodeShellPreRecord, decodeStateLine } from "./state-codec";
+import type {
+  GitSnapshot,
+  PreRecord,
+  RemovePath,
+  ShellPreSnapshot,
+  StateLine,
+  UnitState,
+} from "./types";
 
 export const ORPHAN_TTL_MS = 24 * 60 * 60 * 1000;
 
@@ -331,30 +338,40 @@ export function readBlob(unit: UnitState, digest: string): Uint8Array | null {
   }
 }
 
+function shellRecordPath(unit: UnitState, toolUseId: string): string {
+  return join(unit.shellDirectory, `${keyOf(toolUseId)}.json`);
+}
+
+function writeShellRecord(unit: UnitState, toolUseId: string, record: object): void {
+  mkdirSync(unit.shellDirectory, { recursive: true, mode: DIR_MODE });
+  writeAtomic(shellRecordPath(unit, toolUseId), JSON.stringify({ v: 1, ...record }));
+}
+
 export function writeShellSnapshot(
   unit: UnitState,
   toolUseId: string,
   snapshot: GitSnapshot,
 ): void {
-  mkdirSync(unit.shellDirectory, { recursive: true, mode: DIR_MODE });
-  writeAtomic(
-    join(unit.shellDirectory, `${keyOf(toolUseId)}.json`),
-    JSON.stringify({ v: 1, ...snapshot }),
-  );
+  writeShellRecord(unit, toolUseId, snapshot);
 }
 
-/** Reads and deletes the pre-call snapshot; `null` when absent or unreadable. */
-export function takeShellSnapshot(unit: UnitState, toolUseId: string): GitSnapshot | null {
-  const path = join(unit.shellDirectory, `${keyOf(toolUseId)}.json`);
+/** Records that the pre-call snapshot exceeded a limit, so the Post hook skips its own. */
+export function writeShellSnapshotLimit(unit: UnitState, toolUseId: string): void {
+  writeShellRecord(unit, toolUseId, { failed: "LIMIT_EXCEEDED" });
+}
+
+/** Reads and deletes the pre-call record; `MISSING` when absent or unreadable. */
+export function takeShellSnapshot(unit: UnitState, toolUseId: string): ShellPreSnapshot {
+  const path = shellRecordPath(unit, toolUseId);
 
   try {
-    const snapshot = decodeGitSnapshot(JSON.parse(readFileSync(path, "utf8")));
+    const record = decodeShellPreRecord(JSON.parse(readFileSync(path, "utf8")));
 
     rmSync(path, { force: true });
 
-    return snapshot;
+    return record ?? { status: "MISSING" };
   } catch {
-    return null;
+    return { status: "MISSING" };
   }
 }
 

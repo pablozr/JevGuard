@@ -5,12 +5,16 @@ export type {
   CaptureFileReader,
   ClaudeReviewHandoff,
   FileStat,
+  GitRunFailure,
+  GitRunOptions,
   GitRunner,
   GitRunResult,
   HandoffDelivery,
   HandoffSink,
   HookEnvironment,
   ShellCoverage,
+  ShellDiffLimit,
+  ShellDiffLimits,
 } from "../capture/types";
 export { createProcessDependencies } from "./process-dependencies";
 export { MAX_STDIN_BYTES, readLimitedStdin } from "./read-stdin";

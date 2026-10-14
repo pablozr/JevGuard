@@ -476,6 +476,12 @@ reviews a smaller set of work that it can prove:
   read-only Git status diff. A Git-ignored file written by a shell command is outside
   the evidence, by design. Set `JEVGUARD_CLAUDE_SHELL_GIT_DIFF=0` to turn this
   capture off; shell calls then make the unit `UNAVAILABLE`.
+  The diff has fixed limits per hook call: 2000 dirty entries, 16 MiB of hashed or read
+  content, 40 index reads (two per clean file a command changes), 16 MiB of Git output,
+  2 s per Git call and 3 s in total. These values are not configurable. When any limit is exceeded the
+  unit is `UNAVAILABLE` (`SHELL_DIFF_LIMIT_EXCEEDED`) and is never reviewed with
+  partial evidence, so a very large or heavily dirty repository can make units with
+  shell calls unreviewable.
 - **Refused evidence.** A blocked path (see the [security model](./security.md)), a
   link, a file that is not UTF-8 text without NUL, or a file over 1 MiB makes the unit
   `UNAVAILABLE`, and its content is never read or stored.

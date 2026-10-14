@@ -8,17 +8,24 @@ import {
   readFileImage,
   sha256Hex,
 } from "./file-image";
+import { ShellDiffLimitError } from "./shell-diff-limits";
 import type {
   CaptureFileReader,
   GitDiffResult,
+  GitRunOptions,
+  GitRunResult,
   GitShellContext,
   GitSnapshot,
   ImageReading,
   SnapshotEntry,
+  SnapshotResult,
 } from "./types";
 
-const MAX_STATUS_ENTRIES = 5000;
-const MAX_CAT_FILE_CALLS = 400;
+interface BoundedRun extends GitRunOptions {
+  /** Return an output overflow to the caller instead of treating it as a limit. */
+  readonly tolerateOverflow?: boolean;
+}
+
 const SYMLINK_MODE = "120000";
 
 const STATUS_ARGS = [
@@ -32,6 +39,43 @@ const DECODER = new TextDecoder();
 
 function text(bytes: Uint8Array): string {
   return DECODER.decode(bytes);
+}
+
+function runBounded(
+  context: GitShellContext,
+  args: readonly string[],
+  cwd: string,
+  options: BoundedRun = {},
+): GitRunResult {
+  const { budget, limits } = context;
+
+  if (budget.expired()) throw new ShellDiffLimitError("TOTAL_TIME");
+
+  const remainingMs = budget.remainingMs();
+  const callOwnsTimeout = limits.gitCallTimeoutMs <= remainingMs;
+  const timeoutMs = Math.max(1, Math.ceil(Math.min(limits.gitCallTimeoutMs, remainingMs)));
+  const maxOutputBytes = options.maxOutputBytes ?? limits.maxGitOutputBytes;
+  const result = context.git(args, cwd, {
+    ...(options.input === undefined ? {} : { input: options.input }),
+    timeoutMs,
+    maxOutputBytes,
+  });
+
+  if (result.ok) return result;
+
+  if (result.failure === "TIMEOUT") {
+    throw new ShellDiffLimitError(callOwnsTimeout ? "GIT_CALL_TIME" : "TOTAL_TIME");
+  }
+
+  if (result.failure === "OUTPUT_TOO_LARGE" && options.tolerateOverflow !== true) {
+    throw new ShellDiffLimitError("GIT_OUTPUT");
+  }
+
+  return result;
+}
+
+function chargeContent(context: GitShellContext, bytes: number): void {
+  if (!context.meter.chargeContent(bytes)) throw new ShellDiffLimitError("CONTENT_BYTES");
 }
 
 /** Dirty paths from `status --porcelain=v1 -z`; renames contribute both paths. */
@@ -94,7 +138,7 @@ function snapshotEntries(
   const toHash: { index: number; absolute: string }[] = [];
 
   for (const gitPath of paths) {
-    if (context.budget.expired()) return null;
+    if (context.budget.expired()) throw new ShellDiffLimitError("TOTAL_TIME");
 
     const absolute = resolve(toplevel, gitPath);
     const repoPath = context.resolveRepoPath(absolute, toplevel);
@@ -118,6 +162,7 @@ function snapshotEntries(
     } else if (!stat.isFile || stat.size > MAX_CAPTURED_FILE_BYTES) {
       entries.push({ ...base, state: "PRESENT", fingerprint: `${stat.size}:${stat.mtimeMs}` });
     } else {
+      chargeContent(context, stat.size);
       toHash.push({ index: entries.length, absolute });
       entries.push({ ...base, state: "PRESENT", fingerprint: null });
     }
@@ -125,16 +170,17 @@ function snapshotEntries(
 
   if (toHash.length === 0) return entries;
 
-  const hashed = context.git(
-    ["hash-object", "--stdin-paths"],
-    toplevel,
-    `${toHash.map((item) => item.absolute).join("\n")}\n`,
-  );
+  const hashed = runBounded(context, ["hash-object", "--stdin-paths"], toplevel, {
+    input: `${toHash.map((item) => item.absolute).join("\n")}\n`,
+  });
+
+  if (!hashed.ok) return null;
+
   const blobs = text(hashed.stdout)
     .split("\n")
     .filter((line) => line !== "");
 
-  if (!hashed.ok || blobs.length !== toHash.length) return null;
+  if (blobs.length !== toHash.length) return null;
 
   toHash.forEach((item, position) => {
     const entry = entries[item.index];
@@ -148,52 +194,70 @@ function snapshotEntries(
   return entries;
 }
 
+function captureSnapshot(context: GitShellContext, cwd: string): GitSnapshot | null {
+  const top = runBounded(context, ["rev-parse", "--show-toplevel"], context.projectRoot);
+  const cwdTop = runBounded(context, ["rev-parse", "--show-toplevel"], cwd);
+
+  if (!top.ok || !cwdTop.ok) return null;
+
+  const toplevel = resolve(text(top.stdout).trim());
+
+  if (resolve(text(cwdTop.stdout).trim()) !== toplevel) return null;
+
+  const headResult = runBounded(context, ["rev-parse", "-q", "--verify", "HEAD"], toplevel);
+
+  if (!headResult.ok && headResult.failure !== "EXIT") return null;
+
+  const index = runBounded(context, ["ls-files", "--stage", "-z"], toplevel);
+  const status = runBounded(context, STATUS_ARGS, toplevel);
+
+  if (!index.ok || !status.ok) return null;
+
+  const dirtyPaths = parsePorcelainPaths(text(status.stdout));
+
+  if (dirtyPaths.length > context.limits.maxStatusEntries) {
+    throw new ShellDiffLimitError("STATUS_ENTRIES");
+  }
+
+  const entries = snapshotEntries(
+    dirtyPaths,
+    toplevel,
+    indexedSymlinks(text(index.stdout)),
+    context,
+  );
+
+  if (entries === null) return null;
+
+  return {
+    toplevel,
+    head: headResult.ok ? text(headResult.stdout).trim() : null,
+    indexDigest: sha256Hex(index.stdout),
+    entries,
+  };
+}
+
 /**
  * Read-only picture of HEAD, the index and every dirty path of the repository around
  * `cwd`. A path is classified by the evidence policy before anything is read; blocked
- * paths are compared by size and mtime only. Never writes a Git object. `null` means
- * the picture could not be taken, which the caller must treat as no proof.
+ * paths are compared by size and mtime only. Never writes a Git object. A `FAILED`
+ * result is no proof: it names the exceeded limit, or is `UNPROVEN` when the picture
+ * could not be taken for any other reason.
  */
-export function takeGitSnapshot(context: GitShellContext, cwd: string): GitSnapshot | null {
+export function takeGitSnapshot(context: GitShellContext, cwd: string): SnapshotResult {
   try {
-    if (context.budget.expired()) return null;
+    const snapshot = captureSnapshot(context, cwd);
 
-    const top = context.git(["rev-parse", "--show-toplevel"], context.projectRoot);
-    const cwdTop = context.git(["rev-parse", "--show-toplevel"], cwd);
-
-    if (!top.ok || !cwdTop.ok) return null;
-
-    const toplevel = resolve(text(top.stdout).trim());
-
-    if (resolve(text(cwdTop.stdout).trim()) !== toplevel) return null;
-
-    const headResult = context.git(["rev-parse", "-q", "--verify", "HEAD"], toplevel);
-    const index = context.git(["ls-files", "--stage", "-z"], toplevel);
-    const status = context.git(STATUS_ARGS, toplevel);
-
-    if (!index.ok || !status.ok) return null;
-
-    const dirtyPaths = parsePorcelainPaths(text(status.stdout));
-
-    if (dirtyPaths.length > MAX_STATUS_ENTRIES) return null;
-
-    const entries = snapshotEntries(
-      dirtyPaths,
-      toplevel,
-      indexedSymlinks(text(index.stdout)),
-      context,
-    );
-
-    if (entries === null) return null;
-
+    return snapshot === null
+      ? { status: "FAILED", failure: { kind: "UNPROVEN" } }
+      : { status: "TAKEN", snapshot };
+  } catch (error) {
     return {
-      toplevel,
-      head: headResult.ok ? text(headResult.stdout).trim() : null,
-      indexDigest: sha256Hex(index.stdout),
-      entries,
+      status: "FAILED",
+      failure:
+        error instanceof ShellDiffLimitError
+          ? { kind: "LIMIT_EXCEEDED", limit: error.limit }
+          : { kind: "UNPROVEN" },
     };
-  } catch {
-    return null;
   }
 }
 
@@ -201,21 +265,32 @@ function readIndexImage(
   context: GitShellContext,
   toplevel: string,
   gitPath: string,
-  spend: () => boolean,
 ): ImageReading | null {
-  if (!spend()) return null;
+  if (!context.meter.chargeIndexRead()) throw new ShellDiffLimitError("INDEX_READS");
 
   const spec = `:${gitPath}`;
+  const exists = runBounded(context, ["cat-file", "-e", spec], toplevel);
 
-  if (!context.git(["cat-file", "-e", spec], toplevel).ok) {
-    return { kind: "IMAGE", image: { state: "ABSENT" } };
+  if (!exists.ok) {
+    return exists.failure === "EXIT" ? { kind: "IMAGE", image: { state: "ABSENT" } } : null;
   }
 
-  if (!spend()) return null;
+  if (!context.meter.chargeIndexRead()) throw new ShellDiffLimitError("INDEX_READS");
 
-  const filtered = context.git(["cat-file", "--filters", spec], toplevel);
+  const filtered = runBounded(context, ["cat-file", "--filters", spec], toplevel, {
+    maxOutputBytes: MAX_CAPTURED_FILE_BYTES + 1,
+    tolerateOverflow: true,
+  });
+
+  if (!filtered.ok && filtered.failure === "OUTPUT_TOO_LARGE") {
+    chargeContent(context, MAX_CAPTURED_FILE_BYTES + 1);
+
+    return { kind: "PROBLEM", problem: "CONTENT_TOO_LARGE" };
+  }
 
   if (!filtered.ok) return { kind: "PROBLEM", problem: "CAPTURE_FAILED" };
+
+  chargeContent(context, filtered.stdout.length);
 
   return imageFromBytes(filtered.stdout);
 }
@@ -242,45 +317,62 @@ function changedEntries(pre: GitSnapshot, post: GitSnapshot) {
   return changed;
 }
 
-const FAILED: GitDiffResult = { diff: { status: "FAILED" }, problems: [] };
+const UNPROVEN: GitDiffResult = { status: "FAILED", failure: { kind: "UNPROVEN" } };
+
+function statOrNull(files: CaptureFileReader, absolute: string) {
+  try {
+    return files.stat(absolute);
+  } catch {
+    return null;
+  }
+}
+
+function chargePostRead(context: GitShellContext, absolute: string): void {
+  const stat = statOrNull(context.files, absolute);
+
+  if (stat?.isFile && stat.size <= MAX_CAPTURED_FILE_BYTES) {
+    chargeContent(context, stat.size);
+  }
+}
 
 /**
  * Net Git-visible change between two snapshots. HEAD, index or top-level drift, and a
  * change outside the project root, make the diff `FAILED`. Each changed readable path
  * is read once for its post digest; a `CLEAN` one also gets its index image through
- * `cat-file --filters`, so it matches the worktree's line endings.
+ * `cat-file --filters`, so it matches the worktree's line endings. Reads are charged
+ * to the context's meter before they happen; an exceeded limit makes the diff `FAILED`
+ * with that limit, never partial.
  */
 export function diffGitSnapshots(
   context: GitShellContext,
   pre: GitSnapshot,
   post: GitSnapshot,
 ): GitDiffResult {
-  if (pre.toplevel !== post.toplevel || pre.head !== post.head) return FAILED;
-  if (pre.indexDigest !== post.indexDigest) return FAILED;
+  const drifted =
+    pre.toplevel !== post.toplevel ||
+    pre.head !== post.head ||
+    pre.indexDigest !== post.indexDigest;
+
+  if (drifted) return UNPROVEN;
 
   const changes: GitShellChange[] = [];
   const problems = new Set<CaptureProblem>();
-  let catFileCalls = 0;
-  const spend = (): boolean => {
-    catFileCalls += 1;
-
-    return catFileCalls <= MAX_CAT_FILE_CALLS;
-  };
 
   try {
     for (const { entry, wasDirty } of changedEntries(pre, post)) {
-      if (context.budget.expired() || entry.repoPath === null) return FAILED;
+      if (context.budget.expired()) throw new ShellDiffLimitError("TOTAL_TIME");
+      if (entry.repoPath === null) return UNPROVEN;
 
       if (entry.kind === "BLOCKED") {
         changes.push({ path: entry.repoPath, preState: "UNREAD" });
         continue;
       }
 
-      const after = readFileImage(
-        context.files,
-        context.projectRoot,
-        resolve(post.toplevel, entry.gitPath),
-      );
+      const absolute = resolve(post.toplevel, entry.gitPath);
+
+      chargePostRead(context, absolute);
+
+      const after = readFileImage(context.files, context.projectRoot, absolute);
 
       if (after.kind === "PROBLEM") {
         problems.add(after.problem);
@@ -297,9 +389,9 @@ export function diffGitSnapshots(
         continue;
       }
 
-      const indexImage = readIndexImage(context, post.toplevel, entry.gitPath, spend);
+      const indexImage = readIndexImage(context, post.toplevel, entry.gitPath);
 
-      if (indexImage === null) return FAILED;
+      if (indexImage === null) return UNPROVEN;
       if (indexImage.kind === "PROBLEM") {
         problems.add(indexImage.problem);
         continue;
@@ -312,9 +404,11 @@ export function diffGitSnapshots(
         post: postImage,
       });
     }
-  } catch {
-    return FAILED;
+  } catch (error) {
+    return error instanceof ShellDiffLimitError
+      ? { status: "FAILED", failure: { kind: "LIMIT_EXCEEDED", limit: error.limit } }
+      : UNPROVEN;
   }
 
-  return { diff: { status: "AVAILABLE", changes }, problems: [...problems] };
+  return { status: "AVAILABLE", changes, problems: [...problems] };
 }

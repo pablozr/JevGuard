@@ -13,7 +13,13 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createNodeFileReader, removeTree, runGit } from "../src/capture/node-ports";
-import type { RemovePath } from "../src/capture/types";
+import type {
+  GitRunner,
+  GitSnapshot,
+  RemovePath,
+  ShellDiffLimits,
+  SnapshotResult,
+} from "../src/capture/types";
 import { keyOf, sessionDirectoryOf } from "../src/capture/unit-state";
 import type { ClaudeReviewHandoff, HookDependencies, WorkerSpawnResult } from "../src/hook";
 import { createFileHandoffSink, runHook } from "../src/hook";
@@ -55,6 +61,8 @@ export class HookWorld {
     return "STARTED";
   };
   removePath: RemovePath = removeTree;
+  gitRunner: GitRunner = runGit;
+  shellDiffLimits: ShellDiffLimits | undefined;
   monotonicNow: () => number = () => performance.now();
   clock = new Date("2026-10-05T12:00:00.000Z");
   private toolCounter = 0;
@@ -82,7 +90,8 @@ export class HookWorld {
           return files.readBytes(path, maxBytes);
         },
       },
-      git: runGit,
+      git: (args, cwd, options) => this.gitRunner(args, cwd, options),
+      ...(this.shellDiffLimits === undefined ? {} : { shellDiffLimits: this.shellDiffLimits }),
       now: () => this.clock,
       monotonicNow: () => this.monotonicNow(),
       removePath: (path) => this.removePath(path),
@@ -222,6 +231,12 @@ export class HookWorld {
   cleanup(): void {
     rmSync(this.base, { recursive: true, force: true });
   }
+}
+
+export function takenSnapshot(result: SnapshotResult): GitSnapshot {
+  if (result.status !== "TAKEN") throw new Error("snapshot failed");
+
+  return result.snapshot;
 }
 
 export function causesOf(handoff: ClaudeReviewHandoff): readonly string[] {

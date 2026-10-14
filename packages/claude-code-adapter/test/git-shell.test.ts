@@ -6,8 +6,11 @@ import { UNLIMITED_BUDGET } from "../src/capture/budget";
 import { createRepoPathResolver, sha256Hex } from "../src/capture/file-image";
 import { diffGitSnapshots, takeGitSnapshot } from "../src/capture/git-shell";
 import { createNodeFileReader, runGit } from "../src/capture/node-ports";
+import { createShellDiffMeter, DEFAULT_SHELL_DIFF_LIMITS } from "../src/capture/shell-diff-limits";
 import type { GitShellContext } from "../src/capture/types";
-import { causesOf, git, HookWorld, initRepository, ORIGINAL } from "./hook-world";
+import { causesOf, git, HookWorld, initRepository, ORIGINAL, takenSnapshot } from "./hook-world";
+
+const SECRET_CONTENT = "SHELL_LIMIT_SECRET_4471";
 
 // Real Git processes are slow under a loaded parallel run; keep these from timing out spuriously.
 vi.setConfig({ testTimeout: 20_000 });
@@ -39,6 +42,8 @@ describe("Git shell diff", () => {
         },
       },
       resolveRepoPath: createRepoPathResolver(root),
+      limits: DEFAULT_SHELL_DIFF_LIMITS,
+      meter: createShellDiffMeter(DEFAULT_SHELL_DIFF_LIMITS),
     };
   });
 
@@ -47,24 +52,22 @@ describe("Git shell diff", () => {
   });
 
   function window(act: () => void, projectContext = context) {
-    const pre = takeGitSnapshot(projectContext, root);
+    const pre = takenSnapshot(takeGitSnapshot(projectContext, root));
 
     act();
 
-    const post = takeGitSnapshot(projectContext, root);
-
-    if (pre === null || post === null) throw new Error("snapshot failed");
+    const post = takenSnapshot(takeGitSnapshot(projectContext, root));
 
     return diffGitSnapshots(projectContext, pre, post);
   }
 
   test("a modified clean file is CLEAN with the index image byte for byte, CRLF included", () => {
     const changed = "one\r\nTWO\r\n";
-    const { diff, problems } = window(() => writeFileSync(join(root, "a.ts"), changed));
+    const result = window(() => writeFileSync(join(root, "a.ts"), changed));
 
-    expect(problems).toEqual([]);
-    expect(diff).toEqual({
+    expect(result).toEqual({
       status: "AVAILABLE",
+      problems: [],
       changes: [
         {
           path: "a.ts",
@@ -77,10 +80,11 @@ describe("Git shell diff", () => {
   });
 
   test("a new untracked file is CLEAN with an absent index image", () => {
-    const { diff } = window(() => writeFileSync(join(root, "new.ts"), "fresh\n"));
+    const result = window(() => writeFileSync(join(root, "new.ts"), "fresh\n"));
 
-    expect(diff).toEqual({
+    expect(result).toEqual({
       status: "AVAILABLE",
+      problems: [],
       changes: [
         {
           path: "new.ts",
@@ -93,9 +97,9 @@ describe("Git shell diff", () => {
   });
 
   test("a deleted tracked file has an absent post", () => {
-    const { diff } = window(() => rmSync(join(root, "a.ts")));
+    const result = window(() => rmSync(join(root, "a.ts")));
 
-    expect(diff).toMatchObject({
+    expect(result).toMatchObject({
       status: "AVAILABLE",
       changes: [{ path: "a.ts", preState: "CLEAN", post: { state: "ABSENT" } }],
     });
@@ -104,10 +108,11 @@ describe("Git shell diff", () => {
   test("a file dirty before the call is DIRTY", () => {
     writeFileSync(join(root, "a.ts"), "dirty\r\n");
 
-    const { diff } = window(() => writeFileSync(join(root, "a.ts"), "dirtier\r\n"));
+    const result = window(() => writeFileSync(join(root, "a.ts"), "dirtier\r\n"));
 
-    expect(diff).toEqual({
+    expect(result).toEqual({
       status: "AVAILABLE",
+      problems: [],
       changes: [
         {
           path: "a.ts",
@@ -119,35 +124,39 @@ describe("Git shell diff", () => {
   });
 
   test("a file rewritten with identical content is not a change", () => {
-    const { diff } = window(() => writeFileSync(join(root, "a.ts"), ORIGINAL));
+    const result = window(() => writeFileSync(join(root, "a.ts"), ORIGINAL));
 
-    expect(diff).toEqual({ status: "AVAILABLE", changes: [] });
+    expect(result).toEqual({ status: "AVAILABLE", changes: [], problems: [] });
   });
 
   test("a commit during the call is FAILED", () => {
-    const { diff } = window(() => {
+    const result = window(() => {
       writeFileSync(join(root, "a.ts"), "committed\r\n");
       git(root, "commit", "-q", "-am", "inside the window");
     });
 
-    expect(diff).toEqual({ status: "FAILED" });
+    expect(result).toEqual({ status: "FAILED", failure: { kind: "UNPROVEN" } });
   });
 
   test("an index change during the call is FAILED", () => {
-    const { diff } = window(() => {
+    const result = window(() => {
       writeFileSync(join(root, "a.ts"), "staged\r\n");
       git(root, "add", "a.ts");
     });
 
-    expect(diff).toEqual({ status: "FAILED" });
+    expect(result).toEqual({ status: "FAILED", failure: { kind: "UNPROVEN" } });
   });
 
   test("a blocked changed path is UNREAD and its content is never read", () => {
     reads.length = 0;
 
-    const { diff } = window(() => writeFileSync(join(root, ".env"), "TOKEN=1\n"));
+    const result = window(() => writeFileSync(join(root, ".env"), "TOKEN=1\n"));
 
-    expect(diff).toEqual({ status: "AVAILABLE", changes: [{ path: ".env", preState: "UNREAD" }] });
+    expect(result).toEqual({
+      status: "AVAILABLE",
+      changes: [{ path: ".env", preState: "UNREAD" }],
+      problems: [],
+    });
     expect(reads.filter((path) => path.endsWith(".env"))).toEqual([]);
   });
 
@@ -159,15 +168,16 @@ describe("Git shell diff", () => {
 
     const sub = join(root, "sub");
     const scoped: GitShellContext = { ...context, resolveRepoPath: createRepoPathResolver(sub) };
-    const pre = takeGitSnapshot(scoped, sub);
+    const pre = takenSnapshot(takeGitSnapshot(scoped, sub));
 
     writeFileSync(join(root, "a.ts"), "outside\r\n");
 
-    const post = takeGitSnapshot(scoped, sub);
+    const post = takenSnapshot(takeGitSnapshot(scoped, sub));
 
-    if (pre === null || post === null) throw new Error("snapshot failed");
-
-    expect(diffGitSnapshots(scoped, pre, post).diff).toEqual({ status: "FAILED" });
+    expect(diffGitSnapshots(scoped, pre, post)).toEqual({
+      status: "FAILED",
+      failure: { kind: "UNPROVEN" },
+    });
   });
 
   test("outside a repository there is no snapshot", () => {
@@ -175,7 +185,10 @@ describe("Git shell diff", () => {
 
     mkdirSync(loose);
 
-    expect(takeGitSnapshot(context, loose)).toBeNull();
+    expect(takeGitSnapshot(context, loose)).toEqual({
+      status: "FAILED",
+      failure: { kind: "UNPROVEN" },
+    });
   });
 });
 
@@ -307,6 +320,69 @@ describe.each(["Bash", "PowerShell"])("%s through the hook", (tool) => {
     world.stop();
 
     expect(causesOf(world.onlyHandoff())).toContain("SHELL_GIT_DIFF_UNAVAILABLE");
+  });
+});
+
+describe("shell diff limits through the hook", () => {
+  let world: HookWorld;
+  let gitCalls: string[];
+
+  beforeEach(() => {
+    world = new HookWorld();
+    gitCalls = [];
+    initRepository(world.projectRoot);
+    world.shellDiffLimits = { ...DEFAULT_SHELL_DIFF_LIMITS, maxStatusEntries: 2 };
+    world.gitRunner = (args, cwd, options) => {
+      gitCalls.push(args.find((arg) => !arg.startsWith("--")) ?? "");
+
+      return runGit(args, cwd, options);
+    };
+  });
+
+  afterEach(() => {
+    world.cleanup();
+  });
+
+  function bash(beforeCall: () => void): void {
+    const id = world.nextToolId();
+    const input = { command: "write" };
+
+    world.prompt("rewrite with the shell");
+    beforeCall();
+    world.preTool("Bash", id, input);
+    gitCalls.length = 0;
+    world.write("a.ts", "one\r\nTWO\r\n");
+    world.postTool("Bash", id, input);
+    world.stop();
+  }
+
+  function dirty(count: number): void {
+    for (let index = 0; index < count; index += 1) {
+      world.write(`dirty${index}.ts`, `${SECRET_CONTENT}${index}\n`);
+    }
+  }
+
+  test("a Pre over the limit makes the unit unavailable and the Post takes no snapshot", () => {
+    bash(() => dirty(3));
+
+    const handoff = world.onlyHandoff();
+    const limitLogs = world
+      .hookLog()
+      .filter((entry) => entry.code === "SHELL_DIFF_LIMIT:STATUS_ENTRIES");
+
+    expect(handoff.resolution.status).toBe("UNAVAILABLE");
+    expect(causesOf(handoff)).toEqual(["SHELL_DIFF_LIMIT_EXCEEDED"]);
+    expect(limitLogs).toHaveLength(1);
+    expect(gitCalls).not.toContain("status");
+    expect(gitCalls).not.toContain("hash-object");
+    expect(JSON.stringify(handoff)).not.toContain(SECRET_CONTENT);
+    expect(JSON.stringify(world.hookLog())).not.toContain(SECRET_CONTENT);
+  });
+
+  test("within the limit the call is still reviewed", () => {
+    bash(() => dirty(1));
+
+    expect(causesOf(world.onlyHandoff())).not.toContain("SHELL_DIFF_LIMIT_EXCEEDED");
   });
 });
 

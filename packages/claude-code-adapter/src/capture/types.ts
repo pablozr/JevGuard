@@ -1,7 +1,8 @@
 import type {
   CaptureProblem,
   FileImage,
-  GitShellDiff,
+  GitShellChange,
+  GitShellDiffFailure,
   PostImage,
   ResolveRepoPath,
 } from "../acquisition";
@@ -29,13 +30,72 @@ export interface CaptureFileReader {
   readBytes(path: string, maxBytes: number): Uint8Array;
 }
 
-export interface GitRunResult {
-  readonly ok: boolean;
-  readonly stdout: Uint8Array;
+/** Limit a shell Git diff can exceed; the unit becomes unavailable, never partial. */
+export type ShellDiffLimit =
+  | "STATUS_ENTRIES"
+  | "CONTENT_BYTES"
+  | "INDEX_READS"
+  | "GIT_OUTPUT"
+  | "GIT_CALL_TIME"
+  | "TOTAL_TIME";
+
+/**
+ * Deterministic bounds of the Git diff around one shell call, applied per hook process.
+ */
+export interface ShellDiffLimits {
+  readonly maxStatusEntries: number;
+  /** Sum of the bytes hashed and read by the diff in one hook process. */
+  readonly maxContentBytes: number;
+  readonly maxIndexReads: number;
+  readonly maxGitOutputBytes: number;
+  readonly gitCallTimeoutMs: number;
+  /** Total time allowed to the shell diff of one hook process. */
+  readonly timeMs: number;
 }
 
+export type ShellDiffFailure =
+  | { readonly kind: Extract<GitShellDiffFailure, "UNPROVEN"> }
+  | {
+      readonly kind: Extract<GitShellDiffFailure, "LIMIT_EXCEEDED">;
+      readonly limit: ShellDiffLimit;
+    };
+
+export type SnapshotResult =
+  | { readonly status: "TAKEN"; readonly snapshot: GitSnapshot }
+  | { readonly status: "FAILED"; readonly failure: ShellDiffFailure };
+
+/** Pre-call snapshot as read back by the Post hook. */
+export type ShellPreSnapshot =
+  | { readonly status: "TAKEN"; readonly snapshot: GitSnapshot }
+  | { readonly status: "LIMIT_EXCEEDED" }
+  | { readonly status: "MISSING" };
+
+/** Charges content and index reads against the limits; counting continues past a failure. */
+export interface ShellDiffMeter {
+  /** `false` when the charge takes the total past the limit. */
+  chargeContent(bytes: number): boolean;
+  /** `false` when the charge takes the reads past the limit. */
+  chargeIndexRead(): boolean;
+}
+
+export interface GitRunOptions {
+  readonly input?: string;
+  readonly timeoutMs?: number;
+  readonly maxOutputBytes?: number;
+}
+
+export type GitRunFailure = "EXIT" | "TIMEOUT" | "OUTPUT_TOO_LARGE" | "SPAWN";
+
+export type GitRunResult =
+  | { readonly ok: true; readonly stdout: Uint8Array }
+  | { readonly ok: false; readonly failure: GitRunFailure };
+
 /** Runs `git` with an argument array and no shell; never throws. */
-export type GitRunner = (args: readonly string[], cwd: string, input?: string) => GitRunResult;
+export type GitRunner = (
+  args: readonly string[],
+  cwd: string,
+  options?: GitRunOptions,
+) => GitRunResult;
 
 export interface HookEnvironment {
   get(name: string): string | undefined;
@@ -54,6 +114,7 @@ export type CaptureReport =
   | "HOOK_BUDGET_EXCEEDED"
   | "STATE_WRITE_FAILED"
   | "GIT_FAILED"
+  | `SHELL_DIFF_LIMIT:${ShellDiffLimit}`
   | "SHELL_CROSS_CHECK_AGREE"
   | "SHELL_CROSS_CHECK_DISAGREE"
   | "SHELL_CROSS_CHECK_UNAVAILABLE";
@@ -76,7 +137,7 @@ export type StoredShellChange =
 
 export type StoredGitDiff =
   | { readonly status: "AVAILABLE"; readonly changes: readonly StoredShellChange[] }
-  | { readonly status: "FAILED" };
+  | { readonly status: "FAILED"; readonly cause: GitShellDiffFailure };
 
 /** Everything one hook process captured for its event, persisted in the same line. */
 export interface LineCapture {
@@ -172,6 +233,8 @@ export interface CaptureContext extends CaptureDependencies {
   readonly projectRoot: string;
   readonly resolveRepoPath: ResolveRepoPath;
   readonly budget: Budget;
+  readonly monotonicNow: () => number;
+  readonly shellDiffLimits: ShellDiffLimits;
   readonly report: (code: CaptureReport) => void;
 }
 
@@ -182,12 +245,17 @@ export interface GitShellContext {
   readonly projectRoot: string;
   readonly resolveRepoPath: ResolveRepoPath;
   readonly budget: Budget;
+  readonly limits: ShellDiffLimits;
+  readonly meter: ShellDiffMeter;
 }
 
-export interface GitDiffResult {
-  readonly diff: GitShellDiff;
-  readonly problems: readonly CaptureProblem[];
-}
+export type GitDiffResult =
+  | {
+      readonly status: "AVAILABLE";
+      readonly changes: readonly GitShellChange[];
+      readonly problems: readonly CaptureProblem[];
+    }
+  | { readonly status: "FAILED"; readonly failure: ShellDiffFailure };
 
 export interface CloseUnitInput extends CaptureDependencies {
   readonly unit: UnitState;

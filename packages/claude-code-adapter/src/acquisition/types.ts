@@ -33,9 +33,12 @@ export type CaptureProblem =
   | "CONTENT_NOT_TEXT"
   | "BLOCKED_PATH";
 
+/** Why a shell Git diff is unavailable: no proof, or one of its fixed limits exceeded. */
+export type GitShellDiffFailure = "UNPROVEN" | "LIMIT_EXCEEDED";
+
 export type GitShellDiff =
   | { readonly status: "AVAILABLE"; readonly changes: readonly GitShellChange[] }
-  | { readonly status: "FAILED" };
+  | { readonly status: "FAILED"; readonly cause: GitShellDiffFailure };
 
 /**
  * Data captured around the unit's tool calls, keyed by repo-relative path (and by
@@ -87,6 +90,7 @@ export type ClaudeAcquisitionReason =
   | "SHELL_BACKGROUND"
   | "SHELL_CHANGED_OUTSIDE_UNIVERSE"
   | "SHELL_GIT_DIFF_UNAVAILABLE"
+  | "SHELL_DIFF_LIMIT_EXCEEDED"
   | "MCP_TOOL"
   | "UNKNOWN_TOOL"
   | "PAIRING_BROKEN"

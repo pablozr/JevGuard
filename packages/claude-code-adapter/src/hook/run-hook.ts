@@ -3,6 +3,7 @@ import { BudgetExceededError, createBudget } from "../capture/budget";
 import { captureAfterAppend, captureBeforeAppend } from "../capture/capture-event";
 import { closeUnit } from "../capture/close-unit";
 import { createRepoPathResolver } from "../capture/file-image";
+import { DEFAULT_SHELL_DIFF_LIMITS } from "../capture/shell-diff-limits";
 import type { Budget, CaptureContext, HandoffSink, LineCapture, UnitState } from "../capture/types";
 import {
   appendLine,
@@ -78,6 +79,8 @@ function contextFor(scope: EventScope, unit: UnitState, projectRoot: string): Ca
     projectRoot,
     resolveRepoPath: createRepoPathResolver(projectRoot),
     budget: scope.budget,
+    monotonicNow: dependencies.monotonicNow,
+    shellDiffLimits: dependencies.shellDiffLimits ?? DEFAULT_SHELL_DIFF_LIMITS,
     report: scope.log,
   };
 }

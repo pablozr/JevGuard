@@ -6,7 +6,12 @@ import type {
   PreToolUseEvent,
   ToolCall,
 } from "../hook-event";
-import type { AcquireUnitInput, UnitAttribution } from "./types";
+import type {
+  AcquireUnitInput,
+  ClaudeAcquisitionReason,
+  GitShellDiffFailure,
+  UnitAttribution,
+} from "./types";
 
 function isShell(tool: ToolCall): boolean {
   return tool.category === "BASH" || tool.category === "POWERSHELL";
@@ -161,6 +166,15 @@ function onEditFailed(
   );
 }
 
+function shellFailureReason(cause: GitShellDiffFailure): ClaudeAcquisitionReason {
+  switch (cause) {
+    case "UNPROVEN":
+      return "SHELL_GIT_DIFF_UNAVAILABLE";
+    case "LIMIT_EXCEEDED":
+      return "SHELL_DIFF_LIMIT_EXCEEDED";
+  }
+}
+
 function onShellFinished(
   event: PostToolUseEvent | PostToolUseFailureEvent,
   input: AcquireUnitInput,
@@ -170,8 +184,13 @@ function onShellFinished(
 
   const diff = input.capture.gitDiffs.get(event.tool.toolUseId);
 
-  if (diff === undefined || diff.status === "FAILED") {
+  if (diff === undefined) {
     state.reasons.add("SHELL_GIT_DIFF_UNAVAILABLE");
+    return;
+  }
+
+  if (diff.status === "FAILED") {
+    state.reasons.add(shellFailureReason(diff.cause));
     return;
   }
 

@@ -1,4 +1,10 @@
-import type { CaptureDependencies, HandoffSink, RemovePath } from "../capture/types";
+import type {
+  CaptureDependencies,
+  HandoffSink,
+  RemovePath,
+  ShellDiffLimit,
+  ShellDiffLimits,
+} from "../capture/types";
 import type { HookEventName, HookEventParseReason } from "../hook-event";
 
 export type WorkerSpawnResult = "STARTED" | "ENTRY_MISSING";
@@ -14,6 +20,8 @@ export interface HookDependencies extends CaptureDependencies {
   readonly createHandoffSink: (handoffDirectory: string) => HandoffSink;
   /** Starts the detached review worker without waiting for it; throws when it cannot start. */
   readonly spawnWorker: () => WorkerSpawnResult;
+  /** Internal: tests and the benchmark. Defaults to the provisional shell diff limits. */
+  readonly shellDiffLimits?: ShellDiffLimits;
 }
 
 /** Closed set of hook-log codes: no payload, prompt, path, command or session id. */
@@ -24,6 +32,7 @@ export type HookLogCode =
   | "STDIN_TOO_LARGE"
   | "CAPTURE_READ_FAILED"
   | "GIT_FAILED"
+  | `SHELL_DIFF_LIMIT:${ShellDiffLimit}`
   | "SHELL_CROSS_CHECK_AGREE"
   | "SHELL_CROSS_CHECK_DISAGREE"
   | "SHELL_CROSS_CHECK_UNAVAILABLE"

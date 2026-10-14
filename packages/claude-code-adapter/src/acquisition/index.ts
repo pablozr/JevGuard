@@ -10,6 +10,7 @@ export type {
   FileImage,
   GitShellChange,
   GitShellDiff,
+  GitShellDiffFailure,
   PostImage,
   QuiescentUnit,
   ResolveRepoPath,

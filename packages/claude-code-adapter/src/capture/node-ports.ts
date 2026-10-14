@@ -1,14 +1,24 @@
 import { spawnSync } from "node:child_process";
 import { closeSync, lstatSync, openSync, readSync, realpathSync, rmSync } from "node:fs";
-import type { CaptureFileReader, GitRunner, HookEnvironment, RemovePath } from "./types";
+import { DEFAULT_SHELL_DIFF_LIMITS } from "./shell-diff-limits";
+import type {
+  CaptureFileReader,
+  GitRunner,
+  GitRunResult,
+  HookEnvironment,
+  RemovePath,
+} from "./types";
 
-const GIT_TIMEOUT_MS = 4000;
-const GIT_MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
+function errorCode(error: unknown): unknown {
+  if (typeof error !== "object" || error === null || !("code" in error)) return undefined;
+
+  return error.code;
+}
 
 export function isMissingPathError(error: unknown): boolean {
-  if (typeof error !== "object" || error === null || !("code" in error)) return false;
+  const code = errorCode(error);
 
-  return error.code === "ENOENT" || error.code === "ENOTDIR";
+  return code === "ENOENT" || code === "ENOTDIR";
 }
 
 function readAtMost(path: string, maxBytes: number): Uint8Array {
@@ -67,21 +77,38 @@ export const removeTree: RemovePath = (path) => {
   rmSync(path, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
 };
 
-export const runGit: GitRunner = (args, cwd, input) => {
-  const result = spawnSync("git", [...args], {
-    cwd,
-    timeout: GIT_TIMEOUT_MS,
-    windowsHide: true,
-    maxBuffer: GIT_MAX_OUTPUT_BYTES,
-    stdio: ["pipe", "pipe", "ignore"],
-    ...(input === undefined ? {} : { input }),
-  });
+interface SpawnOutcome {
+  readonly error?: object | undefined;
+  readonly status: number | null;
+  readonly stdout: Uint8Array;
+}
 
-  if (result.error !== undefined || result.status !== 0) {
-    return { ok: false, stdout: new Uint8Array() };
+export function classifySpawnResult(result: SpawnOutcome): GitRunResult {
+  if (result.error !== undefined) {
+    const code = errorCode(result.error);
+
+    if (code === "ETIMEDOUT") return { ok: false, failure: "TIMEOUT" };
+
+    return { ok: false, failure: code === "ENOBUFS" ? "OUTPUT_TOO_LARGE" : "SPAWN" };
   }
 
+  if (result.status === null) return { ok: false, failure: "SPAWN" };
+  if (result.status !== 0) return { ok: false, failure: "EXIT" };
+
   return { ok: true, stdout: result.stdout };
+}
+
+export const runGit: GitRunner = (args, cwd, options = {}) => {
+  const result = spawnSync("git", [...args], {
+    cwd,
+    timeout: options.timeoutMs ?? DEFAULT_SHELL_DIFF_LIMITS.gitCallTimeoutMs,
+    windowsHide: true,
+    maxBuffer: options.maxOutputBytes ?? DEFAULT_SHELL_DIFF_LIMITS.maxGitOutputBytes,
+    stdio: ["pipe", "pipe", "ignore"],
+    ...(options.input === undefined ? {} : { input: options.input }),
+  });
+
+  return classifySpawnResult(result);
 };
 
 export function createProcessEnvironment(env: NodeJS.ProcessEnv): HookEnvironment {

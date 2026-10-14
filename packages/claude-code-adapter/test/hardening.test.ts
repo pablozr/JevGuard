@@ -3,21 +3,31 @@ import { join, resolve } from "node:path";
 import { Readable } from "node:stream";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { createBudget, UNLIMITED_BUDGET } from "../src/capture/budget";
-import { createRepoPathResolver, guardPath } from "../src/capture/file-image";
+import {
+  createRepoPathResolver,
+  guardPath,
+  MAX_CAPTURED_FILE_BYTES,
+} from "../src/capture/file-image";
 import { diffGitSnapshots, takeGitSnapshot } from "../src/capture/git-shell";
+import { createShellDiffMeter, DEFAULT_SHELL_DIFF_LIMITS } from "../src/capture/shell-diff-limits";
 import type {
   CaptureFileReader,
   ClaudeReviewHandoff,
+  GitRunFailure,
   GitRunner,
+  GitRunResult,
   GitShellContext,
   GitSnapshot,
+  ShellDiffLimit,
+  ShellDiffLimits,
+  SnapshotResult,
   UnitState,
 } from "../src/capture/types";
 import { writeBlob } from "../src/capture/unit-state";
 import { createFileHandoffSink } from "../src/hook";
 import { MAX_STDIN_BYTES, readLimitedStdin } from "../src/hook/read-stdin";
 import { resolveAcquisition, toTurn } from "../src/turn";
-import { causesOf, HookWorld, initRepository, SESSION } from "./hook-world";
+import { causesOf, HookWorld, initRepository, SESSION, takenSnapshot } from "./hook-world";
 import { Scenario } from "./scenario";
 
 const SECRET = "SECRET_MARKER_9917";
@@ -108,7 +118,7 @@ describe("links never reach denied or outside files", () => {
 });
 
 function fakeReader(table: {
-  readonly stats?: Readonly<Record<string, { isLink?: boolean }>>;
+  readonly stats?: Readonly<Record<string, { isLink?: boolean; size?: number }>>;
   readonly real?: Readonly<Record<string, string>>;
 }): CaptureFileReader {
   const stats = new Map(Object.entries(table.stats ?? {}).map(([k, v]) => [resolve(k), v]));
@@ -120,7 +130,7 @@ function fakeReader(table: {
 
       return entry === undefined
         ? null
-        : { size: 3, mtimeMs: 1, isFile: true, isLink: entry.isLink === true };
+        : { size: entry.size ?? 3, mtimeMs: 1, isFile: true, isLink: entry.isLink === true };
     },
     realPath: (path) => {
       const key = resolve(path);
@@ -160,9 +170,30 @@ describe("guardPath classifies the real path", () => {
   });
 });
 
+type GitStep = string;
+
+interface GitCall {
+  readonly args: readonly string[];
+  readonly input: string | undefined;
+  readonly timeoutMs: number | undefined;
+  readonly maxOutputBytes: number | undefined;
+}
+
 interface ScriptedGit {
   readonly runner: GitRunner;
-  readonly calls: { args: readonly string[]; input: string | undefined }[];
+  readonly calls: GitCall[];
+}
+
+function stepOf(args: readonly string[]): GitStep {
+  const command = args.find((arg) => !arg.startsWith("--")) ?? "";
+
+  if (command === "rev-parse") {
+    return args.includes("--show-toplevel") ? "rev-parse-toplevel" : "rev-parse-head";
+  }
+
+  if (command === "cat-file") return args.includes("-e") ? "cat-file-exists" : "cat-file-filters";
+
+  return command;
 }
 
 function scriptedGit(options: {
@@ -170,23 +201,28 @@ function scriptedGit(options: {
   readonly stage?: string;
   readonly toplevel?: string;
   readonly cwdToplevel?: string;
+  readonly fail?: Readonly<Partial<Record<GitStep, GitRunFailure>>>;
 }): ScriptedGit {
-  const calls: { args: readonly string[]; input: string | undefined }[] = [];
+  const calls: GitCall[] = [];
   const encoder = new TextEncoder();
-  const runner: GitRunner = (args, cwd, input) => {
-    calls.push({ args, input });
+  const runner: GitRunner = (args, cwd, runOptions) => {
+    calls.push({
+      args,
+      input: runOptions?.input,
+      timeoutMs: runOptions?.timeoutMs,
+      maxOutputBytes: runOptions?.maxOutputBytes,
+    });
 
-    const command = args.find((arg) => !arg.startsWith("--")) ?? "";
-    const reply = (text: string) => ({ ok: true, stdout: encoder.encode(text) });
+    const step = stepOf(args);
+    const failure = options.fail?.[step];
+    const reply = (text: string): GitRunResult => ({ ok: true, stdout: encoder.encode(text) });
 
-    switch (command) {
-      case "rev-parse":
-        if (args.includes("--show-toplevel")) {
-          return reply(
-            cwd === "/inner" ? (options.cwdToplevel ?? "/r") : (options.toplevel ?? "/r"),
-          );
-        }
+    if (failure !== undefined) return { ok: false, failure };
 
+    switch (step) {
+      case "rev-parse-toplevel":
+        return reply(cwd === "/inner" ? (options.cwdToplevel ?? "/r") : (options.toplevel ?? "/r"));
+      case "rev-parse-head":
         return reply("headsha");
       case "ls-files":
         return reply(options.stage ?? "");
@@ -194,7 +230,7 @@ function scriptedGit(options: {
         return reply(options.status);
       case "hash-object":
         return reply(
-          `${(input ?? "")
+          `${(runOptions?.input ?? "")
             .split("\n")
             .filter((line) => line !== "")
             .map((_, index) => `hash${index}`)
@@ -212,6 +248,7 @@ function gitContext(
   runner: GitRunner,
   files: CaptureFileReader,
   budget = UNLIMITED_BUDGET,
+  limits: ShellDiffLimits = DEFAULT_SHELL_DIFF_LIMITS,
 ): GitShellContext {
   return {
     git: runner,
@@ -219,6 +256,50 @@ function gitContext(
     projectRoot: "/r",
     resolveRepoPath: createRepoPathResolver("/r"),
     budget,
+    limits,
+    meter: createShellDiffMeter(limits),
+  };
+}
+
+function limitFailure(limit: ShellDiffLimit): SnapshotResult {
+  return { status: "FAILED", failure: { kind: "LIMIT_EXCEEDED", limit } };
+}
+
+function boundedBy(overrides: Partial<ShellDiffLimits>): ShellDiffLimits {
+  return { ...DEFAULT_SHELL_DIFF_LIMITS, ...overrides };
+}
+
+function namesOf(count: number): readonly string[] {
+  return Array.from({ length: count }, (_, index) => `f${index}.ts`);
+}
+
+function readerOf(names: readonly string[], size = 3): CaptureFileReader {
+  return fakeReader({
+    stats: Object.fromEntries(names.map((name) => [`/r/${name}`, { size }])),
+    real: { "/r": "/r" },
+  });
+}
+
+function withBytes(reader: CaptureFileReader): CaptureFileReader {
+  return { ...reader, readBytes: () => new TextEncoder().encode("x") };
+}
+
+function dirtyStatus(names: readonly string[]): string {
+  return names.map((name) => `?? ${name}\0`).join("");
+}
+
+function snapshotOf(names: readonly string[], fingerprint = "fp"): GitSnapshot {
+  return {
+    toplevel: "/r",
+    head: "h",
+    indexDigest: "d",
+    entries: names.map((name) => ({
+      gitPath: name,
+      repoPath: name,
+      kind: "READABLE" as const,
+      state: "PRESENT" as const,
+      fingerprint,
+    })),
   };
 }
 
@@ -233,10 +314,10 @@ describe("Git snapshot never hashes links or reads past its budgets", () => {
       status: "?? ok.ts\0?? link.md\0 M staged.md\0",
       stage: ["120000 abc 0\tstaged.md", "100644 def 0\tother.ts", ""].join("\0"),
     });
-    const snapshot = takeGitSnapshot(gitContext(script.runner, files), "/r");
+    const snapshot = takenSnapshot(takeGitSnapshot(gitContext(script.runner, files), "/r"));
     const hashed = script.calls.find((call) => call.args.includes("hash-object"));
 
-    expect(snapshot?.entries.map((entry) => [entry.gitPath, entry.kind])).toEqual([
+    expect(snapshot.entries.map((entry) => [entry.gitPath, entry.kind])).toEqual([
       ["link.md", "BLOCKED"],
       ["ok.ts", "READABLE"],
       ["staged.md", "BLOCKED"],
@@ -244,56 +325,254 @@ describe("Git snapshot never hashes links or reads past its budgets", () => {
     expect(hashed?.input).toBe(`${resolve("/r", "ok.ts")}\n`);
   });
 
-  test("too many dirty entries is no proof", () => {
-    const status = Array.from({ length: 5001 }, (_, index) => `?? f${index}.ts\0`).join("");
-    const script = scriptedGit({ status });
+  test("a cwd in another repository than the project is no proof", () => {
+    const script = scriptedGit({ status: "", cwdToplevel: "/r/inner" });
 
-    expect(takeGitSnapshot(gitContext(script.runner, files), "/r")).toBeNull();
+    expect(takeGitSnapshot(gitContext(script.runner, files), "/inner")).toEqual({
+      status: "FAILED",
+      failure: { kind: "UNPROVEN" },
+    });
+  });
+});
+
+describe("shell diff limits are exact and never yield partial evidence", () => {
+  test("the dirty entry limit is inclusive and hashes nothing past it", () => {
+    const names = namesOf(4);
+    const files = readerOf(names);
+    const bound = boundedBy({ maxStatusEntries: 3 });
+    const within = scriptedGit({ status: dirtyStatus(names.slice(0, 3)) });
+    const over = scriptedGit({ status: dirtyStatus(names) });
+
+    expect(
+      takeGitSnapshot(gitContext(within.runner, files, UNLIMITED_BUDGET, bound), "/r").status,
+    ).toBe("TAKEN");
+    expect(takeGitSnapshot(gitContext(over.runner, files, UNLIMITED_BUDGET, bound), "/r")).toEqual(
+      limitFailure("STATUS_ENTRIES"),
+    );
+    expect(over.calls.some((call) => call.args.includes("hash-object"))).toBe(false);
   });
 
-  test("a spent budget is no proof", () => {
+  test("the hashed byte limit is inclusive and hashes nothing past it", () => {
+    const bound = boundedBy({ maxContentBytes: 10 });
+    const status = dirtyStatus(["a.ts", "b.ts"]);
+    const exact = fakeReader({
+      stats: { "/r/a.ts": { size: 5 }, "/r/b.ts": { size: 5 } },
+      real: { "/r": "/r" },
+    });
+    const over = fakeReader({
+      stats: { "/r/a.ts": { size: 5 }, "/r/b.ts": { size: 6 } },
+      real: { "/r": "/r" },
+    });
+    const fits = scriptedGit({ status });
+    const exceeds = scriptedGit({ status });
+
+    expect(
+      takeGitSnapshot(gitContext(fits.runner, exact, UNLIMITED_BUDGET, bound), "/r").status,
+    ).toBe("TAKEN");
+    expect(fits.calls.some((call) => call.args.includes("hash-object"))).toBe(true);
+    expect(
+      takeGitSnapshot(gitContext(exceeds.runner, over, UNLIMITED_BUDGET, bound), "/r"),
+    ).toEqual(limitFailure("CONTENT_BYTES"));
+    expect(exceeds.calls.some((call) => call.args.includes("hash-object"))).toBe(false);
+  });
+
+  test("post reads share the meter with the snapshot", () => {
+    const files = withBytes(readerOf(["a.ts"], 5));
+    const script = scriptedGit({ status: "?? a.ts\0" });
+    const outcomes = [9, 10].map((maxContentBytes) => {
+      const context = gitContext(
+        script.runner,
+        files,
+        UNLIMITED_BUDGET,
+        boundedBy({ maxContentBytes }),
+      );
+      const post = takenSnapshot(takeGitSnapshot(context, "/r"));
+
+      const pre = { ...post, entries: snapshotOf(["a.ts"], "old").entries };
+
+      return diffGitSnapshots(context, pre, post);
+    });
+
+    expect(outcomes[0]).toEqual({
+      status: "FAILED",
+      failure: { kind: "LIMIT_EXCEEDED", limit: "CONTENT_BYTES" },
+    });
+    expect(outcomes[1]).toMatchObject({ status: "AVAILABLE" });
+  });
+
+  test("the index read limit counts both cat-file calls of a file", () => {
+    const bound = boundedBy({ maxIndexReads: 4 });
+    const results = [2, 3].map((count) => {
+      const names = namesOf(count);
+      const script = scriptedGit({ status: "" });
+      const context = gitContext(
+        script.runner,
+        withBytes(readerOf(names)),
+        UNLIMITED_BUDGET,
+        bound,
+      );
+
+      return diffGitSnapshots(context, snapshotOf([]), snapshotOf(names));
+    });
+
+    expect(results[0]).toMatchObject({ status: "AVAILABLE" });
+    expect(results[1]).toEqual({
+      status: "FAILED",
+      failure: { kind: "LIMIT_EXCEEDED", limit: "INDEX_READS" },
+    });
+  });
+
+  test("each Git call gets the smaller of the call timeout and the remaining time", () => {
+    const files = readerOf([]);
+    const timeouts = [1500, 10_000].map((limitMs) => {
+      const script = scriptedGit({ status: "" });
+      const budget = createBudget(() => 0, limitMs);
+
+      takeGitSnapshot(gitContext(script.runner, files, budget), "/r");
+
+      return script.calls.map((call) => call.timeoutMs);
+    });
+
+    expect(new Set(timeouts[0])).toEqual(new Set([1500]));
+    expect(new Set(timeouts[1])).toEqual(new Set([DEFAULT_SHELL_DIFF_LIMITS.gitCallTimeoutMs]));
+  });
+
+  test("a spent budget is a total time limit and runs no Git", () => {
     let now = 0;
     const budget = createBudget(() => now, 10);
 
     now = 11;
 
     const script = scriptedGit({ status: "" });
+    const context = gitContext(script.runner, readerOf([]), budget);
 
-    expect(takeGitSnapshot(gitContext(script.runner, files, budget), "/r")).toBeNull();
+    expect(takeGitSnapshot(context, "/r")).toEqual(limitFailure("TOTAL_TIME"));
+    expect(diffGitSnapshots(context, snapshotOf(["a.ts"], "old"), snapshotOf(["a.ts"]))).toEqual({
+      status: "FAILED",
+      failure: { kind: "LIMIT_EXCEEDED", limit: "TOTAL_TIME" },
+    });
     expect(script.calls).toEqual([]);
   });
 
-  test("a cwd in another repository than the project is no proof", () => {
-    const script = scriptedGit({ status: "", cwdToplevel: "/r/inner" });
+  test("a timeout is the call limit, or the total limit when the budget set it", () => {
+    const files = readerOf([]);
+    const fail = { "rev-parse-toplevel": "TIMEOUT" } as const;
+    const callLimited = scriptedGit({ status: "", fail });
+    const totalLimited = scriptedGit({ status: "", fail });
 
-    expect(takeGitSnapshot(gitContext(script.runner, files), "/inner")).toBeNull();
+    expect(
+      takeGitSnapshot(
+        gitContext(
+          callLimited.runner,
+          files,
+          createBudget(() => 0, 10_000),
+        ),
+        "/r",
+      ),
+    ).toEqual(limitFailure("GIT_CALL_TIME"));
+    expect(
+      takeGitSnapshot(
+        gitContext(
+          totalLimited.runner,
+          files,
+          createBudget(() => 0, 1500),
+        ),
+        "/r",
+      ),
+    ).toEqual(limitFailure("TOTAL_TIME"));
   });
 
-  test("too many index reads make the diff FAILED", () => {
-    const names = Array.from({ length: 201 }, (_, index) => `f${index}.ts`);
-    const present = fakeReader({
-      stats: Object.fromEntries(names.map((name) => [`/r/${name}`, {}])),
-      real: { "/r": "/r" },
-    });
-    const reader: CaptureFileReader = {
-      ...present,
-      readBytes: () => new TextEncoder().encode("x"),
-    };
-    const script = scriptedGit({ status: "" });
-    const empty: GitSnapshot = { toplevel: "/r", head: "h", indexDigest: "d", entries: [] };
-    const full: GitSnapshot = {
-      ...empty,
-      entries: names.map((name) => ({
-        gitPath: name,
-        repoPath: name,
-        kind: "READABLE" as const,
-        state: "PRESENT" as const,
-        fingerprint: name,
-      })),
-    };
+  test("an output overflow is a limit and a failed exit is only no proof", () => {
+    const files = readerOf([]);
+    const overflow = scriptedGit({ status: "", fail: { status: "OUTPUT_TOO_LARGE" } });
+    const exit = scriptedGit({ status: "", fail: { status: "EXIT" } });
 
-    expect(diffGitSnapshots(gitContext(script.runner, reader), empty, full).diff).toEqual({
+    expect(takeGitSnapshot(gitContext(overflow.runner, files), "/r")).toEqual(
+      limitFailure("GIT_OUTPUT"),
+    );
+    expect(takeGitSnapshot(gitContext(exit.runner, files), "/r")).toEqual({
       status: "FAILED",
+      failure: { kind: "UNPROVEN" },
+    });
+  });
+});
+
+describe("a Git timeout is never read as absence", () => {
+  test("a HEAD lookup that timed out is a limit, not an unborn HEAD", () => {
+    const script = scriptedGit({ status: "", fail: { "rev-parse-head": "TIMEOUT" } });
+
+    expect(takeGitSnapshot(gitContext(script.runner, readerOf([])), "/r")).toEqual(
+      limitFailure("GIT_CALL_TIME"),
+    );
+  });
+
+  test("a HEAD lookup that exits non-zero is an unborn HEAD", () => {
+    const script = scriptedGit({ status: "", fail: { "rev-parse-head": "EXIT" } });
+    const snapshot = takenSnapshot(takeGitSnapshot(gitContext(script.runner, readerOf([])), "/r"));
+
+    expect(snapshot.head).toBeNull();
+  });
+
+  test("an index existence check that timed out is a limit, not an absent index image", () => {
+    const script = scriptedGit({ status: "", fail: { "cat-file-exists": "TIMEOUT" } });
+    const context = gitContext(script.runner, withBytes(readerOf(["a.ts"])));
+    const result = diffGitSnapshots(context, snapshotOf([]), snapshotOf(["a.ts"]));
+
+    expect(result).toEqual({
+      status: "FAILED",
+      failure: { kind: "LIMIT_EXCEEDED", limit: "GIT_CALL_TIME" },
+    });
+  });
+
+  test("an index existence check that exits non-zero is an absent index image", () => {
+    const script = scriptedGit({ status: "", fail: { "cat-file-exists": "EXIT" } });
+    const context = gitContext(script.runner, withBytes(readerOf(["a.ts"])));
+    const result = diffGitSnapshots(context, snapshotOf([]), snapshotOf(["a.ts"]));
+
+    expect(result).toMatchObject({
+      status: "AVAILABLE",
+      changes: [{ path: "a.ts", preState: "CLEAN", indexImage: { state: "ABSENT" } }],
+    });
+  });
+
+  test("an oversized index image is a content problem, not a limit", () => {
+    const script = scriptedGit({ status: "", fail: { "cat-file-filters": "OUTPUT_TOO_LARGE" } });
+    const context = gitContext(script.runner, withBytes(readerOf(["a.ts"])));
+    const result = diffGitSnapshots(context, snapshotOf([]), snapshotOf(["a.ts"]));
+    const filters = script.calls.find((call) => call.args.includes("--filters"));
+
+    expect(result).toEqual({ status: "AVAILABLE", changes: [], problems: ["CONTENT_TOO_LARGE"] });
+    expect(filters?.maxOutputBytes).toBe(MAX_CAPTURED_FILE_BYTES + 1);
+  });
+
+  test("an oversized index image still charges the bytes Git produced", () => {
+    const script = scriptedGit({ status: "", fail: { "cat-file-filters": "OUTPUT_TOO_LARGE" } });
+    const context = gitContext(
+      script.runner,
+      withBytes(readerOf(["a.ts"])),
+      UNLIMITED_BUDGET,
+      boundedBy({ maxContentBytes: MAX_CAPTURED_FILE_BYTES }),
+    );
+
+    expect(diffGitSnapshots(context, snapshotOf([]), snapshotOf(["a.ts"]))).toEqual({
+      status: "FAILED",
+      failure: { kind: "LIMIT_EXCEEDED", limit: "CONTENT_BYTES" },
+    });
+  });
+
+  test("a post file too large to read is a content problem and charges nothing", () => {
+    const script = scriptedGit({ status: "" });
+    const context = gitContext(
+      script.runner,
+      withBytes(readerOf(["a.ts"], MAX_CAPTURED_FILE_BYTES + 1)),
+      UNLIMITED_BUDGET,
+      boundedBy({ maxContentBytes: 0 }),
+    );
+
+    expect(diffGitSnapshots(context, snapshotOf(["a.ts"], "old"), snapshotOf(["a.ts"]))).toEqual({
+      status: "AVAILABLE",
+      changes: [],
+      problems: ["CONTENT_TOO_LARGE"],
     });
   });
 });

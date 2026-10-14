@@ -16,6 +16,16 @@ export function createBudget(monotonicNow: () => number, limitMs: number): Budge
   };
 }
 
+/** A budget that ends at its own deadline or the parent's, whichever comes first. */
+export function narrowBudget(parent: Budget, monotonicNow: () => number, limitMs: number): Budget {
+  const deadline = monotonicNow() + Math.min(limitMs, parent.remainingMs());
+
+  return {
+    expired: () => monotonicNow() >= deadline || parent.expired(),
+    remainingMs: () => Math.min(Math.max(0, deadline - monotonicNow()), parent.remainingMs()),
+  };
+}
+
 export const UNLIMITED_BUDGET: Budget = {
   expired: () => false,
   remainingMs: () => Number.POSITIVE_INFINITY,

@@ -1,19 +1,28 @@
 import { resolve } from "node:path";
-import type { CaptureProblem, FileImage, GitShellChange, PostImage } from "../acquisition";
+import type {
+  CaptureProblem,
+  FileImage,
+  GitShellChange,
+  GitShellDiffFailure,
+  PostImage,
+} from "../acquisition";
 import type {
   HookEvent,
   PostToolUseEvent,
   PostToolUseFailureEvent,
   PreToolUseEvent,
 } from "../hook-event";
-import { assertWithinBudget } from "./budget";
+import { assertWithinBudget, narrowBudget } from "./budget";
 import { isReadablePath, readFileImage } from "./file-image";
 import { diffGitSnapshots, takeGitSnapshot } from "./git-shell";
+import { createShellDiffMeter } from "./shell-diff-limits";
 import type {
   CaptureContext,
+  GitShellContext,
   ImageReading,
   LineCapture,
   PreRecord,
+  ShellDiffFailure,
   StoredGitDiff,
   StoredShellChange,
 } from "./types";
@@ -23,6 +32,7 @@ import {
   writeBlob,
   writeFirstPreRecord,
   writeShellSnapshot,
+  writeShellSnapshotLimit,
 } from "./unit-state";
 
 interface CaptureParts {
@@ -196,34 +206,63 @@ function crossCheckBashEditDiff(
   context.report(agree ? "SHELL_CROSS_CHECK_AGREE" : "SHELL_CROSS_CHECK_DISAGREE");
 }
 
+function shellDiffContext(context: CaptureContext): GitShellContext {
+  const { shellDiffLimits } = context;
+
+  return {
+    git: context.git,
+    files: context.files,
+    projectRoot: context.projectRoot,
+    resolveRepoPath: context.resolveRepoPath,
+    budget: narrowBudget(context.budget, context.monotonicNow, shellDiffLimits.timeMs),
+    limits: shellDiffLimits,
+    meter: createShellDiffMeter(shellDiffLimits),
+  };
+}
+
+function failedShellCapture(cause: GitShellDiffFailure): LineCapture {
+  return lineCapture({ gitDiff: { status: "FAILED", cause } });
+}
+
+function reportShellFailure(context: CaptureContext, failure: ShellDiffFailure): void {
+  context.report(
+    failure.kind === "LIMIT_EXCEEDED" ? `SHELL_DIFF_LIMIT:${failure.limit}` : "GIT_FAILED",
+  );
+}
+
 function capturePostShell(
   event: PostToolUseEvent | PostToolUseFailureEvent,
   context: CaptureContext,
 ): LineCapture | null {
   if (event.tool.runInBackground || !isEnabledShellDiff(context)) return null;
 
-  const post = takeGitSnapshot(context, event.cwd);
   const pre = takeShellSnapshot(context.unit, event.tool.toolUseId);
 
-  if (post === null || pre === null) {
-    if (post === null) context.report("GIT_FAILED");
-
-    return lineCapture({ gitDiff: { status: "FAILED" } });
+  if (overlapsAnotherWriter(context, event.tool.toolUseId) || pre.status === "MISSING") {
+    return failedShellCapture("UNPROVEN");
   }
 
-  if (overlapsAnotherWriter(context, event.tool.toolUseId)) {
-    return lineCapture({ gitDiff: { status: "FAILED" } });
+  if (pre.status === "LIMIT_EXCEEDED") return failedShellCapture("LIMIT_EXCEEDED");
+
+  const shell = shellDiffContext(context);
+  const post = takeGitSnapshot(shell, event.cwd);
+  const result =
+    post.status === "TAKEN" ? diffGitSnapshots(shell, pre.snapshot, post.snapshot) : post;
+
+  if (result.status === "FAILED") {
+    reportShellFailure(context, result.failure);
+
+    return failedShellCapture(result.failure.kind);
   }
 
-  const { diff, problems } = diffGitSnapshots(context, pre, post);
-  const gitDiff: StoredGitDiff =
-    diff.status === "AVAILABLE"
-      ? { status: "AVAILABLE", changes: diff.changes.map((item) => toStoredChange(item, context)) }
-      : { status: "FAILED" };
+  const gitDiff: StoredGitDiff = {
+    status: "AVAILABLE",
+    changes: result.changes.map((item) => toStoredChange(item, context)),
+  };
 
   if (event.name === "PostToolUse") crossCheckBashEditDiff(event, gitDiff, context);
 
-  return lineCapture({ gitDiff, problems });
+  return lineCapture({ gitDiff, problems: result.problems });
 }
 
 function captureEditPost(event: PostToolUseEvent, context: CaptureContext): LineCapture | null {
@@ -264,12 +303,16 @@ export function captureAfterAppend(event: HookEvent, context: CaptureContext): v
   if (event.name !== "PreToolUse" || !isShellTool(event)) return;
   if (event.tool.runInBackground || !isEnabledShellDiff(context)) return;
 
-  const snapshot = takeGitSnapshot(context, event.cwd);
+  const result = takeGitSnapshot(shellDiffContext(context), event.cwd);
 
-  if (snapshot === null) {
-    context.report("GIT_FAILED");
+  if (result.status === "TAKEN") {
+    writeShellSnapshot(context.unit, event.tool.toolUseId, result.snapshot);
     return;
   }
 
-  writeShellSnapshot(context.unit, event.tool.toolUseId, snapshot);
+  reportShellFailure(context, result.failure);
+
+  if (result.failure.kind === "LIMIT_EXCEEDED") {
+    writeShellSnapshotLimit(context.unit, event.tool.toolUseId);
+  }
 }

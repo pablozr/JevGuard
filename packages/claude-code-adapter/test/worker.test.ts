@@ -585,7 +585,13 @@ describe("parseHandoff", () => {
       resolution: { ...unavailable.resolution, causes: ["/etc/secret"] },
     };
 
+    const limited = {
+      ...unavailable,
+      resolution: { ...unavailable.resolution, causes: ["SHELL_DIFF_LIMIT_EXCEEDED"] },
+    };
+
     expect(parseHandoff(JSON.stringify(unavailable)).status).toBe("VALID");
+    expect(parseHandoff(JSON.stringify(limited)).status).toBe("VALID");
     expect(parseHandoff(JSON.stringify(forged)).status).toBe("INVALID");
     expect(parseHandoff("[]").status).toBe("INVALID");
   });

@@ -101,12 +101,34 @@ describe("acquireUnit universe and shell rules", () => {
   test("Bash without a Git diff is SHELL_GIT_DIFF_UNAVAILABLE", () => {
     const missing = scenario().bash().stop().acquire();
     const failed = scenario()
-      .bash({ git: { status: "FAILED" } })
+      .bash({ git: { status: "FAILED", cause: "UNPROVEN" } })
       .stop()
       .acquire();
 
     expect(reasonsOf(missing)).toEqual(["SHELL_GIT_DIFF_UNAVAILABLE"]);
     expect(reasonsOf(failed)).toEqual(["SHELL_GIT_DIFF_UNAVAILABLE"]);
+  });
+
+  test("a Bash Git diff that exceeded a limit is SHELL_DIFF_LIMIT_EXCEEDED", () => {
+    const result = scenario()
+      .bash({ git: { status: "FAILED", cause: "LIMIT_EXCEEDED" } })
+      .stop()
+      .acquire();
+
+    expect(reasonsOf(result)).toEqual(["SHELL_DIFF_LIMIT_EXCEEDED"]);
+  });
+
+  test("an exceeded shell diff limit resolves to a missing attributed diff", () => {
+    const result = scenario()
+      .bash({ git: { status: "FAILED", cause: "LIMIT_EXCEEDED" } })
+      .stop()
+      .acquire();
+
+    expect(resolveAcquisition(result)).toMatchObject({
+      status: "UNAVAILABLE",
+      reason: "MISSING_ATTRIBUTED_DIFF",
+      causes: ["SHELL_DIFF_LIMIT_EXCEEDED"],
+    });
   });
 
   test("a failed Bash with a Git diff is not a reason", () => {
@@ -219,7 +241,7 @@ describe("acquireUnit shell via Git diff", () => {
   test("no Git diff or a failed one is SHELL_GIT_DIFF_UNAVAILABLE", () => {
     const missing = scenario().powershell().stop().acquire();
     const failed = scenario()
-      .powershell({ git: { status: "FAILED" } })
+      .powershell({ git: { status: "FAILED", cause: "UNPROVEN" } })
       .stop()
       .acquire();
 
@@ -450,6 +472,7 @@ describe("acquireUnit closure", () => {
       .edit(".env", "a", "b")
       .tool("MCP", "mcp__a__b")
       .powershell()
+      .powershell({ git: { status: "FAILED", cause: "LIMIT_EXCEEDED" } })
       .stopFailure()
       .acquire();
 
@@ -457,6 +480,7 @@ describe("acquireUnit closure", () => {
       "TURN_FAILED",
       "BLOCKED_PATH",
       "SHELL_GIT_DIFF_UNAVAILABLE",
+      "SHELL_DIFF_LIMIT_EXCEEDED",
       "MCP_TOOL",
     ]);
   });

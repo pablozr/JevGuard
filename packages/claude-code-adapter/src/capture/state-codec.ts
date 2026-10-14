@@ -6,6 +6,7 @@ import type {
   GitSnapshot,
   LineCapture,
   PreRecord,
+  ShellPreSnapshot,
   SnapshotEntry,
   StateLine,
   StoredGitDiff,
@@ -75,9 +76,18 @@ function decodeStoredChange(value: unknown): StoredShellChange | null {
     : null;
 }
 
+function decodeFailedGitDiff(value: JsonObject): StoredGitDiff | null {
+  if (hasKeys(value, ["status"])) return { status: "FAILED", cause: "UNPROVEN" };
+  if (!hasKeys(value, ["status", "cause"])) return null;
+
+  const { cause } = value;
+
+  return cause === "UNPROVEN" || cause === "LIMIT_EXCEEDED" ? { status: "FAILED", cause } : null;
+}
+
 function decodeStoredGitDiff(value: unknown): StoredGitDiff | null {
   if (!isJsonObject(value)) return null;
-  if (value.status === "FAILED") return hasKeys(value, ["status"]) ? { status: "FAILED" } : null;
+  if (value.status === "FAILED") return decodeFailedGitDiff(value);
   if (value.status !== "AVAILABLE" || !hasKeys(value, ["status", "changes"])) return null;
   if (!Array.isArray(value.changes)) return null;
 
@@ -188,6 +198,17 @@ function decodeSnapshotEntry(value: unknown): SnapshotEntry | null {
   if (fingerprint !== null && typeof fingerprint !== "string") return null;
 
   return { gitPath, repoPath, kind, state, fingerprint };
+}
+
+/** Pre-call record of a shell call: a snapshot, or the marker of an exceeded limit. */
+export function decodeShellPreRecord(value: unknown): ShellPreSnapshot | null {
+  if (isJsonObject(value) && hasKeys(value, ["v", "failed"])) {
+    return value.v === 1 && value.failed === "LIMIT_EXCEEDED" ? { status: "LIMIT_EXCEEDED" } : null;
+  }
+
+  const snapshot = decodeGitSnapshot(value);
+
+  return snapshot === null ? null : { status: "TAKEN", snapshot };
 }
 
 export function decodeGitSnapshot(value: unknown): GitSnapshot | null {

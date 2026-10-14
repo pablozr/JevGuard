@@ -130,7 +130,7 @@ function collectLines(input: CloseUnitInput, state: Accumulator): readonly HookE
 
     if (diff === null) state.problems.add("CAPTURE_FAILED");
 
-    state.gitDiffs.set(toolUseId, diff ?? { status: "FAILED" });
+    state.gitDiffs.set(toolUseId, diff ?? { status: "FAILED", cause: "UNPROVEN" });
   }
 
   return events;
