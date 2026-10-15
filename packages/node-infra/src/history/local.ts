@@ -1,14 +1,16 @@
-import { isAbsolute, join } from "node:path";
+import { join } from "node:path";
 import type { ReviewLogEntry } from "../review-log";
+import { resolveJevGuardDataDirectory } from "./data-directory";
+import { boundJsonLinesFile, isObject, parseJsonLines } from "./jsonl-file";
 import type {
   LocalReviewHistory,
   LocalReviewHistoryDependencies,
   ReviewHistoryPathContext,
   ReviewHistoryReadResult,
   ReviewHistoryRecord,
+  ReviewHistoryStrictReadResult,
 } from "./types";
 
-const DATA_DIRECTORY = "jevguard";
 const HISTORY_FILENAME = "reviews.jsonl";
 
 /** Rewrite the file once it grows past this many bytes, keeping only the newest records. */
@@ -40,47 +42,27 @@ export function createLocalReviewHistory(
 
       await dependencies.fileSystem.ensureParentDirectory(filePath);
       await dependencies.fileSystem.appendFile(filePath, `${JSON.stringify(record)}\n`);
-      await boundGrowth();
-    } catch {
-      return;
-    }
-  }
-
-  async function boundGrowth(): Promise<void> {
-    try {
-      const size = await dependencies.fileSystem.sizeOf(filePath);
-
-      if (size === null || size <= maxBytes) {
-        return;
-      }
-
-      const contents = await dependencies.fileSystem.readFile(filePath);
-
-      if (contents === null) {
-        return;
-      }
-
-      const lines = contents.split("\n").filter((line) => line.trim() !== "");
-      const kept = lines.slice(Math.max(0, lines.length - maxRecords));
-      const rewritten = kept.length === 0 ? "" : `${kept.join("\n")}\n`;
-
-      await dependencies.fileSystem.writeFileAtomic(filePath, rewritten);
+      await boundJsonLinesFile(dependencies.fileSystem, filePath, maxBytes, maxRecords);
     } catch {
       return;
     }
   }
 
   async function read(): Promise<ReviewHistoryReadResult> {
+    const result = await readStrict();
+
+    return result.status === "READ"
+      ? { records: result.records, skippedLineCount: result.skippedLineCount }
+      : { records: [], skippedLineCount: 0 };
+  }
+
+  async function readStrict(): Promise<ReviewHistoryStrictReadResult> {
     try {
       const contents = await dependencies.fileSystem.readFile(filePath);
 
-      if (contents === null) {
-        return { records: [], skippedLineCount: 0 };
-      }
-
-      return parseRecords(contents);
+      return { status: "READ", ...parseJsonLines(contents ?? "", parseRecord) };
     } catch {
-      return { records: [], skippedLineCount: 0 };
+      return { status: "FAILED" };
     }
   }
 
@@ -93,44 +75,13 @@ export function createLocalReviewHistory(
       return run;
     },
     read,
+    readStrict,
   };
 }
 
 /** Resolves `jevguard/reviews.jsonl` under the configured data home. */
 export function resolveHistoryFilePath(context: ReviewHistoryPathContext): string {
-  return join(resolveDataHome(context), DATA_DIRECTORY, HISTORY_FILENAME);
-}
-
-function resolveDataHome(context: ReviewHistoryPathContext): string {
-  const configured = context.environment.get("XDG_DATA_HOME");
-
-  if (configured !== undefined && configured !== "" && isAbsolute(configured)) {
-    return configured;
-  }
-
-  return join(context.homedir, ".local", "share");
-}
-
-function parseRecords(contents: string): ReviewHistoryReadResult {
-  const records: ReviewHistoryRecord[] = [];
-  let skippedLineCount = 0;
-
-  for (const line of contents.split("\n")) {
-    if (line.trim() === "") {
-      continue;
-    }
-
-    const parsed = parseRecord(line);
-
-    if (parsed === null) {
-      skippedLineCount += 1;
-      continue;
-    }
-
-    records.push(parsed);
-  }
-
-  return { records, skippedLineCount };
+  return join(resolveJevGuardDataDirectory(context), HISTORY_FILENAME);
 }
 
 function parseRecord(line: string): ReviewHistoryRecord | null {
@@ -217,10 +168,6 @@ function isReviewOutcome(value: unknown): boolean {
     value === "UNAVAILABLE" ||
     value === "SKIPPED"
   );
-}
-
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
 }
 
 function ignore(): void {

@@ -88,11 +88,23 @@ export interface ReportBuiltInCount {
   readonly count: number;
 }
 
-/** One repository rule's outcome counts and how many of its evaluations were sliced. */
+/**
+ * Local feedback calibration for one rule, over its distinct FAILs. `precision` is
+ * right / (right + wrong), or null while nothing is answered.
+ */
+export interface ReportRuleCalibration {
+  readonly right: number;
+  readonly wrong: number;
+  readonly unanswered: number;
+  readonly precision: number | null;
+}
+
+/** One repository rule's outcome counts, sliced evaluations, and feedback calibration. */
 export interface ReportRuleBreakdown {
   readonly ruleId: string;
   readonly counts: ReportOutcomeTotals;
   readonly slicedRuleCount: number;
+  readonly calibration: ReportRuleCalibration;
 }
 
 /**

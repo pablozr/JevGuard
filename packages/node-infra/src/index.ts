@@ -1,13 +1,3 @@
-export {
-  API_KEY_ENVIRONMENT_VARIABLE,
-  CREDENTIAL_ACCOUNT,
-  CREDENTIAL_SERVICE,
-  createCredentialProvider,
-  createKeyringCredentialStore,
-  createProcessEnvironment,
-  createSecretPrompt,
-  login,
-} from "./credentials";
 export type {
   CredentialEnvironment,
   CredentialProviderDependencies,
@@ -23,20 +13,42 @@ export type {
   SecretPromptResult,
 } from "./credentials";
 export {
-  createNodePolicyFileSystem,
-  createPolicyFileLoader,
-  parsePolicyConfig,
-  policyFilePaths,
-} from "./policy";
-export type { PolicyFilePaths, PolicyFileSystem, PolicyLoaderDependencies } from "./policy";
+  API_KEY_ENVIRONMENT_VARIABLE,
+  CREDENTIAL_ACCOUNT,
+  CREDENTIAL_SERVICE,
+  createCredentialProvider,
+  createKeyringCredentialStore,
+  createProcessEnvironment,
+  createSecretPrompt,
+  login,
+} from "./credentials";
+export type {
+  FeedbackReadResult,
+  FeedbackSelectionReadResult,
+  FeedbackWriteStatus,
+  LocalFeedbackStore,
+  LocalFeedbackStoreDependencies,
+} from "./feedback";
+export { createLocalFeedbackStore } from "./feedback";
+export type {
+  HistoryEnvironment,
+  LocalReviewHistory,
+  LocalReviewHistoryDependencies,
+  ReviewHistoryFileSystem,
+  ReviewHistoryPathContext,
+  ReviewHistoryReadResult,
+  ReviewHistoryRecord,
+  ReviewHistoryStrictReadResult,
+} from "./history";
 export {
-  buildTypeSafeClientConfig,
-  createJevTransport,
-  createTypeSafeJevTransport,
-  createTypeSafeSystemOneClient,
-  JEV_MODEL,
-  RULE_BATCH_CONCURRENCY,
-} from "./jev";
+  createLocalReviewHistory,
+  createMirroredReviewLogSink,
+  createNodeReviewHistoryFileSystem,
+  createProcessReviewHistoryContext,
+  DEFAULT_HISTORY_MAX_BYTES,
+  DEFAULT_HISTORY_MAX_RECORDS,
+  resolveHistoryFilePath,
+} from "./history";
 export type {
   JevTransport,
   JevTransportChange,
@@ -54,24 +66,20 @@ export type {
   TypeSafeSystemOneRequest,
 } from "./jev";
 export {
-  createLocalReviewHistory,
-  createMirroredReviewLogSink,
-  createNodeReviewHistoryFileSystem,
-  createProcessReviewHistoryContext,
-  DEFAULT_HISTORY_MAX_BYTES,
-  DEFAULT_HISTORY_MAX_RECORDS,
-  resolveHistoryFilePath,
-} from "./history";
-export type {
-  HistoryEnvironment,
-  LocalReviewHistory,
-  LocalReviewHistoryDependencies,
-  ReviewHistoryFileSystem,
-  ReviewHistoryPathContext,
-  ReviewHistoryReadResult,
-  ReviewHistoryRecord,
-} from "./history";
-export { toReviewLogEntry, toReviewLogResult } from "./review-log";
+  buildTypeSafeClientConfig,
+  createJevTransport,
+  createTypeSafeJevTransport,
+  createTypeSafeSystemOneClient,
+  JEV_MODEL,
+  RULE_BATCH_CONCURRENCY,
+} from "./jev";
+export type { PolicyFilePaths, PolicyFileSystem, PolicyLoaderDependencies } from "./policy";
+export {
+  createNodePolicyFileSystem,
+  createPolicyFileLoader,
+  parsePolicyConfig,
+  policyFilePaths,
+} from "./policy";
 export type {
   DeliveryStatus,
   ReviewLogEntry,
@@ -79,3 +87,4 @@ export type {
   ReviewLogSummary,
   StructuredLogSink,
 } from "./review-log";
+export { toReviewLogEntry, toReviewLogResult } from "./review-log";

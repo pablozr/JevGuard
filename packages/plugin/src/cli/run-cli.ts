@@ -1,21 +1,21 @@
 import type { InstallOutcome, InstallTarget } from "@jevguard/opencode-adapter";
 import {
-  describeDoctorReport,
   DOCTOR_FAILURE_MESSAGE,
+  describeDoctorReport,
   serializeDoctorReport,
 } from "./doctor/messages";
-import { rulesCheckExitCode } from "./rules-check/exit-code";
-import { parseRulesCheckArguments } from "./rules-check/arguments";
+import { parseFeedbackArguments } from "./feedback/arguments";
+import { feedbackMarkExitCode } from "./feedback/exit-code";
 import {
-  describeDiffInputFailure,
-  describeRulesCheck,
-  RULE_NOT_FOUND_MESSAGE,
-  RULES_CHECK_FAILURE_MESSAGE,
-  RULES_CHECK_USAGE,
-  serializeRulesCheck,
-} from "./rules-check/messages";
-import type { RulesCheckArguments, RulesCheckResult } from "./rules-check/types";
-import type { CliDependencies, CliIO } from "./types";
+  describeFeedbackError,
+  describeFeedbackList,
+  describeFeedbackMark,
+  FEEDBACK_FAILURE_MESSAGE,
+  FEEDBACK_INVALID_DECISION_MESSAGE,
+  FEEDBACK_USAGE,
+  serializeFeedbackList,
+} from "./feedback/messages";
+import type { FeedbackListResult, FeedbackMarkRequest } from "./feedback/types";
 import {
   describeInstallAborted,
   describeInstallAlreadyInstalled,
@@ -29,13 +29,27 @@ import {
   serializeReport,
   USAGE,
 } from "./messages";
+import { parseRulesCheckArguments } from "./rules-check/arguments";
+import { rulesCheckExitCode } from "./rules-check/exit-code";
+import {
+  describeDiffInputFailure,
+  describeRulesCheck,
+  RULE_NOT_FOUND_MESSAGE,
+  RULES_CHECK_FAILURE_MESSAGE,
+  RULES_CHECK_USAGE,
+  serializeRulesCheck,
+} from "./rules-check/messages";
+import type { RulesCheckArguments, RulesCheckResult } from "./rules-check/types";
+import type { CliDependencies, CliIO } from "./types";
 
 /**
  * Dispatches the `jevguard` CLI: `login`, `install [--project]`, `report [--json]`,
- * `doctor [--json]`, and `rules check --diff <file|-> ...`. Any other command,
+ * `doctor [--json]`, `feedback [--json]`, `feedback <number> <right|wrong>`, and
+ * `rules check --diff <file|-> ...`. Any other command,
  * argument, or secret-looking argument yields usage and a nonzero exit, and no
  * argument value is ever echoed. `rules check` exits 0 (clean), 1 (a rule failed),
- * or 2 (it could not complete, including invalid arguments).
+ * or 2 (it could not complete, including invalid arguments). `feedback` exits 0
+ * (listed or recorded), 1 (invalid input), or 2 (local storage failed).
  */
 export async function runCli(
   argv: readonly string[],
@@ -74,8 +88,77 @@ export async function runCli(
     return runRulesCheck(argv.slice(2), io, dependencies);
   }
 
+  if (argv[0] === "feedback") {
+    return runFeedback(argv.slice(1), io, dependencies);
+  }
+
   io.writeErr(USAGE);
   return 1;
+}
+
+async function runFeedback(
+  args: readonly string[],
+  io: CliIO,
+  dependencies: CliDependencies,
+): Promise<number> {
+  const parsed = parseFeedbackArguments(args);
+
+  switch (parsed.kind) {
+    case "USAGE":
+      io.writeErr(FEEDBACK_USAGE);
+      return 1;
+    case "INVALID_DECISION":
+      io.writeErr(FEEDBACK_INVALID_DECISION_MESSAGE);
+      return 1;
+    case "LIST":
+      return guardFeedback(io, () => runFeedbackList(io, dependencies, parsed.json));
+    case "MARK":
+      return guardFeedback(io, () => runFeedbackMark(io, dependencies, parsed.request));
+  }
+}
+
+async function guardFeedback(io: CliIO, run: () => Promise<number>): Promise<number> {
+  try {
+    return await run();
+  } catch {
+    io.writeErr(FEEDBACK_FAILURE_MESSAGE);
+
+    return 2;
+  }
+}
+
+async function runFeedbackList(
+  io: CliIO,
+  dependencies: CliDependencies,
+  json: boolean,
+): Promise<number> {
+  const result: FeedbackListResult = await dependencies.feedbackList();
+
+  if (result.status !== "LISTED") {
+    io.writeErr(describeFeedbackError(result.status));
+
+    return 2;
+  }
+
+  io.writeOut(json ? serializeFeedbackList(result) : describeFeedbackList(result, new Date()));
+
+  return 0;
+}
+
+async function runFeedbackMark(
+  io: CliIO,
+  dependencies: CliDependencies,
+  request: FeedbackMarkRequest,
+): Promise<number> {
+  const result = await dependencies.feedbackMark(request);
+
+  if (result.status === "RECORDED" || result.status === "UNCHANGED") {
+    io.writeOut(describeFeedbackMark(result, new Date()));
+  } else {
+    io.writeErr(describeFeedbackError(result.status));
+  }
+
+  return feedbackMarkExitCode(result);
 }
 
 async function runLogin(io: CliIO, dependencies: CliDependencies): Promise<number> {

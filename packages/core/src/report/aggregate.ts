@@ -1,4 +1,7 @@
 import type { ReviewOutcome, SkippedReason, UnavailableReason } from "../domain/types";
+import { collectRuleFails, latestDecisions } from "../feedback/identity";
+import type { FeedbackRecord } from "../feedback/types";
+import { compareStrings } from "./compare";
 import type {
   ReportBuiltInCount,
   ReportEvaluationCoverage,
@@ -6,6 +9,7 @@ import type {
   ReportReasonCount,
   ReportRecord,
   ReportRuleBreakdown,
+  ReportRuleCalibration,
   ReviewReport,
 } from "./types";
 
@@ -22,17 +26,25 @@ interface RuleAccumulator {
   sliced: number;
 }
 
+interface CalibrationAccumulator {
+  right: number;
+  wrong: number;
+  unanswered: number;
+}
+
 /**
  * Pure, deterministic aggregation over parsed local review-history records. Outcome
  * totals, reason breakdowns, built-in counts, per-rule breakdowns, and timestamp
  * bounds are recomputed from `results`; the stored per-record `summary` is never
  * trusted. Rules are sorted by ID, checks by check ID, and reasons by code, so equal
  * history always produces byte-identical output. `skippedLineCount` is the number of
- * malformed lines the reader dropped.
+ * malformed lines the reader dropped. `feedback` is counted only where it matches a
+ * distinct rule FAIL in `records`; it never changes an outcome.
  */
 export function aggregateReviewHistory(
   records: readonly ReportRecord[],
   skippedLineCount: number,
+  feedback: readonly FeedbackRecord[],
 ): ReviewReport {
   const outcomes = emptyAccumulator();
   const unavailableReasons = new Map<UnavailableReason, number>();
@@ -85,13 +97,17 @@ export function aggregateReviewHistory(
     unavailableReasons: sortedReasons(unavailableReasons),
     skippedReasons: sortedReasons(skippedReasons),
     builtIns: sortedBuiltIns(builtIns),
-    rules: sortedRules(rules),
+    rules: sortedRules(rules, calibrateRules(records, feedback)),
     evaluation: finalizeEvaluation(evaluation),
   };
 }
 
 function emptyAccumulator(): OutcomeAccumulator {
   return { pass: 0, warn: 0, fail: 0, unavailable: 0, skipped: 0 };
+}
+
+function emptyCalibration(): CalibrationAccumulator {
+  return { right: 0, wrong: 0, unanswered: 0 };
 }
 
 function countOutcome(counts: OutcomeAccumulator, outcome: ReviewOutcome): void {
@@ -182,12 +198,50 @@ function sortedBuiltIns(map: ReadonlyMap<string, number>): readonly ReportBuiltI
     .sort((left, right) => compareStrings(left.checkId, right.checkId));
 }
 
-function sortedRules(map: ReadonlyMap<string, RuleAccumulator>): readonly ReportRuleBreakdown[] {
+function calibrateRules(
+  records: readonly ReportRecord[],
+  feedback: readonly FeedbackRecord[],
+): ReadonlyMap<string, CalibrationAccumulator> {
+  const decisions = latestDecisions(feedback);
+  const calibrations = new Map<string, CalibrationAccumulator>();
+
+  for (const [key, fail] of collectRuleFails(records)) {
+    const accumulator = calibrations.get(fail.ruleId) ?? emptyCalibration();
+    const decision = decisions.get(key);
+
+    if (decision === "RIGHT") {
+      accumulator.right += 1;
+    } else if (decision === "WRONG") {
+      accumulator.wrong += 1;
+    } else {
+      accumulator.unanswered += 1;
+    }
+
+    calibrations.set(fail.ruleId, accumulator);
+  }
+
+  return calibrations;
+}
+
+function finalizeCalibration(
+  accumulator: CalibrationAccumulator | undefined,
+): ReportRuleCalibration {
+  const { right, wrong, unanswered } = accumulator ?? emptyCalibration();
+  const answered = right + wrong;
+
+  return { right, wrong, unanswered, precision: answered === 0 ? null : right / answered };
+}
+
+function sortedRules(
+  map: ReadonlyMap<string, RuleAccumulator>,
+  calibrations: ReadonlyMap<string, CalibrationAccumulator>,
+): readonly ReportRuleBreakdown[] {
   return [...map.entries()]
     .map(([ruleId, accumulator]) => ({
       ruleId,
       counts: finalizeAccumulator(accumulator.counts),
       slicedRuleCount: accumulator.sliced,
+      calibration: finalizeCalibration(calibrations.get(ruleId)),
     }))
     .sort((left, right) => compareStrings(left.ruleId, right.ruleId));
 }
@@ -198,12 +252,4 @@ function earlier(current: string | null, candidate: string): string {
 
 function later(current: string | null, candidate: string): string {
   return current === null || candidate > current ? candidate : current;
-}
-
-function compareStrings(left: string, right: string): number {
-  if (left < right) {
-    return -1;
-  }
-
-  return left > right ? 1 : 0;
 }

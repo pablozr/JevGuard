@@ -373,7 +373,8 @@ path (a relative `XDG_DATA_HOME` is ignored). It stores only the structured-log
 allowlist plus a timestamp, is local-only, rewrites itself once it passes 5 MB keeping
 the newest records, and is safe to delete at any time. `jevguard report` and
 `jevguard report --json` aggregate it into outcome totals, reason breakdowns,
-per-rule counts, and slice coverage; a missing or empty file is a normal empty report.
+per-rule counts, slice coverage, and the per-rule feedback calibration (see
+`jevguard feedback` below); a missing or empty file is a normal empty report.
 See the [security model](./security.md) for exactly what it stores.
 
 ## CLI diagnostics and on-demand rule checks
@@ -454,6 +455,43 @@ invalid arguments, an unreadable or unsupported diff, a `--rule` that matches no
 or an `UNAVAILABLE` result with no `FAIL`. Errors are always plain text on standard
 error, also with `--json`.
 
+### `jevguard feedback [--json]` / `jevguard feedback <number> <right|wrong>`
+
+Records whether a repository-rule `FAIL` was a real violation or a false alarm. It is
+a local decision only: it never changes policy, thresholds, outcomes, or Jev calls.
+
+- `jevguard feedback` lists the rule `FAIL`s you have not answered, newest first and
+  numbered (at most 20; it prints `Showing k of n.` when more are pending). `--json`
+  prints `{version: 1, listedAt, total, items: [{number, ruleId, turnId, timestamp,
+  violationProbability}]}`.
+- `jevguard feedback <number> right` marks a real violation and
+  `jevguard feedback <number> wrong` marks a false alarm. The confirmation names the
+  rule, its age, and its probability, as the listing showed them.
+- Each listing pins its numbers: `<number>` always refers to the item shown by the
+  last `jevguard feedback`, in any terminal, even if newer `FAIL`s arrive or other
+  items are answered meanwhile. You can answer 1, 2, and 3 in sequence from one
+  listing. If two listings run at once, the last one wins; the rule, age, and
+  probability in the confirmation let you check.
+- Only `FAIL`s of repository rules are covered; built-in checks are not.
+- The last answer for a `FAIL` wins. Repeating the same answer writes nothing and
+  prints `Already marked as ...`; a different answer prints `Changed to ... (was ...)`.
+- An item that left the review history (rotation or a deleted history) is refused with
+  exit 1 and nothing is written.
+- Exit codes: `0` listed, recorded, or already recorded (an empty list is fine); `1`
+  invalid input (usage, an answer other than `right`/`wrong`, a number not in the last
+  list, no earlier listing, or an item no longer in the history); `2` the local files
+  could not be read or written, including an unreadable review history, which never
+  looks like an empty list.
+- It needs no TTY, so it works from the `!` prefix in Claude Code and OpenCode.
+- It covers reviews from both hosts, because both write the same local review history.
+  The CLI reads the history under the `XDG_DATA_HOME` of the terminal it runs in; if the
+  host runs with a different value, set it the same way for `jevguard report` and
+  `jevguard feedback`.
+
+`jevguard report` then shows, per rule, `feedback right R · wrong W · unanswered U ·
+precision P`, where `precision` is `right / (right + wrong)`, or `n/a` until you
+answer. Only feedback that matches a `FAIL` still in the history counts.
+
 ## Safe auto-propose remediation
 
 This section describes the OpenCode behavior. Claude Code has its own opt-in; see
@@ -507,7 +545,7 @@ JevGuard also reviews work done in Claude Code through a separate plugin. It is
 background and observe-only like the OpenCode plugin: it never changes what Claude
 sees, never prompts, blocks, or edits, unless you opt in to `delivery: agent` under
 [Remediation proposals](#remediation-proposals). Each reviewed unit is recorded in the
-[local review history](#local-review-history), which `jevguard report` reads, and its
+[local review history](#local-review-history), which `jevguard report` reads and `jevguard feedback` answers against, and its
 result is also shown to you only, inside the session (see
 [In-session results](#in-session-results)). Remediation proposals are off by default and
 strategy-only; see [Remediation proposals](#remediation-proposals).

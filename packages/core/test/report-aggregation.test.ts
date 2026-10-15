@@ -1,8 +1,10 @@
 import { describe, expect, test } from "vitest";
 import { aggregateReviewHistory } from "../src/index";
 import type {
+  FeedbackRecord,
   ReportRecord,
   ReportResult,
+  ReviewReport,
   RuleEvidenceMetadata,
   SemanticVerdict,
   SkippedReason,
@@ -111,6 +113,7 @@ describe("aggregateReviewHistory totals and reasons", () => {
         ]),
       ],
       0,
+      [],
     );
 
     expect(report.outcomes).toEqual({
@@ -136,6 +139,7 @@ describe("aggregateReviewHistory totals and reasons", () => {
         ]),
       ],
       0,
+      [],
     );
 
     expect(report.unavailableReasons).toEqual([
@@ -158,6 +162,7 @@ describe("aggregateReviewHistory totals and reasons", () => {
         ]),
       ],
       0,
+      [],
     );
 
     expect(report.builtIns).toEqual([
@@ -181,6 +186,7 @@ describe("aggregateReviewHistory totals and reasons", () => {
         ]),
       ],
       0,
+      [],
     );
 
     expect(report.rules).toEqual([
@@ -188,11 +194,13 @@ describe("aggregateReviewHistory totals and reasons", () => {
         ruleId: "R-A",
         counts: { pass: 1, warn: 0, fail: 0, unavailable: 0, skipped: 1, total: 2 },
         slicedRuleCount: 1,
+        calibration: { right: 0, wrong: 0, unanswered: 0, precision: null },
       },
       {
         ruleId: "R-B",
         counts: { pass: 1, warn: 0, fail: 1, unavailable: 0, skipped: 0, total: 2 },
         slicedRuleCount: 0,
+        calibration: { right: 0, wrong: 0, unanswered: 1, precision: null },
       },
     ]);
   });
@@ -210,6 +218,7 @@ describe("aggregateReviewHistory totals and reasons", () => {
         ]),
       ],
       0,
+      [],
     );
 
     expect(report.evaluation).toEqual({
@@ -227,6 +236,7 @@ describe("aggregateReviewHistory totals and reasons", () => {
         record("2026-03-01T00:00:00.000Z", [ruleSemantic("R-3", "PASS")]),
       ],
       4,
+      [],
     );
 
     expect(report.entryCount).toBe(3);
@@ -247,6 +257,7 @@ describe("aggregateReviewHistory determinism and empty input", () => {
         ]),
       ],
       0,
+      [],
     );
     const descending = aggregateReviewHistory(
       [
@@ -257,13 +268,14 @@ describe("aggregateReviewHistory determinism and empty input", () => {
         ]),
       ],
       0,
+      [],
     );
 
     expect(JSON.stringify(ascending)).toBe(JSON.stringify(descending));
   });
 
   test("returns an empty report for no records", () => {
-    const report = aggregateReviewHistory([], 2);
+    const report = aggregateReviewHistory([], 2, []);
 
     expect(report).toEqual({
       entryCount: 0,
@@ -277,5 +289,108 @@ describe("aggregateReviewHistory determinism and empty input", () => {
       rules: [],
       evaluation: { wholeEvaluations: 0, slicedEvaluations: 0, totalSliceJudgments: 0 },
     });
+  });
+});
+
+function failRecord(timestamp: string, turnId: string, ruleId: string): ReportRecord {
+  return { ...record(timestamp, [ruleSemantic(ruleId, "FAIL", 0.9)]), turnId };
+}
+
+function decision(
+  turnId: string,
+  ruleId: string,
+  value: FeedbackRecord["decision"],
+): FeedbackRecord {
+  return { turnId, ruleId, decision: value, timestamp: "2026-02-01T00:00:00.000Z" };
+}
+
+function calibrationOf(report: ReviewReport, ruleId: string) {
+  return report.rules.find((entry) => entry.ruleId === ruleId)?.calibration;
+}
+
+describe("aggregateReviewHistory calibration", () => {
+  const history = [
+    failRecord("2026-01-01T00:00:00.000Z", "t1", "R"),
+    failRecord("2026-01-02T00:00:00.000Z", "t2", "R"),
+    failRecord("2026-01-03T00:00:00.000Z", "t3", "R"),
+    failRecord("2026-01-04T00:00:00.000Z", "t4", "R"),
+  ];
+
+  test("computes precision from three right and one wrong", () => {
+    const report = aggregateReviewHistory(history, 0, [
+      decision("t1", "R", "RIGHT"),
+      decision("t2", "R", "RIGHT"),
+      decision("t3", "R", "RIGHT"),
+      decision("t4", "R", "WRONG"),
+    ]);
+
+    expect(calibrationOf(report, "R")).toEqual({
+      right: 3,
+      wrong: 1,
+      unanswered: 0,
+      precision: 0.75,
+    });
+  });
+
+  test("is 1 with only right answers and 0 with only wrong answers", () => {
+    const right = aggregateReviewHistory(history, 0, [decision("t1", "R", "RIGHT")]);
+    const wrong = aggregateReviewHistory(history, 0, [decision("t1", "R", "WRONG")]);
+
+    expect(calibrationOf(right, "R")?.precision).toBe(1);
+    expect(calibrationOf(wrong, "R")?.precision).toBe(0);
+  });
+
+  test("has null precision and counts every FAIL as unanswered without feedback", () => {
+    const report = aggregateReviewHistory(history, 0, []);
+
+    expect(calibrationOf(report, "R")).toEqual({
+      right: 0,
+      wrong: 0,
+      unanswered: 4,
+      precision: null,
+    });
+  });
+
+  test("ignores feedback for an absent identity or a non-FAIL result", () => {
+    const records = [...history, record("2026-01-05T00:00:00.000Z", [ruleSemantic("P", "PASS")])];
+    const report = aggregateReviewHistory(records, 0, [
+      decision("ghost", "R", "RIGHT"),
+      decision("turn-2026-01-05T00:00:00.000Z", "P", "RIGHT"),
+    ]);
+
+    expect(calibrationOf(report, "R")?.right).toBe(0);
+    expect(calibrationOf(report, "P")).toEqual({
+      right: 0,
+      wrong: 0,
+      unanswered: 0,
+      precision: null,
+    });
+  });
+
+  test("counts only the latest answer after a change", () => {
+    const report = aggregateReviewHistory(history, 0, [
+      decision("t1", "R", "RIGHT"),
+      decision("t1", "R", "WRONG"),
+    ]);
+
+    expect(calibrationOf(report, "R")).toMatchObject({ right: 0, wrong: 1, unanswered: 3 });
+  });
+
+  test("counts a duplicated FAIL once", () => {
+    const report = aggregateReviewHistory(
+      [...history, failRecord("2026-01-09T00:00:00.000Z", "t1", "R")],
+      0,
+      [],
+    );
+
+    expect(calibrationOf(report, "R")?.unanswered).toBe(4);
+  });
+
+  test("is deterministic regardless of record order", () => {
+    const feedback = [decision("t2", "R", "WRONG")];
+    const forward = aggregateReviewHistory(history, 0, feedback);
+    const reversed = aggregateReviewHistory([...history].reverse(), 0, feedback);
+
+    expect(JSON.stringify(forward)).toBe(JSON.stringify(reversed));
   });
 });

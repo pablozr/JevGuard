@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { performDoctor } from "./doctor/perform";
+import { performFeedbackList, performFeedbackMark } from "./feedback/perform";
 import { performInstall } from "./install";
 import { performLogin } from "./login";
 import { performReport } from "./report";
@@ -18,6 +19,8 @@ const exitCode = await runCli(process.argv.slice(2), io, {
   report: performReport,
   doctor: performDoctor,
   rulesCheck: performRulesCheck,
+  feedbackList: performFeedbackList,
+  feedbackMark: performFeedbackMark,
 });
 
 process.exitCode = exitCode;

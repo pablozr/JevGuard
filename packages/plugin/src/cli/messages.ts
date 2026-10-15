@@ -5,6 +5,7 @@ import type {
   ReportBuiltInCount,
   ReportReasonCount,
   ReportRuleBreakdown,
+  ReportRuleCalibration,
   ReviewCounts,
   ReviewReport,
 } from "@jevguard/core";
@@ -15,6 +16,8 @@ export const USAGE = [
   "       jevguard report [--json]",
   "       jevguard doctor [--json]",
   "       jevguard rules check --diff <file|-> [--task <text>] [--rule <id>] [--json]",
+  "       jevguard feedback [--json]",
+  "       jevguard feedback <number> <right|wrong>",
   "",
   "`jev-init` and `jevguard-rules` are OpenCode skills, not CLI commands. Register",
   "the plugin in opencode.json (or run `jevguard install`) and invoke them from",
@@ -23,7 +26,7 @@ export const USAGE = [
 
 export const EMPTY_HISTORY_MESSAGE = "No review history yet.";
 
-export const REPORT_READ_FAILURE_MESSAGE = "Could not read the review history.";
+export const REPORT_READ_FAILURE_MESSAGE = "Could not read the review history or feedback.";
 
 export const LOGIN_SAVED_MESSAGE = "Credential saved to the OS credential store.";
 
@@ -146,6 +149,12 @@ function describeRules(rules: readonly ReportRuleBreakdown[]): readonly string[]
 
   return rules.map(
     (entry) =>
-      `  ${entry.ruleId}: ${describeTotals(entry.counts)} · sliced ${entry.slicedRuleCount}`,
+      `  ${entry.ruleId}: ${describeTotals(entry.counts)} · sliced ${entry.slicedRuleCount} · ${describeCalibration(entry.calibration)}`,
   );
+}
+
+function describeCalibration(calibration: ReportRuleCalibration): string {
+  const precision = calibration.precision === null ? "n/a" : calibration.precision.toFixed(2);
+
+  return `feedback right ${calibration.right} · wrong ${calibration.wrong} · unanswered ${calibration.unanswered} · precision ${precision}`;
 }

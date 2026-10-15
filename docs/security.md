@@ -159,6 +159,27 @@ turn. `jevguard report` reads and aggregates this file and prints aggregated cou
 rule IDs, check IDs, and reason codes only — never a file path, task, diff, or
 credential.
 
+## Local rule feedback
+
+`jevguard feedback` stores your right/wrong decisions about rule `FAIL`s in two local
+files under the same data directory as the review history:
+
+```text
+<XDG_DATA_HOME or ~/.local/share>/jevguard/feedback.jsonl
+<XDG_DATA_HOME or ~/.local/share>/jevguard/feedback-selection.json
+```
+
+`feedback.jsonl` has one line per answer with exactly four fields: `turnId`, `ruleId`,
+`decision` (`RIGHT` or `WRONG`), and `timestamp`. `feedback-selection.json` holds the
+identifiers shown by the last listing (`turnId`, `ruleId`) and `listedAt`. Neither
+file stores a task, diff, finding, file path, file content, or credential.
+
+Both files are created owner-only (mode 0600 inside a 0700 directory; on Windows the
+profile's ACL applies). `feedback.jsonl` is bounded to 1 MB: past that it is rewritten
+atomically keeping the newest 5000 lines. The data is local-only, never uploaded, and
+safe to delete at any time. It does not change policy, thresholds, outcomes, or any Jev
+call; it only feeds the calibration printed by `jevguard report`.
+
 ## Rule authoring skill
 
 The package ships two OpenCode skills with private validators: `jevguard-rules` to

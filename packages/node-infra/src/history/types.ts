@@ -15,6 +15,20 @@ export interface ReviewHistoryReadResult {
   readonly skippedLineCount: number;
 }
 
+/** Parsed JSON Lines records plus how many malformed lines were skipped. */
+export interface ParsedJsonLines<T> {
+  readonly records: readonly T[];
+  readonly skippedLineCount: number;
+}
+
+/**
+ * Strict history read: a missing file is an empty `READ`, an I/O error is `FAILED` so a
+ * caller never mistakes an unreadable history for an empty one.
+ */
+export type ReviewHistoryStrictReadResult =
+  | ({ readonly status: "READ" } & ReviewHistoryReadResult)
+  | { readonly status: "FAILED" };
+
 /** Minimal read-only environment port so tests never read the real process env. */
 export interface HistoryEnvironment {
   get(name: string): string | undefined;
@@ -54,9 +68,11 @@ export interface LocalReviewHistoryDependencies {
 /**
  * Local review history surface. `append` never rejects: a write failure is contained
  * so it can never affect a review. `read` returns an empty result for a missing or
- * unreadable file and counts malformed lines instead of crashing.
+ * unreadable file and counts malformed lines instead of crashing; `readStrict` instead
+ * reports an I/O error as `FAILED`.
  */
 export interface LocalReviewHistory {
   append(entry: ReviewLogEntry): Promise<void>;
   read(): Promise<ReviewHistoryReadResult>;
+  readStrict(): Promise<ReviewHistoryStrictReadResult>;
 }

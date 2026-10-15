@@ -1,12 +1,22 @@
 import { existsSync, readFileSync } from "node:fs";
-import { describe, expect, test } from "vitest";
-import { runCli } from "../src/cli/run-cli";
-import type { CliDependencies, CliIO } from "../src/cli/types";
+import {
+  aggregateReview,
+  aggregateReviewHistory,
+  type FeedbackRecord,
+  type ReviewReport,
+} from "@jevguard/core";
 import type { LoginOutcome, ReviewHistoryRecord } from "@jevguard/node-infra";
 import type { InstallOutcome, InstallTarget } from "@jevguard/opencode-adapter";
-import { aggregateReview, aggregateReviewHistory, type ReviewReport } from "@jevguard/core";
+import { describe, expect, test } from "vitest";
 import type { DoctorReport } from "../src/cli/doctor/types";
+import type {
+  FeedbackListResult,
+  FeedbackMarkRequest,
+  FeedbackMarkResult,
+} from "../src/cli/feedback/types";
 import type { RulesCheckRequest, RulesCheckResult } from "../src/cli/rules-check/types";
+import { runCli } from "../src/cli/run-cli";
+import type { CliDependencies, CliIO } from "../src/cli/types";
 
 const GLOBAL_PATH = "C:/home/.config/opencode/opencode.json";
 const PROJECT_PATH = "C:/repo/opencode.json";
@@ -14,7 +24,7 @@ const MANUAL_SNIPPET = '{ "plugin": ["@pablozrrrr/jevguard"] }';
 
 const PATH_SENTINEL = "src/SECRET_PATH_SENTINEL.ts";
 
-function reportFixture(): ReviewReport {
+function reportFixture(feedback: readonly FeedbackRecord[] = []): ReviewReport {
   const record: ReviewHistoryRecord = {
     timestamp: "2026-01-01T00:00:00.000Z",
     turnId: "turn-1",
@@ -35,7 +45,7 @@ function reportFixture(): ReviewReport {
     ],
   };
 
-  return aggregateReviewHistory([record], 0);
+  return aggregateReviewHistory([record], 0, feedback);
 }
 
 function doctorFixture(status: DoctorReport["status"]): DoctorReport {
@@ -101,10 +111,34 @@ class StubDependencies implements CliDependencies {
     path: GLOBAL_PATH,
   };
   reportCalls = 0;
-  reportResult: ReviewReport = aggregateReviewHistory([], 0);
+  reportResult: ReviewReport = aggregateReviewHistory([], 0, []);
   doctorCalls = 0;
   doctorError: Error | null = null;
   doctorResult: DoctorReport = doctorFixture("OK");
+  feedbackError: Error | null = null;
+  readonly feedbackMarkRequests: FeedbackMarkRequest[] = [];
+  feedbackListResult: FeedbackListResult = {
+    status: "LISTED",
+    listedAt: "2026-01-01T00:00:00.000Z",
+    total: 1,
+    items: [
+      {
+        number: 1,
+        ruleId: "ARCH-001",
+        turnId: "turn-1",
+        timestamp: new Date(Date.now() - 5 * 60_000).toISOString(),
+        violationProbability: 0.91,
+      },
+    ],
+  };
+  feedbackMarkResult: FeedbackMarkResult = {
+    status: "RECORDED",
+    ruleId: "ARCH-001",
+    decision: "WRONG",
+    previous: null,
+    timestamp: new Date(Date.now() - 3 * 3_600_000).toISOString(),
+    violationProbability: 0.91,
+  };
   rulesCheckCalls = 0;
   rulesCheckError: Error | null = null;
   readonly rulesCheckRequests: RulesCheckRequest[] = [];
@@ -135,6 +169,20 @@ class StubDependencies implements CliDependencies {
     return this.doctorError === null
       ? Promise.resolve(this.doctorResult)
       : Promise.reject(this.doctorError);
+  }
+
+  feedbackList(): Promise<FeedbackListResult> {
+    return this.feedbackError === null
+      ? Promise.resolve(this.feedbackListResult)
+      : Promise.reject(this.feedbackError);
+  }
+
+  feedbackMark(request: FeedbackMarkRequest): Promise<FeedbackMarkResult> {
+    this.feedbackMarkRequests.push(request);
+
+    return this.feedbackError === null
+      ? Promise.resolve(this.feedbackMarkResult)
+      : Promise.reject(this.feedbackError);
   }
 
   rulesCheck(request: RulesCheckRequest): Promise<RulesCheckResult> {
@@ -546,6 +594,211 @@ describe("runCli rules check", () => {
     expect(usage).toContain(
       "jevguard rules check --diff <file|-> [--task <text>] [--rule <id>] [--json]",
     );
+  });
+});
+
+describe("runCli feedback", () => {
+  test("lists unanswered FAILs with the answer instructions", async () => {
+    const { io, dependencies } = harness();
+
+    const exitCode = await runCli(["feedback"], io, dependencies);
+    const output = io.out.join("\n");
+
+    expect(exitCode).toBe(0);
+    expect(io.err).toEqual([]);
+    expect(output).toContain("ARCH-001");
+    expect(output).toContain("p=0.91");
+    expect(output).toContain("min ago");
+    expect(output).toContain("Answer with:");
+    expect(output).toContain("jevguard feedback 1 wrong");
+  });
+
+  test("prints the listing as versioned JSON for --json", async () => {
+    const { io, dependencies } = harness();
+
+    const exitCode = await runCli(["feedback", "--json"], io, dependencies);
+    const parsed = JSON.parse(io.out.join("\n"));
+
+    expect(exitCode).toBe(0);
+    expect(parsed.version).toBe(1);
+    expect(parsed.total).toBe(1);
+    expect(parsed.items.map((item: { number: number }) => item.number)).toEqual([1]);
+  });
+
+  test("states an empty list plainly", async () => {
+    const { io, dependencies } = harness();
+    dependencies.feedbackListResult = {
+      status: "LISTED",
+      listedAt: "2026-01-01T00:00:00.000Z",
+      total: 0,
+      items: [],
+    };
+
+    const exitCode = await runCli(["feedback"], io, dependencies);
+
+    expect(exitCode).toBe(0);
+    expect(io.out.join("\n")).toBe("No unanswered FAILs.");
+  });
+
+  test.each([
+    ["wrong", "Marked as a false alarm: ARCH-001 (3 h ago, p=0.91).", "WRONG"],
+    ["right", "Marked as a real violation: ARCH-001 (3 h ago, p=0.91).", "RIGHT"],
+  ] as const)("marks a FAIL as %s", async (answer, message, decision) => {
+    const { io, dependencies } = harness();
+    dependencies.feedbackMarkResult = {
+      status: "RECORDED",
+      ruleId: "ARCH-001",
+      decision,
+      previous: null,
+      timestamp: new Date(Date.now() - 3 * 3_600_000).toISOString(),
+      violationProbability: 0.91,
+    };
+
+    const exitCode = await runCli(["feedback", "1", answer], io, dependencies);
+
+    expect(exitCode).toBe(0);
+    expect(io.out.join("\n")).toBe(message);
+    expect(dependencies.feedbackMarkRequests).toEqual([{ number: 1, decision }]);
+  });
+
+  test("exits zero for an answer that was already recorded", async () => {
+    const { io, dependencies } = harness();
+    dependencies.feedbackMarkResult = {
+      status: "UNCHANGED",
+      ruleId: "ARCH-001",
+      decision: "WRONG",
+      timestamp: new Date(Date.now() - 3 * 3_600_000).toISOString(),
+      violationProbability: 0.91,
+    };
+
+    const exitCode = await runCli(["feedback", "1", "wrong"], io, dependencies);
+
+    expect(exitCode).toBe(0);
+    expect(io.out.join("\n")).toBe("Already marked as a false alarm: ARCH-001 (3 h ago, p=0.91).");
+  });
+
+  test.each([
+    ["NO_SELECTION", 1, "Run `jevguard feedback` first"],
+    ["NUMBER_OUT_OF_RANGE", 1, "No FAIL has that number"],
+    ["NO_LONGER_IN_HISTORY", 1, "no longer in the review history"],
+    ["READ_FAILED", 2, "Could not read the local review history or feedback."],
+    ["WRITE_FAILED", 2, "Could not save the feedback."],
+  ] as const)("reports %s on stderr with exit %i", async (status, code, message) => {
+    const { io, dependencies } = harness();
+    dependencies.feedbackMarkResult = { status };
+
+    const exitCode = await runCli(["feedback", "1", "wrong"], io, dependencies);
+
+    expect(exitCode).toBe(code);
+    expect(io.out).toEqual([]);
+    expect(io.err.join("\n")).toContain(message);
+  });
+
+  test("exits 2 when the listing cannot be stored", async () => {
+    const { io, dependencies } = harness();
+    dependencies.feedbackListResult = { status: "WRITE_FAILED" };
+
+    const exitCode = await runCli(["feedback"], io, dependencies);
+
+    expect(exitCode).toBe(2);
+    expect(io.err.join("\n")).toContain("Could not save the feedback.");
+  });
+
+  test.each([["maybe"], ["WRONG"]])(
+    "rejects the decision %s without calling the dependency or echoing it",
+    async (answer) => {
+      const { io, dependencies } = harness();
+
+      const exitCode = await runCli(["feedback", "1", answer], io, dependencies);
+
+      expect(exitCode).toBe(1);
+      expect(dependencies.feedbackMarkRequests).toEqual([]);
+      expect(io.err.join("\n")).toContain("right (a real violation) or wrong (a false alarm)");
+      expect(io.err.join("\n")).not.toContain(answer);
+    },
+  );
+
+  test.each([
+    [["feedback", "abc", "wrong"]],
+    [["feedback", "0", "wrong"]],
+    [["feedback", "1"]],
+    [["feedback", "1", "wrong", "extra"]],
+    [["feedback", "--json", "extra"]],
+  ])("prints the feedback usage for %j without echoing arguments", async (argv) => {
+    const { io, dependencies } = harness();
+
+    const exitCode = await runCli(argv, io, dependencies);
+
+    expect(exitCode).toBe(1);
+    expect(dependencies.feedbackMarkRequests).toEqual([]);
+    expect(io.err.join("\n")).toContain("jevguard feedback <number> <right|wrong>");
+    expect(io.err.join("\n")).not.toContain("abc");
+    expect(io.err.join("\n")).not.toContain("extra");
+  });
+
+  test("exits 2 when a dependency throws", async () => {
+    const { io, dependencies } = harness();
+    dependencies.feedbackError = new Error("SECRET_VALUE");
+
+    const listExit = await runCli(["feedback"], io, dependencies);
+    const markExit = await runCli(["feedback", "1", "wrong"], io, dependencies);
+
+    expect(listExit).toBe(2);
+    expect(markExit).toBe(2);
+    expect(io.err.join("\n")).toContain("Could not complete the feedback command.");
+    expect(io.err.join("\n")).not.toContain("SECRET_VALUE");
+  });
+
+  test("lists feedback in the top-level usage", async () => {
+    const { io, dependencies } = harness();
+
+    await runCli(["bogus"], io, dependencies);
+
+    expect(io.err.join("\n")).toContain("jevguard feedback [--json]");
+    expect(io.err.join("\n")).toContain("jevguard feedback <number> <right|wrong>");
+  });
+});
+
+describe("runCli report calibration", () => {
+  test("shows feedback calibration per rule", async () => {
+    const { io, dependencies } = harness();
+    dependencies.reportResult = reportFixture([
+      {
+        turnId: "turn-1",
+        ruleId: "ARCH-001",
+        decision: "RIGHT",
+        timestamp: "2026-01-02T00:00:00.000Z",
+      },
+    ]);
+
+    await runCli(["report"], io, dependencies);
+
+    expect(io.out.join("\n")).toContain(
+      "feedback right 1 · wrong 0 · unanswered 0 · precision 1.00",
+    );
+  });
+
+  test("shows n/a precision without feedback", async () => {
+    const { io, dependencies } = harness();
+    dependencies.reportResult = reportFixture();
+
+    await runCli(["report"], io, dependencies);
+
+    expect(io.out.join("\n")).toContain("unanswered 1 · precision n/a");
+  });
+
+  test("includes calibration in report --json", async () => {
+    const { io, dependencies } = harness();
+    dependencies.reportResult = reportFixture();
+
+    await runCli(["report", "--json"], io, dependencies);
+
+    expect(JSON.parse(io.out.join("\n")).rules[0].calibration).toEqual({
+      right: 0,
+      wrong: 0,
+      unanswered: 1,
+      precision: null,
+    });
   });
 });
 

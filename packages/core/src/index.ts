@@ -111,10 +111,24 @@ export type {
   ReportRecord,
   ReportResult,
   ReportRuleBreakdown,
+  ReportRuleCalibration,
   ReportSummary,
   ReviewReport,
 } from "./report/types";
 export { aggregateReviewHistory } from "./report/aggregate";
+export type {
+  FailIdentity,
+  FeedbackDecision,
+  FeedbackDecisionPlan,
+  FeedbackRecord,
+  FeedbackSelection,
+  FeedbackTargetResolution,
+  PendingFailList,
+  RuleFail,
+} from "./feedback/types";
+export { collectRuleFails, failIdentityKey, latestDecisions } from "./feedback/identity";
+export { FEEDBACK_LIST_LIMIT, listPendingFails } from "./feedback/pending";
+export { planFeedbackDecision, resolveFeedbackTarget } from "./feedback/resolve";
 export type {
   BudgetedRulePlan,
   DiffParseFailureReason,

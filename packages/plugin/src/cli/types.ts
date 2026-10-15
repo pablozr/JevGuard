@@ -2,6 +2,7 @@ import type { ReviewReport } from "@jevguard/core";
 import type { LoginOutcome } from "@jevguard/node-infra";
 import type { InstallOutcome, InstallTarget } from "@jevguard/opencode-adapter";
 import type { DoctorReport } from "./doctor/types";
+import type { FeedbackListResult, FeedbackMarkRequest, FeedbackMarkResult } from "./feedback/types";
 import type { RulesCheckRequest, RulesCheckResult } from "./rules-check/types";
 
 export interface CliIO {
@@ -15,4 +16,6 @@ export interface CliDependencies {
   readonly report: () => Promise<ReviewReport>;
   readonly doctor: () => Promise<DoctorReport>;
   readonly rulesCheck: (request: RulesCheckRequest) => Promise<RulesCheckResult>;
+  readonly feedbackList: () => Promise<FeedbackListResult>;
+  readonly feedbackMark: (request: FeedbackMarkRequest) => Promise<FeedbackMarkResult>;
 }

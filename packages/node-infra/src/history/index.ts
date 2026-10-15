@@ -15,4 +15,5 @@ export type {
   ReviewHistoryPathContext,
   ReviewHistoryReadResult,
   ReviewHistoryRecord,
+  ReviewHistoryStrictReadResult,
 } from "./types";

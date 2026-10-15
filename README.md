@@ -427,6 +427,24 @@ The report prints aggregated counts, rule IDs, check IDs, and reason codes only 
 never file paths, tasks, diffs, or credentials. A missing or empty history is a
 normal empty report, not an error.
 
+### Rule feedback
+
+Tell JevGuard whether a `FAIL` was right. The answer is stored locally and only
+feeds the calibration shown by `jevguard report`; it never changes a rule, a
+threshold, or what the model returns.
+
+```sh
+# unanswered rule FAILs, newest first, numbered
+jevguard feedback
+
+# answer one: right = a real violation, wrong = a false alarm
+jevguard feedback 1 wrong
+```
+
+Numbers stay fixed to the last listing. Built-in checks are not covered. See
+[configuration](./docs/configuration.md)
+for details.
+
 ## Diagnose your setup
 
 `jevguard doctor` checks your local setup without touching the network or changing

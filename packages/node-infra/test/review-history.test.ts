@@ -2,64 +2,19 @@ import { mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
+import type {
+  DeliveryStatus,
+  LocalReviewHistory,
+  ReviewLogEntry,
+  StructuredLogSink,
+} from "../src/index";
 import {
   createLocalReviewHistory,
   createMirroredReviewLogSink,
   createNodeReviewHistoryFileSystem,
   resolveHistoryFilePath,
 } from "../src/index";
-import type {
-  DeliveryStatus,
-  LocalReviewHistory,
-  ReviewHistoryFileSystem,
-  ReviewLogEntry,
-  StructuredLogSink,
-} from "../src/index";
-
-class FakeHistoryFileSystem implements ReviewHistoryFileSystem {
-  readonly files = new Map<string, string>();
-  readonly ensuredDirectories: string[] = [];
-  readonly atomicWrites: string[] = [];
-  failAppend = false;
-
-  async readFile(path: string): Promise<string | null> {
-    return this.files.get(path) ?? null;
-  }
-
-  async appendFile(path: string, data: string): Promise<void> {
-    if (this.failAppend) {
-      throw new Error("append failed");
-    }
-
-    this.files.set(path, (this.files.get(path) ?? "") + data);
-  }
-
-  async sizeOf(path: string): Promise<number | null> {
-    const contents = this.files.get(path);
-
-    return contents === undefined ? null : Buffer.byteLength(contents, "utf8");
-  }
-
-  async writeFileAtomic(path: string, data: string): Promise<void> {
-    this.atomicWrites.push(path);
-    this.files.set(path, data);
-  }
-
-  async ensureParentDirectory(path: string): Promise<void> {
-    this.ensuredDirectories.push(path);
-  }
-}
-
-function context(overrides: { readonly xdg?: string | undefined; readonly homedir?: string } = {}) {
-  return {
-    cwd: "C:/work",
-    homedir: overrides.homedir ?? "C:/home",
-    environment: {
-      get: (name: string): string | undefined =>
-        name === "XDG_DATA_HOME" ? overrides.xdg : undefined,
-    },
-  };
-}
+import { context, FakeHistoryFileSystem } from "./support/history-fakes";
 
 function historyWith(
   fileSystem: FakeHistoryFileSystem,
@@ -229,6 +184,44 @@ describe("local review history append and read", () => {
     for (const line of lines) {
       expect(() => JSON.parse(line)).not.toThrow();
     }
+  });
+});
+
+describe("local review history strict read", () => {
+  test("reads a missing file as an empty READ", async () => {
+    const history = historyWith(new FakeHistoryFileSystem());
+
+    await expect(history.readStrict()).resolves.toEqual({
+      status: "READ",
+      records: [],
+      skippedLineCount: 0,
+    });
+  });
+
+  test("reports an I/O error as FAILED while the tolerant read stays empty", async () => {
+    const fileSystem = new FakeHistoryFileSystem();
+    const history = historyWith(fileSystem);
+
+    await history.append(entry("turn-1"));
+    fileSystem.failRead = true;
+
+    await expect(history.readStrict()).resolves.toEqual({ status: "FAILED" });
+    await expect(history.read()).resolves.toEqual({ records: [], skippedLineCount: 0 });
+  });
+
+  test("returns the records of a valid file", async () => {
+    const history = historyWith(new FakeHistoryFileSystem());
+
+    await history.append(entry("turn-1"));
+    await history.append(entry("turn-2"));
+
+    const result = await history.readStrict();
+
+    expect(result.status).toBe("READ");
+    expect(result.status === "READ" ? result.records.map((item) => item.turnId) : []).toEqual([
+      "turn-1",
+      "turn-2",
+    ]);
   });
 });
 
