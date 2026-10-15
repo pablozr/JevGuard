@@ -87,13 +87,20 @@ export type {
 export { parseRule } from "./rules/parse-rule";
 export { parseRules } from "./rules/parse-rules";
 export type {
+  CheckRulesInput,
+  PolicyConfig,
+  PolicyConfigCode,
+  PolicyConfigDiagnosis,
   ReviewCounts,
   ReviewSummary,
   ReviewTurnDependencies,
+  RuleCheckOutcome,
   TurnReview,
   TurnReviewOutcome,
 } from "./review/types";
 export { aggregateReview } from "./review/aggregate";
+export { checkRules } from "./review/check-rules";
+export { diagnosePolicyConfig, loadPolicy } from "./review/policy";
 export { reviewTurn } from "./review/review-turn";
 export { reviewLevelUnavailable, unavailableReview } from "./review/unavailable";
 export type {

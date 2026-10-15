@@ -1,4 +1,4 @@
-import type { ReviewResult, SemanticVerdict } from "../domain/types";
+import type { ReviewResult, SemanticVerdict, Turn } from "../domain/types";
 import type { GateConfigResult } from "../gate/types";
 import type { JevEvaluationPort, PolicyConfigParser, PolicyLoader } from "../ports/types";
 import type { RemediationConfigResult } from "../remediation/types";
@@ -45,9 +45,19 @@ export interface TurnReviewOutcome {
   readonly remediation: RemediationConfigResult;
 }
 
-export type ConfigValue =
-  | { readonly status: "VALUE"; readonly value: unknown }
-  | { readonly status: "INVALID" };
+/** Why the optional `.jev/config.yaml` text is, or is not, usable policy configuration. */
+export type PolicyConfigCode =
+  | "DEFAULTS"
+  | "VALID"
+  | "PARSE_INVALID"
+  | "GATE_INVALID"
+  | "REMEDIATION_INVALID";
+
+/** The single diagnosis of one config text: a typed code plus the resolved configuration. */
+export interface PolicyConfigDiagnosis {
+  readonly code: PolicyConfigCode;
+  readonly config: PolicyConfig;
+}
 
 /** Rule-lane results plus the parsed rule provenance the review result omits. */
 export interface RuleLaneReview {
@@ -60,3 +70,18 @@ export interface PolicyConfig {
   readonly gate: GateConfigResult;
   readonly remediation: RemediationConfigResult;
 }
+
+/** Either the parsed rule candidates or the rule lane degraded to review-level `UNAVAILABLE`. */
+export type RuleCandidateResolution =
+  | { readonly status: "RULES"; readonly rules: RuleParseResults }
+  | { readonly status: "UNAVAILABLE"; readonly lane: RuleLaneReview };
+
+/** One on-demand rule check: the provided turn and an optional single rule to restrict to. */
+export interface CheckRulesInput {
+  readonly turn: Turn;
+  readonly ruleId: string | null;
+}
+
+export type RuleCheckOutcome =
+  | { readonly status: "REVIEWED"; readonly review: TurnReview }
+  | { readonly status: "RULE_NOT_FOUND" };
