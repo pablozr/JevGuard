@@ -2,6 +2,7 @@ import type {
   EvidenceSliceKind,
   RuleEvidence,
   SkippedReason,
+  TurnFile,
   UnavailableReason,
 } from "../domain/types";
 
@@ -90,3 +91,63 @@ export type RuleEvidencePlan =
 export type BudgetedRulePlan =
   | RuleEvidencePlan
   | { readonly status: "SLICE_LIMIT_EXCEEDED"; readonly slices: readonly EvidenceSlice[] };
+
+export type DiffParseFailureReason =
+  | "UNRECOGNIZED_DIFF"
+  | "BINARY_PATCH"
+  | "QUOTED_PATH"
+  | "MISSING_PATH"
+  | "COMBINED_DIFF"
+  | "UNSUPPORTED_PREFIX"
+  | "RENAMED_PATH"
+  | "TRUNCATED_HUNK";
+
+/**
+ * Result of strictly splitting a unified diff into per-file turn patches. Any input
+ * that is not fully understood is `INVALID`; a partial file list is never returned.
+ */
+export type DiffParseResult =
+  | { readonly status: "PARSED"; readonly files: readonly TurnFile[] }
+  | { readonly status: "INVALID"; readonly reason: DiffParseFailureReason };
+
+export type DiffFormat = "GIT" | "PLAIN";
+
+export interface DiffLines {
+  readonly raw: readonly string[];
+  readonly text: readonly string[];
+  readonly endsWithNewline: boolean;
+}
+
+export interface DiffInvalid {
+  readonly status: "INVALID";
+  readonly reason: DiffParseFailureReason;
+}
+
+export interface DiffSectionRead {
+  readonly status: "OK";
+  readonly file: TurnFile | null;
+  readonly next: number;
+}
+
+export interface DiffPaths {
+  readonly status: "OK";
+  readonly oldPath: string | null;
+  readonly newPath: string | null;
+}
+
+export interface DiffExtendedHeaders {
+  readonly status: "OK";
+  readonly next: number;
+  readonly movedFrom: string | null;
+  readonly movedTo: string | null;
+}
+
+export interface DiffHunksRead {
+  readonly status: "OK";
+  readonly end: number;
+}
+
+export interface DiffHunkRead {
+  readonly status: "OK";
+  readonly next: number;
+}

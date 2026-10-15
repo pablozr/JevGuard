@@ -110,6 +110,8 @@ export type {
 export { aggregateReviewHistory } from "./report/aggregate";
 export type {
   BudgetedRulePlan,
+  DiffParseFailureReason,
+  DiffParseResult,
   EvidencePolicy,
   EvidenceSelection,
   EvidenceSlice,
@@ -120,6 +122,7 @@ export type {
   TurnEvidenceSelection,
 } from "./evidence/types";
 export { DEFAULT_EVIDENCE_POLICY } from "./evidence/defaults";
+export { parseUnifiedDiff } from "./evidence/parse-unified-diff";
 export { planRuleEvidence } from "./evidence/plan-slices";
 export {
   MAX_EXTRA_RULE_CALLS_PER_TURN,
