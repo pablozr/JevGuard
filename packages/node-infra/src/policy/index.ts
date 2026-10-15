@@ -1,3 +1,7 @@
 export { parsePolicyConfig } from "./config-yaml";
-export { createNodePolicyFileSystem, createPolicyFileLoader } from "./file-source";
-export type { PolicyFileSystem, PolicyLoaderDependencies } from "./types";
+export {
+  createNodePolicyFileSystem,
+  createPolicyFileLoader,
+  policyFilePaths,
+} from "./file-source";
+export type { PolicyFilePaths, PolicyFileSystem, PolicyLoaderDependencies } from "./types";

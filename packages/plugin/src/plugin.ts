@@ -1,15 +1,11 @@
-import { createFifoJevPort, createRemediationProposalStore } from "@jevguard/core";
+import { createRemediationProposalStore } from "@jevguard/core";
 import {
-  createCredentialProvider,
-  createKeyringCredentialStore,
   createLocalReviewHistory,
   createMirroredReviewLogSink,
   createNodePolicyFileSystem,
   createNodeReviewHistoryFileSystem,
   createPolicyFileLoader,
-  createProcessEnvironment,
   createProcessReviewHistoryContext,
-  createTypeSafeJevTransport,
 } from "@jevguard/node-infra";
 import {
   createOpenCodeLogSink,
@@ -24,13 +20,12 @@ import {
   InMemoryTurnDeduplicator,
 } from "@jevguard/opencode-adapter";
 import type { Plugin } from "@opencode-ai/plugin";
+import { createDefaultJevPort } from "./jev-port";
 import { registerRemediationConfig } from "./remediation/config";
 import { createPluginRuntime } from "./runtime";
 import { createConfigHook } from "./skills/config-hook";
 import { resolveInstalledSkillDirectories } from "./skills/skill-directory";
 import type { PluginRuntimeDependencies } from "./types";
-
-const DEFAULT_JEV_MAX_CONCURRENCY = 2;
 
 /**
  * OpenCode V1.18.32 server plugin entrypoint. It composes the adapter
@@ -70,15 +65,7 @@ export const JevGuardPlugin: Plugin = async (input) => {
     navigator: createOpenCodeSessionNavigator(presentationClient),
     notifier: createRemediationNotifier(toast),
     failures: createRemediationFailureLogSink(presentationClient),
-    jev: createFifoJevPort(
-      createTypeSafeJevTransport(
-        createCredentialProvider({
-          environment: createProcessEnvironment(),
-          store: createKeyringCredentialStore(),
-        }),
-      ),
-      { maxConcurrency: DEFAULT_JEV_MAX_CONCURRENCY },
-    ),
+    jev: createDefaultJevPort(),
   };
 
   const skillConfigHook = createConfigHook({

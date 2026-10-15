@@ -21,6 +21,20 @@ is a single request with two independent answers; the same complete evidence fee
 
 It does not send repository-wide diffs as a fallback.
 
+`jevguard rules check` sends the same per-rule evidence under the same policy, but from a
+diff you provide: the task from `--task` (or a fixed default task), the rule policy, the
+diff of the files within each rule's scope, and their paths. The evidence policy still
+applies, so a denylisted path makes the rule `UNAVAILABLE` (`BLOCKED_EVIDENCE`) before
+anything is sent. The diff parser is strict so that policy cannot be bypassed through
+the input: it accepts only `git diff` output (or a plain `---`/`+++` diff) with `a/`
+and `b/` prefixes, and it refuses the whole input (exit `2`, nothing sent) for a rename
+or copy with content (otherwise `.env` content could travel under an allowed path),
+combined or merge diffs, `git log -p` or format-patch output, truncated hunks, content
+outside a file section, unsupported prefixes, quoted paths, binary patches and invalid
+UTF-8. It sends no built-in batch, starts no remediation and records no
+history. Its output never contains the task or the diff. `--task` is visible in the
+process list, so keep secrets out of it.
+
 ## What the remediation path sends to the coding model
 
 Safe auto-propose remediation is separate from Jev evaluation and is delivered by the
@@ -234,6 +248,10 @@ persists it in history.
 
 If neither source provides a key, the plugin stays loaded and the evaluation is
 `UNAVAILABLE`, with a safe instruction to run `jevguard login`.
+
+`jevguard doctor` reports where the key comes from (the OS credential store or the
+`TYPESAFE_API_KEY` override) without printing the key or any part of it. It makes no
+network call and creates no Jev transport.
 
 > [!IMPORTANT]
 > A secret passed through the environment of the OpenCode process can be inherited

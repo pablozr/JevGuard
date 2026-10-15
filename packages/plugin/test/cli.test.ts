@@ -4,7 +4,9 @@ import { runCli } from "../src/cli/run-cli";
 import type { CliDependencies, CliIO } from "../src/cli/types";
 import type { LoginOutcome, ReviewHistoryRecord } from "@jevguard/node-infra";
 import type { InstallOutcome, InstallTarget } from "@jevguard/opencode-adapter";
-import { aggregateReviewHistory, type ReviewReport } from "@jevguard/core";
+import { aggregateReview, aggregateReviewHistory, type ReviewReport } from "@jevguard/core";
+import type { DoctorReport } from "../src/cli/doctor/types";
+import type { RulesCheckRequest, RulesCheckResult } from "../src/cli/rules-check/types";
 
 const GLOBAL_PATH = "C:/home/.config/opencode/opencode.json";
 const PROJECT_PATH = "C:/repo/opencode.json";
@@ -36,6 +38,45 @@ function reportFixture(): ReviewReport {
   return aggregateReviewHistory([record], 0);
 }
 
+function doctorFixture(status: DoctorReport["status"]): DoctorReport {
+  return {
+    version: 1,
+    projectRoot: "C:/repo",
+    status,
+    checks: [
+      status === "FAIL"
+        ? { id: "credential", status: "FAIL", code: "MISSING_CREDENTIAL" }
+        : { id: "credential", status: "OK", code: "CREDENTIAL_STORE" },
+      {
+        id: "opencode-plugin",
+        status: status === "WARN" ? "WARN" : "OK",
+        code: status === "WARN" ? "NOT_REGISTERED" : "REGISTERED",
+        targets: [
+          { status: "NOT_REGISTERED", target: "global", path: GLOBAL_PATH },
+          { status: "NOT_REGISTERED", target: "project", path: PROJECT_PATH },
+        ],
+      },
+    ],
+  };
+}
+
+function failingCheck(): RulesCheckResult {
+  return {
+    status: "REVIEWED",
+    review: aggregateReview("rules-check", [
+      {
+        kind: "RULE",
+        turnId: "rules-check",
+        ruleId: "ARCH-001",
+        severity: "error",
+        scopedPaths: ["src/a.ts"],
+        outcome: "FAIL",
+        violationProbability: 0.9,
+      },
+    ]),
+  };
+}
+
 class RecordingIO implements CliIO {
   readonly out: string[] = [];
   readonly err: string[] = [];
@@ -61,6 +102,16 @@ class StubDependencies implements CliDependencies {
   };
   reportCalls = 0;
   reportResult: ReviewReport = aggregateReviewHistory([], 0);
+  doctorCalls = 0;
+  doctorError: Error | null = null;
+  doctorResult: DoctorReport = doctorFixture("OK");
+  rulesCheckCalls = 0;
+  rulesCheckError: Error | null = null;
+  readonly rulesCheckRequests: RulesCheckRequest[] = [];
+  rulesCheckResult: RulesCheckResult = {
+    status: "REVIEWED",
+    review: aggregateReview("rules-check", []),
+  };
 
   login(): Promise<LoginOutcome> {
     this.loginCalls += 1;
@@ -76,6 +127,23 @@ class StubDependencies implements CliDependencies {
   report(): Promise<ReviewReport> {
     this.reportCalls += 1;
     return Promise.resolve(this.reportResult);
+  }
+
+  doctor(): Promise<DoctorReport> {
+    this.doctorCalls += 1;
+
+    return this.doctorError === null
+      ? Promise.resolve(this.doctorResult)
+      : Promise.reject(this.doctorError);
+  }
+
+  rulesCheck(request: RulesCheckRequest): Promise<RulesCheckResult> {
+    this.rulesCheckCalls += 1;
+    this.rulesCheckRequests.push(request);
+
+    return this.rulesCheckError === null
+      ? Promise.resolve(this.rulesCheckResult)
+      : Promise.reject(this.rulesCheckError);
   }
 }
 
@@ -322,6 +390,162 @@ describe("runCli report", () => {
     expect(output).not.toContain("src/");
     expect(output).not.toContain("--- a/");
     expect(output).not.toContain("@@");
+  });
+});
+
+describe("runCli doctor", () => {
+  test("prints the report and exits 0 when nothing fails", async () => {
+    const { io, dependencies } = harness();
+
+    const exitCode = await runCli(["doctor"], io, dependencies);
+
+    expect(exitCode).toBe(0);
+    expect(dependencies.doctorCalls).toBe(1);
+    expect(io.out.join("\n")).toContain("JevGuard doctor");
+    expect(io.err).toEqual([]);
+  });
+
+  test("exits 1 when any check fails", async () => {
+    const { io, dependencies } = harness();
+    dependencies.doctorResult = doctorFixture("FAIL");
+
+    expect(await runCli(["doctor"], io, dependencies)).toBe(1);
+    expect(io.out.join("\n")).toContain("Result: FAIL");
+  });
+
+  test("exits 0 when there are only warnings", async () => {
+    const { io, dependencies } = harness();
+    dependencies.doctorResult = doctorFixture("WARN");
+
+    expect(await runCli(["doctor"], io, dependencies)).toBe(0);
+  });
+
+  test("prints a JSON report that round-trips with --json", async () => {
+    const { io, dependencies } = harness();
+    dependencies.doctorResult = doctorFixture("WARN");
+
+    const exitCode = await runCli(["doctor", "--json"], io, dependencies);
+
+    expect(exitCode).toBe(0);
+    expect(JSON.parse(io.out.join("\n"))).toEqual(dependencies.doctorResult);
+  });
+
+  test("reports a generic failure when the diagnosis throws", async () => {
+    const { io, dependencies } = harness();
+    dependencies.doctorError = new Error("SECRET_VALUE");
+
+    const exitCode = await runCli(["doctor"], io, dependencies);
+
+    expect(exitCode).toBe(1);
+    expect(io.err.join("\n")).toBe("Could not run the diagnostics.");
+  });
+
+  test("rejects an unknown doctor argument without echoing it", async () => {
+    const { io, dependencies } = harness();
+
+    const exitCode = await runCli(["doctor", "SECRET_VALUE"], io, dependencies);
+
+    expect(exitCode).toBe(1);
+    expect(dependencies.doctorCalls).toBe(0);
+    expect(io.err.join("\n")).toContain("jevguard doctor [--json]");
+    expect(io.err.join("\n")).not.toContain("SECRET_VALUE");
+  });
+});
+
+describe("runCli rules check", () => {
+  test("passes a stdin request to the dependency", async () => {
+    const { io, dependencies } = harness();
+
+    const exitCode = await runCli(["rules", "check", "--diff", "-"], io, dependencies);
+
+    expect(exitCode).toBe(0);
+    expect(dependencies.rulesCheckRequests[0]?.diff.kind).toBe("STDIN");
+    expect(io.out.join("\n")).toContain("JevGuard rules check");
+  });
+
+  test("exits 1 when a rule fails", async () => {
+    const { io, dependencies } = harness();
+    dependencies.rulesCheckResult = failingCheck();
+
+    expect(await runCli(["rules", "check", "--diff", "-"], io, dependencies)).toBe(1);
+    expect(io.out.join("\n")).toContain("ARCH-001");
+  });
+
+  test("prints versioned JSON with --json", async () => {
+    const { io, dependencies } = harness();
+    dependencies.rulesCheckResult = failingCheck();
+
+    await runCli(["rules", "check", "--diff", "-", "--json"], io, dependencies);
+
+    expect(JSON.parse(io.out.join("\n"))).toMatchObject({ version: 1, turnId: "rules-check" });
+  });
+
+  test("exits 2 for an unknown rule without echoing the id", async () => {
+    const { io, dependencies } = harness();
+    dependencies.rulesCheckResult = { status: "RULE_NOT_FOUND" };
+
+    const exitCode = await runCli(
+      ["rules", "check", "--diff", "-", "--rule", "SECRET_VALUE"],
+      io,
+      dependencies,
+    );
+
+    expect(exitCode).toBe(2);
+    expect(io.out).toEqual([]);
+    expect(io.err.join("\n")).not.toContain("SECRET_VALUE");
+  });
+
+  test("exits 2 and explains failed input", async () => {
+    const { io, dependencies } = harness();
+    dependencies.rulesCheckResult = { status: "INPUT_FAILED", reason: "BINARY_PATCH" };
+
+    const exitCode = await runCli(["rules", "check", "--diff", "x.diff"], io, dependencies);
+
+    expect(exitCode).toBe(2);
+    expect(io.err.join("\n")).toContain("binary");
+  });
+
+  test("exits 2 with a generic message when the dependency throws", async () => {
+    const { io, dependencies } = harness();
+    dependencies.rulesCheckError = new Error("SECRET_VALUE");
+
+    const exitCode = await runCli(["rules", "check", "--diff", "-"], io, dependencies);
+
+    expect(exitCode).toBe(2);
+    expect(io.err.join("\n")).toBe("Could not run the rule check.");
+  });
+
+  test("exits 2 on invalid arguments without calling the dependency or echoing them", async () => {
+    const { io, dependencies } = harness();
+
+    const exitCode = await runCli(["rules", "check", "--bogus", "SECRET_VALUE"], io, dependencies);
+
+    expect(exitCode).toBe(2);
+    expect(dependencies.rulesCheckCalls).toBe(0);
+    expect(io.err.join("\n")).toContain("Usage: jevguard rules check");
+    expect(io.err.join("\n")).not.toContain("SECRET_VALUE");
+  });
+
+  test("a bare rules command prints the global usage and exits 1", async () => {
+    const { io, dependencies } = harness();
+
+    const exitCode = await runCli(["rules"], io, dependencies);
+
+    expect(exitCode).toBe(1);
+    expect(io.err.join("\n")).toContain("Usage: jevguard login");
+  });
+
+  test("the global usage lists the new commands", async () => {
+    const { io, dependencies } = harness();
+
+    await runCli([], io, dependencies);
+
+    const usage = io.err.join("\n");
+
+    expect(usage).toContain("jevguard doctor [--json]");
+    expect(usage).toContain(
+      "jevguard rules check --diff <file|-> [--task <text>] [--rule <id>] [--json]",
+    );
   });
 });
 

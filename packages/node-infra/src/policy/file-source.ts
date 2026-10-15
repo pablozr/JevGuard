@@ -1,11 +1,16 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { PolicyLoader, PolicyLoadResult } from "@jevguard/core";
-import type { PolicyFileSystem, PolicyLoaderDependencies } from "./types";
+import type { PolicyFilePaths, PolicyFileSystem, PolicyLoaderDependencies } from "./types";
 
 type OptionalFileRead =
   | { readonly status: "READ"; readonly value: string | null }
   | { readonly status: "FAILED" };
+
+/** Fixed `.jev/rules.md` and `.jev/config.yaml` paths under a project root. */
+export function policyFilePaths(root: string): PolicyFilePaths {
+  return { rules: join(root, ".jev", "rules.md"), config: join(root, ".jev", "config.yaml") };
+}
 
 /**
  * Reads `.jev/rules.md` and `.jev/config.yaml` as UTF-8 from fixed paths under the
@@ -15,19 +20,14 @@ type OptionalFileRead =
 export function createPolicyFileLoader(dependencies: PolicyLoaderDependencies): PolicyLoader {
   return {
     async load(): Promise<PolicyLoadResult> {
-      const rules = await readOptionalFile(
-        dependencies.fileSystem,
-        join(dependencies.root, ".jev", "rules.md"),
-      );
+      const paths = policyFilePaths(dependencies.root);
+      const rules = await readOptionalFile(dependencies.fileSystem, paths.rules);
 
       if (rules.status === "FAILED") {
         return { status: "FAILED", reason: "RULES_READ_FAILURE" };
       }
 
-      const config = await readOptionalFile(
-        dependencies.fileSystem,
-        join(dependencies.root, ".jev", "config.yaml"),
-      );
+      const config = await readOptionalFile(dependencies.fileSystem, paths.config);
 
       if (config.status === "FAILED") {
         return { status: "FAILED", reason: "CONFIG_READ_FAILURE" };

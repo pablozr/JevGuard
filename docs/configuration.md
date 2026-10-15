@@ -376,6 +376,84 @@ the newest records, and is safe to delete at any time. `jevguard report` and
 per-rule counts, and slice coverage; a missing or empty file is a normal empty report.
 See the [security model](./security.md) for exactly what it stores.
 
+## CLI diagnostics and on-demand rule checks
+
+Two CLI commands work from the terminal, outside any agent turn. Both resolve the
+project root as the first ancestor of the current directory that contains `.git` (a
+file or a directory), or the current directory when none does.
+
+### `jevguard doctor [--json]`
+
+A local diagnosis: no network, no Jev transport, no writes. Checks, in order:
+
+| Check | Codes |
+| --- | --- |
+| `credential` | `CREDENTIAL_STORE`, `CREDENTIAL_ENVIRONMENT`, `MISSING_CREDENTIAL`, `STORE_READ_FAILURE` |
+| `rules` | `RULES_VALID`, `RULES_INVALID`, `RULES_MISSING`, `RULES_READ_FAILURE`, `RULES_NOT_CHECKED` |
+| `config` | `CONFIG_DEFAULTS`, `CONFIG_VALID`, `CONFIG_PARSE_INVALID`, `CONFIG_INVALID`, `REMEDIATION_INVALID`, `CONFIG_READ_FAILURE`, `CONFIG_NOT_CHECKED` |
+| `opencode-plugin` | `REGISTERED`, `NOT_REGISTERED`, `INSPECTION_FAILED` |
+
+A missing credential, missing or invalid rules, and an invalid or unreadable config
+are `FAIL`. An unregistered or uninspectable OpenCode plugin is `WARN`, and so is a
+check skipped because the other policy file could not be read. The overall status is
+the worst check. The OpenCode check inspects the global `opencode.json` and the
+`opencode.json` in the current directory, and passes when either registers the plugin.
+Claude Code installs are not diagnosed yet.
+
+Exit codes: `0` when no check is `FAIL` (warnings included), `1` when any check is
+`FAIL`, and `1` with the usage text for invalid arguments.
+
+`--json` prints `{ "version": 1, "projectRoot", "status", "checks": [...] }`. The
+report carries statuses, codes, rule IDs and file paths only. It never carries the API
+key or any part of it, rule text, or file contents.
+
+### `jevguard rules check --diff <file|-> [--task <text>] [--rule <id>] [--json]`
+
+Runs the repository rules over a unified diff:
+
+- `--diff <file>` reads a diff file; `--diff -` reads standard input (a terminal is
+  refused). Input is limited to 16 MiB and must be valid UTF-8. It must be `git diff`
+  output (or a plain `---`/`+++` unified diff) with `a/` and `b/` path prefixes.
+- `--task <text>` is the task Jev judges the change against. Without it, the fixed task
+  "No task was provided. Judge the change against the rule on its own." is sent. The
+  task appears in the process list, so it is not a place for secrets.
+- `--rule <id>` evaluates only that rule. The filter applies before Jev and before the
+  per-turn slice budget, so only the selected rule counts against the budget.
+- `--json` prints `{ "version": 1, ...}` with the same allowlist projection as the
+  structured log and the review history.
+
+It uses the normal credential and, once the diff is accepted, applies the same scope
+filtering, evidence policy (a denylisted or non-allowlisted scoped file makes the rule
+`UNAVAILABLE` with `BLOCKED_EVIDENCE`), sliced evidence for large diffs and no partial
+results as a review. A diff with no files, or no file in a rule's scope, is `SKIPPED` without
+calling Jev. It runs no built-in checks, starts no remediation and records nothing in
+the review history. The output lists each rule's outcome, probability, severity and
+scoped paths or its typed reason, never the task or the diff.
+
+The diff parser is strict. Anything it does not fully understand makes the command
+refuse the whole diff (exit `2`, nothing sent to Jev) rather than evaluate part of it.
+The refused cases, with their typed reason codes, are:
+
+- `UNRECOGNIZED_DIFF`: text that is not git diff output, a preamble before the first
+  `diff --git` line (`git log -p`, format-patch headers or a `-- ` signature), trailing
+  content after a complete hunk, a malformed hunk header, or `---`/`+++` paths that
+  disagree with the `diff --git` header.
+- `COMBINED_DIFF`: `diff --cc` or `diff --combined` (merge diffs).
+- `RENAMED_PATH`: a rename or copy that carries content changes. A pure rename or
+  mode change without content is ignored.
+- `UNSUPPORTED_PREFIX`: paths without `a/` and `b/` prefixes, such as `--no-prefix` or
+  `diff.mnemonicPrefix` output. Run `git -c diff.mnemonicPrefix=false diff` instead.
+- `TRUNCATED_HUNK`: a hunk that ends before its line counts, or a file header without
+  hunks.
+- `BINARY_PATCH`, `QUOTED_PATH` (git quotes unusual names) and `MISSING_PATH`.
+- `DIFF_NOT_UTF8`: the input is not valid UTF-8.
+
+Exit codes: `0` when it completed with no `FAIL` and no `UNAVAILABLE`; `1` when any
+rule `FAIL`ed (even alongside `UNAVAILABLE`); `2` when it could not check completely —
+invalid arguments, an unreadable or unsupported diff, a `--rule` that matches nothing,
+or an `UNAVAILABLE` result with no `FAIL`. Errors are always plain text on standard
+error, also with `--json`.
+
 ## Safe auto-propose remediation
 
 This section describes the OpenCode behavior. Claude Code has its own opt-in; see

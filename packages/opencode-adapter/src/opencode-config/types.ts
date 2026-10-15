@@ -77,3 +77,27 @@ export type PluginEntryMutation =
   | { readonly status: "ADDED"; readonly document: Readonly<Record<string, unknown>> }
   | { readonly status: "PRESENT" }
   | { readonly status: "INVALID_SHAPE" };
+
+export type InstallInspectionFailureReason = Extract<
+  InstallFailureReason,
+  "UNSUPPORTED_JSONC" | "INVALID_JSON" | "INVALID_CONFIG_SHAPE" | "READ_FAILURE"
+>;
+
+/** Read-only registration state of the JevGuard plugin entry in one `opencode.json`. */
+export type InstallInspection =
+  | {
+      readonly status: "REGISTERED" | "NOT_REGISTERED";
+      readonly target: InstallTarget;
+      readonly path: string;
+    }
+  | {
+      readonly status: "FAILED";
+      readonly target: InstallTarget;
+      readonly path: string;
+      readonly reason: InstallInspectionFailureReason;
+    };
+
+export interface InspectInstallDependencies extends InstallPathContext {
+  readonly target: InstallTarget;
+  readonly fileSystem: Pick<ConfigFileSystem, "readFile" | "fileExists">;
+}

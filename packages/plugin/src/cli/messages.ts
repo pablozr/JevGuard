@@ -3,9 +3,9 @@ import type { LoginFailureReason } from "@jevguard/node-infra";
 import type { InstallFailureReason, InstallTarget } from "@jevguard/opencode-adapter";
 import type {
   ReportBuiltInCount,
-  ReportOutcomeTotals,
   ReportReasonCount,
   ReportRuleBreakdown,
+  ReviewCounts,
   ReviewReport,
 } from "@jevguard/core";
 
@@ -13,6 +13,8 @@ export const USAGE = [
   "Usage: jevguard login",
   "       jevguard install [--project]",
   "       jevguard report [--json]",
+  "       jevguard doctor [--json]",
+  "       jevguard rules check --diff <file|-> [--task <text>] [--rule <id>] [--json]",
   "",
   "`jev-init` and `jevguard-rules` are OpenCode skills, not CLI commands. Register",
   "the plugin in opencode.json (or run `jevguard install`) and invoke them from",
@@ -117,7 +119,7 @@ export function describeReport(report: ReviewReport): string {
   ].join("\n");
 }
 
-function describeTotals(totals: ReportOutcomeTotals): string {
+export function describeTotals(totals: ReviewCounts): string {
   return `pass ${totals.pass} · warn ${totals.warn} · fail ${totals.fail} · unavailable ${totals.unavailable} · skipped ${totals.skipped}`;
 }
 

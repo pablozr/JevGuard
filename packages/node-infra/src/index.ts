@@ -22,8 +22,13 @@ export type {
   SecretPromptFailureReason,
   SecretPromptResult,
 } from "./credentials";
-export { createNodePolicyFileSystem, createPolicyFileLoader, parsePolicyConfig } from "./policy";
-export type { PolicyFileSystem, PolicyLoaderDependencies } from "./policy";
+export {
+  createNodePolicyFileSystem,
+  createPolicyFileLoader,
+  parsePolicyConfig,
+  policyFilePaths,
+} from "./policy";
+export type { PolicyFilePaths, PolicyFileSystem, PolicyLoaderDependencies } from "./policy";
 export {
   buildTypeSafeClientConfig,
   createJevTransport,
