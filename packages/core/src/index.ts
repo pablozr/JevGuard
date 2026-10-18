@@ -126,7 +126,12 @@ export type {
   PendingFailList,
   RuleFail,
 } from "./feedback/types";
-export { collectRuleFails, failIdentityKey, latestDecisions } from "./feedback/identity";
+export {
+  collectRuleFails,
+  failIdentityKey,
+  latestDecisions,
+  latestFeedbackRecords,
+} from "./feedback/identity";
 export { FEEDBACK_LIST_LIMIT, listPendingFails } from "./feedback/pending";
 export { planFeedbackDecision, resolveFeedbackTarget } from "./feedback/resolve";
 export type {

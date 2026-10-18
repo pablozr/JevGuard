@@ -1,8 +1,10 @@
 import { join } from "node:path";
 import type { FailIdentity, FeedbackRecord, FeedbackSelection } from "@jevguard/core";
 import { resolveJevGuardDataDirectory } from "../history/data-directory";
-import { boundJsonLinesFile, isObject, parseJsonLines } from "../history/jsonl-file";
+import { isObject, parseJsonLines } from "../history/jsonl-file";
 import type { ReviewHistoryPathContext } from "../history/types";
+import { compactFeedbackFile } from "./compact";
+import { isBoundedString, parseFeedbackRecord, parseJson, serializeFeedbackRecord } from "./record";
 import type {
   FeedbackReadResult,
   FeedbackSelectionReadResult,
@@ -13,14 +15,12 @@ import type {
 
 const FEEDBACK_FILENAME = "feedback.jsonl";
 const SELECTION_FILENAME = "feedback-selection.json";
-const MAX_FIELD_LENGTH = 1024;
 const MAX_SELECTION_ITEMS = 1000;
-const RECORD_KEY_COUNT = 4;
 
-/** Rewrite the feedback file once it grows past this many bytes, keeping the newest lines. */
+/** Compact the feedback file once it grows past this many bytes. */
 export const DEFAULT_FEEDBACK_MAX_BYTES = 1024 * 1024;
 
-/** Number of newest decisions retained by a bounded rewrite. */
+/** Distinct FAIL identities retained by a compaction. */
 export const DEFAULT_FEEDBACK_MAX_RECORDS = 5000;
 
 /** Builds the local JSON Lines feedback store plus the last-listing selection snapshot. */
@@ -37,7 +37,7 @@ export function createLocalFeedbackStore(
     try {
       const contents = await fileSystem.readFile(filePath);
 
-      return { status: "READ", ...parseJsonLines(contents ?? "", parseRecord) };
+      return { status: "READ", ...parseJsonLines(contents ?? "", parseFeedbackRecord) };
     } catch {
       return { status: "FAILED" };
     }
@@ -45,12 +45,7 @@ export function createLocalFeedbackStore(
 
   async function append(record: FeedbackRecord): Promise<FeedbackWriteStatus> {
     try {
-      const line = JSON.stringify({
-        turnId: record.turnId,
-        ruleId: record.ruleId,
-        decision: record.decision,
-        timestamp: record.timestamp,
-      });
+      const line = serializeFeedbackRecord(record);
 
       await fileSystem.ensureParentDirectory(filePath);
       await fileSystem.appendFile(filePath, `${line}\n`);
@@ -58,7 +53,7 @@ export function createLocalFeedbackStore(
       return "FAILED";
     }
 
-    await boundJsonLinesFile(fileSystem, filePath, maxBytes, maxRecords);
+    await compactFeedbackFile(fileSystem, filePath, maxBytes, maxRecords);
 
     return "WRITTEN";
   }
@@ -103,26 +98,6 @@ export function resolveFeedbackSelectionFilePath(context: ReviewHistoryPathConte
   return join(resolveJevGuardDataDirectory(context), SELECTION_FILENAME);
 }
 
-function parseRecord(line: string): FeedbackRecord | null {
-  const value = parseJson(line);
-
-  if (!isObject(value) || Object.keys(value).length !== RECORD_KEY_COUNT) {
-    return null;
-  }
-
-  const { turnId, ruleId, decision, timestamp } = value;
-
-  if (!isBoundedString(turnId) || !isBoundedString(ruleId) || !isBoundedString(timestamp)) {
-    return null;
-  }
-
-  if ((decision !== "RIGHT" && decision !== "WRONG") || Number.isNaN(Date.parse(timestamp))) {
-    return null;
-  }
-
-  return { turnId, ruleId, decision, timestamp };
-}
-
 function parseSelection(contents: string): FeedbackSelection | null {
   const value = parseJson(contents);
 
@@ -147,16 +122,4 @@ function parseSelection(contents: string): FeedbackSelection | null {
   }
 
   return { version: 1, listedAt: value.listedAt, items: identities };
-}
-
-function parseJson(text: string): unknown {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
-}
-
-function isBoundedString(value: unknown): value is string {
-  return typeof value === "string" && value !== "" && value.length <= MAX_FIELD_LENGTH;
 }

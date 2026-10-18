@@ -4,6 +4,7 @@ import {
   failIdentityKey,
   FEEDBACK_LIST_LIMIT,
   latestDecisions,
+  latestFeedbackRecords,
   listPendingFails,
   planFeedbackDecision,
   resolveFeedbackTarget,
@@ -125,6 +126,21 @@ describe("latestDecisions", () => {
     const decisions = latestDecisions([answer("t1", "A", "RIGHT"), answer("t1", "A", "WRONG")]);
 
     expect(decisions.get(failIdentityKey({ turnId: "t1", ruleId: "A" }))).toBe("WRONG");
+  });
+});
+
+describe("latestFeedbackRecords", () => {
+  test("keeps the last record per identity in order of last write", () => {
+    const feedback = [
+      answer("t1", "A", "RIGHT"),
+      answer("t2", "A", "RIGHT"),
+      answer("t1", "A", "WRONG"),
+    ];
+
+    const latest = latestFeedbackRecords(feedback);
+
+    expect(latest).toEqual([answer("t2", "A", "RIGHT"), answer("t1", "A", "WRONG")]);
+    expect(latestDecisions(latest)).toEqual(latestDecisions(feedback));
   });
 });
 

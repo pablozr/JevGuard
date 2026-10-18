@@ -175,8 +175,9 @@ identifiers shown by the last listing (`turnId`, `ruleId`) and `listedAt`. Neith
 file stores a task, diff, finding, file path, file content, or credential.
 
 Both files are created owner-only (mode 0600 inside a 0700 directory; on Windows the
-profile's ACL applies). `feedback.jsonl` is bounded to 1 MB: past that it is rewritten
-atomically keeping the newest 5000 lines. The data is local-only, never uploaded, and
+profile's ACL applies). `feedback.jsonl` is bounded to 1 MiB: past that it is compacted
+atomically to one line per answered FAIL with its latest decision, keeping at most the
+5000 most recently answered FAILs; nothing else changes. The data is local-only, never uploaded, and
 safe to delete at any time. It does not change policy, thresholds, outcomes, or any Jev
 call; it only feeds the calibration printed by `jevguard report`.
 

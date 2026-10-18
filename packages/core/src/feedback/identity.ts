@@ -48,3 +48,20 @@ export function latestDecisions(
 
   return decisions;
 }
+
+/**
+ * One record per FAIL identity, the last written, ordered by last write. Its
+ * `latestDecisions` always equals that of the input.
+ */
+export function latestFeedbackRecords(feedback: readonly FeedbackRecord[]): FeedbackRecord[] {
+  const latest = new Map<string, FeedbackRecord>();
+
+  for (const record of feedback) {
+    const key = failIdentityKey(record);
+
+    latest.delete(key);
+    latest.set(key, record);
+  }
+
+  return [...latest.values()];
+}
