@@ -21,7 +21,7 @@ const EXPECTED_FILES = [
   "hook.js",
   "hooks/hooks.json",
   "hooks/jevguard-ui.js",
-  "package-lock.json",
+  "npm-shrinkwrap.json",
   "package.json",
   "types/index.d.ts",
   "worker.js",
@@ -45,6 +45,18 @@ const FORBIDDEN_CONTENT = [
   /sk-[A-Za-z0-9]{20,}/,
   /TYPESAFE_API_KEY\s*[:=]\s*["'][^"']+["']/,
 ];
+const EXACT_SEMVER = /^\d+\.\d+\.\d+$/;
+const REGISTRY_PREFIX = "https://registry.npmjs.org/";
+const REQUIRED_PLATFORM_PACKAGES = [
+  "keyring-win32-x64-msvc",
+  "keyring-win32-arm64-msvc",
+  "keyring-darwin-x64",
+  "keyring-darwin-arm64",
+  "keyring-linux-x64-gnu",
+  "keyring-linux-arm64-gnu",
+  "keyring-linux-x64-musl",
+  "keyring-linux-arm64-musl",
+];
 const STATIC_KEYRING_IMPORT = /^import [^\n]* from ["']@napi-rs\/keyring["']/m;
 const WORKSPACE_IMPORT = /^import [^\n]* from ["']@jevguard\//m;
 const MOD_FORBIDDEN_TEXT = /import\(|require\(|node:|process\.|@jevguard\/|napi-rs|typesafe/;
@@ -67,12 +79,21 @@ interface HooksFile {
   readonly hooks?: Readonly<Record<string, readonly HookGroup[]>>;
 }
 
+interface LockEntry {
+  readonly version?: string;
+  readonly resolved?: string;
+  readonly integrity?: string;
+  readonly hasInstallScript?: boolean;
+  readonly os?: readonly string[];
+  readonly cpu?: readonly string[];
+  readonly dependencies?: Readonly<Record<string, string>>;
+}
+
 interface PackageLock {
   readonly name?: string;
   readonly version?: string;
-  readonly packages?: Readonly<
-    Record<string, { readonly dependencies?: Readonly<Record<string, string>> }>
-  >;
+  readonly lockfileVersion?: number;
+  readonly packages?: Readonly<Record<string, LockEntry>>;
 }
 
 interface Manifest {
@@ -81,6 +102,8 @@ interface Manifest {
   readonly type?: string;
   readonly dependencies?: Readonly<Record<string, string>>;
   readonly engines?: Readonly<Record<string, string>>;
+  readonly private?: boolean;
+  readonly overrides?: unknown;
 }
 
 let scratch = "";
@@ -168,13 +191,16 @@ describe("claude code artifact", () => {
     expect(text).not.toMatch(/userConfig|apiKey|api_key|token/i);
   });
 
-  test("package.json, package-lock.json and plugin.json are consistent", () => {
+  test("package.json, npm-shrinkwrap.json and plugin.json are consistent", () => {
     const manifest = readJson<Manifest>("package.json");
-    const lock = readJson<PackageLock>("package-lock.json");
+    const lock = readJson<PackageLock>("npm-shrinkwrap.json");
     const plugin = readJson<{ version?: string }>(".claude-plugin/plugin.json");
     const root = lock.packages?.[""];
 
     expect(manifest.type).toBe("module");
+    expect(manifest.name).toBe("@pablozrrrr/jevguard-claude-code");
+    expect(manifest).not.toHaveProperty("private");
+    expect(manifest).not.toHaveProperty("overrides");
     expect(manifest.dependencies).toEqual({ "@napi-rs/keyring": "2.1.0" });
     expect(manifest.engines).toEqual({ node: ">=22.13.0" });
     expect(lock.name).toBe(manifest.name);
@@ -182,9 +208,37 @@ describe("claude code artifact", () => {
     expect(root?.dependencies).toEqual(manifest.dependencies);
     expect(plugin.version).toBe(manifest.version);
     expect(Object.keys(lock.packages ?? {})).toContain("node_modules/@napi-rs/keyring");
-    expect(readFileSync(join(DIST_DIR, "package-lock.json"), "utf8")).not.toContain(
+    expect(readFileSync(join(DIST_DIR, "npm-shrinkwrap.json"), "utf8")).not.toContain(
       "hasInstallScript",
     );
+  });
+
+  test("npm-shrinkwrap.json pins https registry tarballs with sha512 and exact versions", () => {
+    const lock = readJson<PackageLock>("npm-shrinkwrap.json");
+    const entries = Object.entries(lock.packages ?? {}).filter(([key]) =>
+      key.startsWith("node_modules/"),
+    );
+
+    expect([2, 3]).toContain(lock.lockfileVersion);
+    expect(entries.length).toBeGreaterThan(0);
+
+    for (const [, entry] of entries) {
+      expect(entry.resolved?.startsWith(REGISTRY_PREFIX)).toBe(true);
+      expect(entry.integrity?.startsWith("sha512-")).toBe(true);
+      expect(entry.version).toMatch(EXACT_SEMVER);
+      expect(entry.hasInstallScript).toBeUndefined();
+    }
+  });
+
+  test("npm-shrinkwrap.json covers every supported keyring platform", () => {
+    const lock = readJson<PackageLock>("npm-shrinkwrap.json");
+
+    for (const name of REQUIRED_PLATFORM_PACKAGES) {
+      const entry = lock.packages?.[`node_modules/@napi-rs/${name}`];
+
+      expect(entry?.os?.length).toBeGreaterThan(0);
+      expect(entry?.cpu?.length).toBeGreaterThan(0);
+    }
   });
 
   test("the hook never references the keyring and the worker loads it lazily", () => {

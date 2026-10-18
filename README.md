@@ -461,7 +461,11 @@ something is wrong. It never prints the API key or any part of it — only wheth
 key comes from the OS credential store or the `TYPESAFE_API_KEY` override. It exits
 `0` unless a check fails (warnings are fine) and `1` when one does. The project root is
 the first parent directory of the current directory that contains `.git`, or the
-current directory when there is none. Claude Code installs are not covered yet.
+current directory when there is none. It does not check Claude Code installs yet.
+
+To install the Claude Code plugin, run `/plugin marketplace add pablozr/JevGuard` and
+`/plugin install jevguard@jevguard`; see
+[Install](./docs/configuration.md#install).
 
 ## Check rules on demand
 

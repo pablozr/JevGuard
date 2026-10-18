@@ -303,6 +303,13 @@ Remediation is off by default. Only the user can turn it on, in their own
 `claude-code.yaml` (never in the repository); it is strategy-only and works as described
 in "Proposal requests" and "Agent delivery" below.
 
+- **Supply chain.** The marketplace catalog pins one exact version of the npm package
+  `@pablozrrrr/jevguard-claude-code`; Claude Code downloads that version, and the native
+  keyring comes from the package's `npm-shrinkwrap.json`, which pins every tarball by
+  version, https registry URL and sha512 integrity. Dependencies are installed with
+  `--ignore-scripts`, so no install script runs. The hook never uses the network, the
+  keyring or Jev. No credential appears in the catalog, the plugin manifest or the
+  package.
 - **Where Jev and credentials run.** Never inside a hook. A hook only records evidence
   and leaves a handoff; a detached worker process reads the credential (`jevguard login`
   and the OS credential store; `TYPESAFE_API_KEY` only as a CI override), calls Jev, and

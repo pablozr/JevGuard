@@ -21,7 +21,7 @@ const TEMPLATE_FILES: readonly (readonly [string, string])[] = [
   ["plugin.json", ".claude-plugin/plugin.json"],
   ["hooks.json", "hooks/hooks.json"],
   ["package.json", "package.json"],
-  ["package-lock.json", "package-lock.json"],
+  ["npm-shrinkwrap.json", "npm-shrinkwrap.json"],
   ["types/index.d.ts", "types/index.d.ts"],
 ];
 

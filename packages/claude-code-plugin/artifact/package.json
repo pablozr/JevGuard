@@ -1,10 +1,18 @@
 {
-  "name": "jevguard-claude-code",
+  "name": "@pablozrrrr/jevguard-claude-code",
   "version": "0.1.0",
-  "private": true,
   "description": "JevGuard Claude Code plugin: background, observe-only semantic review of completed work units.",
   "license": "MIT",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pablozr/JevGuard.git",
+    "directory": "packages/claude-code-plugin"
+  },
+  "homepage": "https://github.com/pablozr/JevGuard#readme",
+  "publishConfig": {
+    "access": "public"
+  },
   "engines": {
     "node": ">=22.13.0"
   },

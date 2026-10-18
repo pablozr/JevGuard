@@ -1,0 +1,18 @@
+{
+  "name": "jevguard",
+  "description": "JevGuard semantic review for Claude Code",
+  "owner": {
+    "name": "pablozr"
+  },
+  "plugins": [
+    {
+      "name": "jevguard",
+      "description": "Background, observe-only semantic review of Claude Code work units against repository rules, using Jev.",
+      "source": {
+        "source": "npm",
+        "package": "@pablozrrrr/jevguard-claude-code",
+        "version": "0.1.0"
+      }
+    }
+  ]
+}

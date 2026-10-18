@@ -2,5 +2,11 @@
   "name": "jevguard",
   "version": "0.1.0",
   "description": "Background semantic review of Claude Code work units against repository rules, using Jev, with opt-in remediation proposals.",
+  "author": {
+    "name": "pablozr"
+  },
+  "homepage": "https://github.com/pablozr/JevGuard#readme",
+  "repository": "https://github.com/pablozr/JevGuard",
+  "license": "MIT",
   "types": "./types/index.d.ts"
 }

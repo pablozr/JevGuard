@@ -552,24 +552,52 @@ strategy-only; see [Remediation proposals](#remediation-proposals).
 
 ### Install
 
-The plugin is a directory built from this repository with
-`bun packages/claude-code-plugin/scripts/build-artifact.ts` (output:
-`packages/claude-code-plugin/dist/`). For local testing, load that directory directly:
+The plugin is distributed through a Claude Code marketplace served from this
+repository. Inside Claude Code:
+
+```text
+/plugin marketplace add pablozr/JevGuard
+/plugin install jevguard@jevguard
+```
+
+or from a terminal:
 
 ```sh
+claude plugin marketplace add pablozr/JevGuard
+claude plugin install jevguard@jevguard
+```
+
+Claude Code downloads the published package `@pablozrrrr/jevguard-claude-code` at the
+exact version pinned in the catalog and, because the package ships an
+`npm-shrinkwrap.json`, installs the one native dependency, `@napi-rs/keyring`, for your
+platform with `--ignore-scripts`. There is no `--plugin-dir` flag and no manual
+`npm ci`.
+
+To update, run `/plugin marketplace update jevguard` (or enable the marketplace
+auto-update) and then update the plugin.
+
+The credential comes from `jevguard login` and lives in the operating system credential
+store, so the OpenCode plugin and the Claude Code plugin share it. Run `jevguard login`
+once; nothing is stored in the plugin, the catalog, or the repository.
+
+### Local development
+
+To test a build from this repository instead of the published package:
+
+```sh
+bun packages/claude-code-plugin/scripts/build-artifact.ts
 cd packages/claude-code-plugin/dist
 npm ci --omit=dev
 claude --plugin-dir <absolute path to that dist directory>
 ```
 
-`npm ci --omit=dev` installs the one native dependency, `@napi-rs/keyring`, which
-reads the credential. Claude Code does not install dependencies for a directory
-loaded with `--plugin-dir`; a plugin copied into its cache from a marketplace gets an
-automatic `npm install` when the plugin ships a lockfile, which this one does. How the
-plugin will be distributed is an open decision and is not published.
+`npm ci --omit=dev` installs the native `@napi-rs/keyring` that reads the credential.
+Claude Code does not install dependencies for a directory loaded with `--plugin-dir`.
 
 Requirements:
 
+- `npm` and `git` on `PATH`: Claude Code uses `npm` to install the keyring and `git`
+  to read the marketplace catalog.
 - `node` on `PATH`, version 22.13 or newer. The hook and the review worker run with
   `node`. Claude Code's native installer does not necessarily provide Node. Without
   Node the hook cannot run, so nothing is reviewed and the Claude Code session is
@@ -577,7 +605,7 @@ Requirements:
 - A credential from `jevguard login` (stored in the OS credential store). In CI, set
   `TYPESAFE_API_KEY` in the process environment. Without a credential, or without the
   keyring binary, a review is recorded as `UNAVAILABLE` (`JEV_FAILURE`); the hook is
-  never affected.
+  never affected, and `TYPESAFE_API_KEY` still works without the keyring.
 - Rules in `.jev/rules.md` and optional `.jev/config.yaml`, exactly as for OpenCode.
 
 ### What is reviewed
