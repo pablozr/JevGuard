@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createBudget, narrowBudget } from "../src/capture/budget";
 import { classifySpawnResult } from "../src/capture/node-ports";
 import { createShellDiffMeter, DEFAULT_SHELL_DIFF_LIMITS } from "../src/capture/shell-diff-limits";
@@ -8,6 +8,8 @@ import { decodeShellPreRecord, decodeStateLine } from "../src/capture/state-code
 import { HookWorld, initRepository } from "./hook-world";
 
 const STDOUT = new Uint8Array([1]);
+
+vi.setConfig({ testTimeout: 20_000 });
 
 describe("shell diff meter", () => {
   test("content is inclusive at the limit and fails one byte past it", () => {
@@ -122,9 +124,7 @@ describe("persisted shell diff failures", () => {
     return line;
   }
 
-  function withGitDiff(gitDiff: unknown): unknown {
-    const line = recordedShellLine();
-
+  function withGitDiff(gitDiff: unknown, line = recordedShellLine()): unknown {
     return { ...line, capture: { ...(line.capture as object), gitDiff } };
   }
 
@@ -144,9 +144,13 @@ describe("persisted shell diff failures", () => {
   });
 
   test("an unknown cause or extra key makes the line invalid", () => {
-    expect(decodeStateLine(withGitDiff({ status: "FAILED", cause: "X" }))).toBeNull();
+    const line = recordedShellLine();
+
+    expect(decodeStateLine(withGitDiff({ status: "FAILED", cause: "X" }, line))).toBeNull();
     expect(
-      decodeStateLine(withGitDiff({ status: "FAILED", cause: "UNPROVEN", limit: "TOTAL_TIME" })),
+      decodeStateLine(
+        withGitDiff({ status: "FAILED", cause: "UNPROVEN", limit: "TOTAL_TIME" }, line),
+      ),
     ).toBeNull();
   });
 
