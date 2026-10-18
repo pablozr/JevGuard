@@ -8,7 +8,7 @@ import type {
 } from "./types";
 
 interface KeyringEntry {
-  getPassword(): Promise<string | undefined>;
+  getPassword(): Promise<string | null | undefined>;
   setPassword(password: string): Promise<void>;
   deletePassword(): Promise<boolean>;
 }
@@ -50,7 +50,7 @@ async function readCredential(): Promise<CredentialStoreReadResult> {
     const { AsyncEntry } = await import("@napi-rs/keyring");
     const value = await createKeyringEntry(AsyncEntry).getPassword();
 
-    if (value === undefined || value.length === 0) {
+    if (value === null || value === undefined || value.length === 0) {
       return { status: "NOT_FOUND" };
     }
 
