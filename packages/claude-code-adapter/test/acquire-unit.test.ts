@@ -70,23 +70,29 @@ describe("acquireUnit universe and shell rules", () => {
     });
   });
 
-  test("a dirty Bash change outside the universe is unavailable", () => {
+  test("a dirty Bash change outside the universe is reviewed against its pre-call content", () => {
     const result = scenario()
-      .bash({ git: git(dirtyChange("src/x.ts", "changed")) })
+      .bash({ git: git(dirtyChange("src/x.ts", "before", "changed")) })
       .stop()
       .acquire();
 
-    expect(reasonsOf(result)).toEqual(["SHELL_CHANGED_OUTSIDE_UNIVERSE"]);
+    expect(result).toMatchObject({
+      status: "READY",
+      unit: { files: [{ path: "src/x.ts", before: image("before"), after: image("changed") }] },
+    });
   });
 
-  test("a Bash change to a file edited later was outside the universe", () => {
+  test("a later edit of a file a Bash call changed keeps the shell pre-image", () => {
     const result = scenario()
-      .bash({ git: git(dirtyChange("src/a.ts", "x")) })
+      .bash({ git: git(dirtyChange("src/a.ts", "before", "x")) })
       .edit("src/a.ts", "a", "b")
       .stop()
       .acquire();
 
-    expect(reasonsOf(result)).toEqual(["SHELL_CHANGED_OUTSIDE_UNIVERSE"]);
+    expect(result).toMatchObject({
+      status: "READY",
+      unit: { files: [{ path: "src/a.ts", before: image("before"), after: image("b") }] },
+    });
   });
 
   test("a blocked Bash change is BLOCKED_PATH", () => {
@@ -168,10 +174,10 @@ describe("acquireUnit universe and shell rules", () => {
     expect(reasonsOf(withoutGit)).toEqual(["SHELL_GIT_DIFF_UNAVAILABLE"]);
   });
 
-  test("a file brought in from the index is in the universe for later shells", () => {
+  test("a file brought in from the HEAD before the call is in the universe for later shells", () => {
     const result = scenario()
       .bash({ git: git(cleanChange("src/x.ts", "indexed", "one")) })
-      .bash({ git: git(dirtyChange("src/x.ts", "two")) })
+      .bash({ git: git(dirtyChange("src/x.ts", "one", "two")) })
       .stop()
       .acquire();
 
@@ -181,7 +187,7 @@ describe("acquireUnit universe and shell rules", () => {
     });
   });
 
-  test("a later edit of a file brought in from the index keeps the index pre-image", () => {
+  test("a later edit of a file brought in from the HEAD before the call keeps its pre-image", () => {
     const result = scenario()
       .powershell({ git: git(cleanChange("src/x.ts", "indexed", "one")) })
       .edit("src/x.ts", "one", "two")
@@ -259,7 +265,7 @@ describe("acquireUnit shell via Git diff", () => {
     expect(result.status).toBe("READY");
   });
 
-  test("a clean file changed outside the universe is recovered from the index", () => {
+  test("a clean file changed outside the universe is recovered from the HEAD before the call", () => {
     const result = scenario()
       .powershell({ git: git(cleanChange("src/x.ts", "indexed", "changed")) })
       .stop()
@@ -271,19 +277,22 @@ describe("acquireUnit shell via Git diff", () => {
     });
   });
 
-  test("a dirty file changed outside the universe is unavailable", () => {
+  test("a dirty file changed outside the universe is reviewed against its pre-call content", () => {
     const result = scenario()
-      .powershell({ git: git(dirtyChange("src/x.ts", "changed")) })
+      .powershell({ git: git(dirtyChange("src/x.ts", "before", "changed")) })
       .stop()
       .acquire();
 
-    expect(reasonsOf(result)).toEqual(["SHELL_CHANGED_OUTSIDE_UNIVERSE"]);
+    expect(result).toMatchObject({
+      status: "READY",
+      unit: { files: [{ path: "src/x.ts", before: image("before"), after: image("changed") }] },
+    });
   });
 
   test("a dirty file already edited is fine", () => {
     const result = scenario()
       .edit("src/x.ts", "a", "b")
-      .powershell({ git: git(dirtyChange("src/x.ts", "c")) })
+      .powershell({ git: git(dirtyChange("src/x.ts", "b", "c")) })
       .stop()
       .acquire();
 

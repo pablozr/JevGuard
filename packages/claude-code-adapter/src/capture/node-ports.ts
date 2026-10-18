@@ -51,6 +51,8 @@ export function createNodeFileReader(): CaptureFileReader {
         return {
           size: stats.size,
           mtimeMs: stats.mtimeMs,
+          ctimeMs: stats.ctimeMs,
+          ino: stats.ino,
           isFile: stats.isFile(),
           isLink: stats.isSymbolicLink(),
         };

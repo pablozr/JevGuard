@@ -1,11 +1,10 @@
 import type { HookEvent } from "../hook-event";
 import { attributeToolEvents } from "./attribute-tools";
+import { sameImage } from "./images";
 import type {
   AcquiredFile,
   AcquireUnitInput,
   ClaudeAcquisitionReason,
-  FileImage,
-  PostImage,
   QuiescentUnit,
   UnitAcquisition,
   UnitAttribution,
@@ -62,12 +61,6 @@ function closingReasons(unit: QuiescentUnit): readonly ClaudeAcquisitionReason[]
 interface AssembledFiles {
   readonly files: readonly AcquiredFile[];
   readonly reasons: ReadonlySet<ClaudeAcquisitionReason>;
-}
-
-function sameImage(final: FileImage, attributed: PostImage): boolean {
-  if (final.state === "ABSENT") return attributed.state === "ABSENT";
-
-  return attributed.state === "PRESENT" && attributed.digest === final.digest;
 }
 
 function assembleFiles(input: AcquireUnitInput, attribution: UnitAttribution): AssembledFiles {

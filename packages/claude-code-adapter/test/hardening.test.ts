@@ -7,8 +7,10 @@ import {
   createRepoPathResolver,
   guardPath,
   MAX_CAPTURED_FILE_BYTES,
+  sha256Hex,
 } from "../src/capture/file-image";
-import { diffGitSnapshots, takeGitSnapshot } from "../src/capture/git-shell";
+import { takeGitSnapshot } from "../src/capture/git-shell";
+import { diffGitSnapshots } from "../src/capture/git-shell-diff";
 import { createShellDiffMeter, DEFAULT_SHELL_DIFF_LIMITS } from "../src/capture/shell-diff-limits";
 import type {
   CaptureFileReader,
@@ -17,10 +19,10 @@ import type {
   GitRunner,
   GitRunResult,
   GitShellContext,
-  GitSnapshot,
   ShellDiffLimit,
   ShellDiffLimits,
   SnapshotResult,
+  TakenSnapshot,
   UnitState,
 } from "../src/capture/types";
 import { writeBlob } from "../src/capture/unit-state";
@@ -117,10 +119,13 @@ describe("links never reach denied or outside files", () => {
   });
 });
 
-function fakeReader(table: {
-  readonly stats?: Readonly<Record<string, { isLink?: boolean; size?: number }>>;
-  readonly real?: Readonly<Record<string, string>>;
-}): CaptureFileReader {
+function fakeReader(
+  table: {
+    readonly stats?: Readonly<Record<string, { isLink?: boolean; size?: number }>>;
+    readonly real?: Readonly<Record<string, string>>;
+  },
+  reads?: string[],
+): CaptureFileReader {
   const stats = new Map(Object.entries(table.stats ?? {}).map(([k, v]) => [resolve(k), v]));
   const real = new Map(Object.entries(table.real ?? {}).map(([k, v]) => [resolve(k), resolve(v)]));
 
@@ -130,15 +135,26 @@ function fakeReader(table: {
 
       return entry === undefined
         ? null
-        : { size: entry.size ?? 3, mtimeMs: 1, isFile: true, isLink: entry.isLink === true };
+        : {
+            size: entry.size ?? 3,
+            mtimeMs: 1,
+            ctimeMs: 1,
+            ino: 1,
+            isFile: true,
+            isLink: entry.isLink === true,
+          };
     },
     realPath: (path) => {
       const key = resolve(path);
 
       return real.get(key) ?? (stats.has(key) ? key : null);
     },
-    readBytes: () => {
-      throw new Error("content must not be read");
+    readBytes: (path) => {
+      if (reads === undefined) throw new Error("content must not be read");
+
+      reads.push(resolve(path));
+
+      return new TextEncoder().encode("x");
     },
   };
 }
@@ -199,6 +215,7 @@ function stepOf(args: readonly string[]): GitStep {
 function scriptedGit(options: {
   readonly status: string;
   readonly stage?: string;
+  readonly moved?: readonly string[];
   readonly toplevel?: string;
   readonly cwdToplevel?: string;
   readonly fail?: Readonly<Partial<Record<GitStep, GitRunFailure>>>;
@@ -228,14 +245,9 @@ function scriptedGit(options: {
         return reply(options.stage ?? "");
       case "status":
         return reply(options.status);
-      case "hash-object":
-        return reply(
-          `${(runOptions?.input ?? "")
-            .split("\n")
-            .filter((line) => line !== "")
-            .map((_, index) => `hash${index}`)
-            .join("\n")}\n`,
-        );
+      case "diff-tree":
+      case "ls-tree":
+        return reply((options.moved ?? []).map((path) => `${path}\0`).join(""));
       default:
         return reply("");
     }
@@ -273,11 +285,14 @@ function namesOf(count: number): readonly string[] {
   return Array.from({ length: count }, (_, index) => `f${index}.ts`);
 }
 
-function readerOf(names: readonly string[], size = 3): CaptureFileReader {
-  return fakeReader({
-    stats: Object.fromEntries(names.map((name) => [`/r/${name}`, { size }])),
-    real: { "/r": "/r" },
-  });
+function readerOf(names: readonly string[], size = 3, reads?: string[]): CaptureFileReader {
+  return fakeReader(
+    {
+      stats: Object.fromEntries(names.map((name) => [`/r/${name}`, { size }])),
+      real: { "/r": "/r" },
+    },
+    reads,
+  );
 }
 
 function withBytes(reader: CaptureFileReader): CaptureFileReader {
@@ -288,41 +303,68 @@ function dirtyStatus(names: readonly string[]): string {
   return names.map((name) => `?? ${name}\0`).join("");
 }
 
-function snapshotOf(names: readonly string[], fingerprint = "fp"): GitSnapshot {
+function snapshotOf(names: readonly string[], content = "x"): TakenSnapshot {
+  const bytes = new TextEncoder().encode(content);
+
   return {
-    toplevel: "/r",
-    head: "h",
-    indexDigest: "d",
-    entries: names.map((name) => ({
-      gitPath: name,
-      repoPath: name,
-      kind: "READABLE" as const,
-      state: "PRESENT" as const,
-      fingerprint,
-    })),
+    snapshot: {
+      toplevel: "/r",
+      head: "h",
+      indexLinks: [],
+      entries: names.map((name) => ({
+        gitPath: name,
+        repoPath: name,
+        kind: "READABLE" as const,
+        state: "PRESENT" as const,
+        fingerprint: sha256Hex(bytes),
+      })),
+    },
+    contents: new Map(names.map((name) => [name, bytes])),
   };
 }
 
-describe("Git snapshot never hashes links or reads past its budgets", () => {
-  const files = fakeReader({
-    stats: { "/r/ok.ts": {}, "/r/link.md": { isLink: true }, "/r/staged.md": {} },
-    real: { "/r": "/r" },
-  });
+describe("Git snapshot never reads links or reads past its budgets", () => {
+  const reads: string[] = [];
+  const files = fakeReader(
+    {
+      stats: { "/r/ok.ts": {}, "/r/link.md": { isLink: true }, "/r/staged.md": {} },
+      real: { "/r": "/r" },
+    },
+    reads,
+  );
 
-  test("worktree links and index symlinks are blocked and never hashed", () => {
+  test("worktree links and index symlinks are blocked and never read", () => {
+    reads.length = 0;
+
     const script = scriptedGit({
       status: "?? ok.ts\0?? link.md\0 M staged.md\0",
       stage: ["120000 abc 0\tstaged.md", "100644 def 0\tother.ts", ""].join("\0"),
     });
-    const snapshot = takenSnapshot(takeGitSnapshot(gitContext(script.runner, files), "/r"));
-    const hashed = script.calls.find((call) => call.args.includes("hash-object"));
+    const { snapshot } = takenSnapshot(takeGitSnapshot(gitContext(script.runner, files), "/r"));
 
     expect(snapshot.entries.map((entry) => [entry.gitPath, entry.kind])).toEqual([
       ["link.md", "BLOCKED"],
       ["ok.ts", "READABLE"],
       ["staged.md", "BLOCKED"],
     ]);
-    expect(hashed?.input).toBe(`${resolve("/r", "ok.ts")}\n`);
+    expect(reads).toEqual([resolve("/r", "ok.ts")]);
+  });
+
+  test("a gitlink in the index is blocked and never read", () => {
+    reads.length = 0;
+
+    const script = scriptedGit({
+      status: " M sub\0",
+      stage: ["160000 abc 0\tsub", ""].join("\0"),
+    });
+    const reader = fakeReader({ stats: { "/r/sub": {} }, real: { "/r": "/r" } }, reads);
+    const { snapshot } = takenSnapshot(takeGitSnapshot(gitContext(script.runner, reader), "/r"));
+
+    expect(snapshot.indexLinks).toEqual(["sub"]);
+    expect(snapshot.entries.map((entry) => [entry.gitPath, entry.kind])).toEqual([
+      ["sub", "BLOCKED"],
+    ]);
+    expect(reads).toEqual([]);
   });
 
   test("a cwd in another repository than the project is no proof", () => {
@@ -336,9 +378,10 @@ describe("Git snapshot never hashes links or reads past its budgets", () => {
 });
 
 describe("shell diff limits are exact and never yield partial evidence", () => {
-  test("the dirty entry limit is inclusive and hashes nothing past it", () => {
+  test("the dirty entry limit is inclusive and reads nothing past it", () => {
     const names = namesOf(4);
-    const files = readerOf(names);
+    const reads: string[] = [];
+    const files = readerOf(names, 3, reads);
     const bound = boundedBy({ maxStatusEntries: 3 });
     const within = scriptedGit({ status: dirtyStatus(names.slice(0, 3)) });
     const over = scriptedGit({ status: dirtyStatus(names) });
@@ -349,55 +392,70 @@ describe("shell diff limits are exact and never yield partial evidence", () => {
     expect(takeGitSnapshot(gitContext(over.runner, files, UNLIMITED_BUDGET, bound), "/r")).toEqual(
       limitFailure("STATUS_ENTRIES"),
     );
-    expect(over.calls.some((call) => call.args.includes("hash-object"))).toBe(false);
+    expect(reads).toHaveLength(3);
   });
 
-  test("the hashed byte limit is inclusive and hashes nothing past it", () => {
+  test("the read byte limit is inclusive and reads nothing past it", () => {
     const bound = boundedBy({ maxContentBytes: 10 });
     const status = dirtyStatus(["a.ts", "b.ts"]);
-    const exact = fakeReader({
-      stats: { "/r/a.ts": { size: 5 }, "/r/b.ts": { size: 5 } },
-      real: { "/r": "/r" },
-    });
-    const over = fakeReader({
-      stats: { "/r/a.ts": { size: 5 }, "/r/b.ts": { size: 6 } },
-      real: { "/r": "/r" },
-    });
+    const exactReads: string[] = [];
+    const overReads: string[] = [];
+    const exact = fakeReader(
+      {
+        stats: { "/r/a.ts": { size: 5 }, "/r/b.ts": { size: 5 } },
+        real: { "/r": "/r" },
+      },
+      exactReads,
+    );
+    const over = fakeReader(
+      {
+        stats: { "/r/a.ts": { size: 5 }, "/r/b.ts": { size: 6 } },
+        real: { "/r": "/r" },
+      },
+      overReads,
+    );
     const fits = scriptedGit({ status });
     const exceeds = scriptedGit({ status });
 
     expect(
       takeGitSnapshot(gitContext(fits.runner, exact, UNLIMITED_BUDGET, bound), "/r").status,
     ).toBe("TAKEN");
-    expect(fits.calls.some((call) => call.args.includes("hash-object"))).toBe(true);
+    expect(exactReads).toHaveLength(2);
     expect(
       takeGitSnapshot(gitContext(exceeds.runner, over, UNLIMITED_BUDGET, bound), "/r"),
     ).toEqual(limitFailure("CONTENT_BYTES"));
-    expect(exceeds.calls.some((call) => call.args.includes("hash-object"))).toBe(false);
+    expect(overReads).toEqual([resolve("/r", "a.ts")]);
   });
 
-  test("post reads share the meter with the snapshot", () => {
-    const files = withBytes(readerOf(["a.ts"], 5));
-    const script = scriptedGit({ status: "?? a.ts\0" });
+  test("Pre and Post reads are charged once per file", () => {
     const outcomes = [9, 10].map((maxContentBytes) => {
+      const reads: string[] = [];
+      const script = scriptedGit({ status: "?? a.ts\0" });
       const context = gitContext(
         script.runner,
-        files,
+        readerOf(["a.ts"], 5, reads),
         UNLIMITED_BUDGET,
         boundedBy({ maxContentBytes }),
       );
-      const post = takenSnapshot(takeGitSnapshot(context, "/r"));
+      const pre = takeGitSnapshot(context, "/r");
+      const post = takeGitSnapshot(context, "/r");
 
-      const pre = { ...post, entries: snapshotOf(["a.ts"], "old").entries };
-
-      return diffGitSnapshots(context, pre, post);
+      return {
+        post: post.status,
+        reads: reads.length,
+        diff:
+          pre.status === "TAKEN" && post.status === "TAKEN"
+            ? diffGitSnapshots(context, takenSnapshot(pre), takenSnapshot(post))
+            : null,
+      };
     });
 
-    expect(outcomes[0]).toEqual({
-      status: "FAILED",
-      failure: { kind: "LIMIT_EXCEEDED", limit: "CONTENT_BYTES" },
+    expect(outcomes[0]).toEqual({ post: "FAILED", reads: 1, diff: null });
+    expect(outcomes[1]).toEqual({
+      post: "TAKEN",
+      reads: 2,
+      diff: { status: "AVAILABLE", changes: [], problems: [] },
     });
-    expect(outcomes[1]).toMatchObject({ status: "AVAILABLE" });
   });
 
   test("the index read limit counts both cat-file calls of a file", () => {
@@ -411,14 +469,38 @@ describe("shell diff limits are exact and never yield partial evidence", () => {
         UNLIMITED_BUDGET,
         bound,
       );
+      const result = diffGitSnapshots(context, snapshotOf([]), snapshotOf(names));
+      const specs = script.calls
+        .filter((call) => call.args.includes("cat-file"))
+        .map((call) => call.args[call.args.length - 1]);
 
-      return diffGitSnapshots(context, snapshotOf([]), snapshotOf(names));
+      expect(specs.every((spec) => spec?.startsWith("h:f"))).toBe(true);
+
+      return result;
     });
 
     expect(results[0]).toMatchObject({ status: "AVAILABLE" });
     expect(results[1]).toEqual({
       status: "FAILED",
       failure: { kind: "LIMIT_EXCEEDED", limit: "INDEX_READS" },
+    });
+  });
+
+  test("a moved Pre HEAD that is not a commit is no proof even when nothing else is dirty", () => {
+    const script = scriptedGit({ status: "", fail: { "cat-file-exists": "EXIT" } });
+    const context = gitContext(script.runner, readerOf([]));
+    const pre = snapshotOf([]);
+    const post = snapshotOf([]);
+    const moved = { ...post, snapshot: { ...post.snapshot, head: "other" } };
+
+    expect(diffGitSnapshots(context, pre, moved)).toEqual({
+      status: "FAILED",
+      failure: { kind: "UNPROVEN" },
+    });
+    expect(diffGitSnapshots(context, pre, post)).toEqual({
+      status: "AVAILABLE",
+      changes: [],
+      problems: [],
     });
   });
 
@@ -508,7 +590,9 @@ describe("a Git timeout is never read as absence", () => {
 
   test("a HEAD lookup that exits non-zero is an unborn HEAD", () => {
     const script = scriptedGit({ status: "", fail: { "rev-parse-head": "EXIT" } });
-    const snapshot = takenSnapshot(takeGitSnapshot(gitContext(script.runner, readerOf([])), "/r"));
+    const { snapshot } = takenSnapshot(
+      takeGitSnapshot(gitContext(script.runner, readerOf([])), "/r"),
+    );
 
     expect(snapshot.head).toBeNull();
   });
@@ -531,7 +615,7 @@ describe("a Git timeout is never read as absence", () => {
 
     expect(result).toMatchObject({
       status: "AVAILABLE",
-      changes: [{ path: "a.ts", preState: "CLEAN", indexImage: { state: "ABSENT" } }],
+      changes: [{ path: "a.ts", preState: "CLEAN", preImage: { state: "ABSENT" } }],
     });
   });
 
@@ -561,15 +645,21 @@ describe("a Git timeout is never read as absence", () => {
   });
 
   test("a post file too large to read is a content problem and charges nothing", () => {
-    const script = scriptedGit({ status: "" });
+    const reads: string[] = [];
+    const script = scriptedGit({ status: "?? a.ts\0" });
     const context = gitContext(
       script.runner,
-      withBytes(readerOf(["a.ts"], MAX_CAPTURED_FILE_BYTES + 1)),
+      readerOf(["a.ts"], MAX_CAPTURED_FILE_BYTES + 1, reads),
       UNLIMITED_BUDGET,
       boundedBy({ maxContentBytes: 0 }),
     );
+    const post = takenSnapshot(takeGitSnapshot(context, "/r"));
 
-    expect(diffGitSnapshots(context, snapshotOf(["a.ts"], "old"), snapshotOf(["a.ts"]))).toEqual({
+    const dirty = snapshotOf(["a.ts"], "old");
+    const pre = { ...dirty, snapshot: { ...dirty.snapshot, toplevel: post.snapshot.toplevel } };
+
+    expect(reads).toEqual([]);
+    expect(diffGitSnapshots(context, pre, post)).toEqual({
       status: "AVAILABLE",
       changes: [],
       problems: ["CONTENT_TOO_LARGE"],

@@ -623,20 +623,29 @@ reviews a smaller set of work that it can prove:
   is each file's net change from its state before the unit to its final state. No
   repository-wide diff is ever used.
 - **Shell.** Each foreground shell call (Bash or PowerShell) is bracketed by a
-  read-only Git status diff. A Git-ignored file written by a shell command is outside
-  the evidence, by design. Set `JEVGUARD_CLAUDE_SHELL_GIT_DIFF=0` to turn this
+  read-only Git picture of the working tree. Before the call the hook records the HEAD
+  commit and keeps the content of every file that is already modified; the call's
+  change is the difference in file content between before and after. A file
+  unmodified before the call is compared with its version in the HEAD recorded before
+  the call, so a `commit`, `push` or `git add` that changes no file adds nothing, while
+  `git switch`, `checkout`, `reset --hard`, `merge`, `pull` or `stash` add the content
+  they change, as the agent's change. A file already modified before the unit that a
+  shell command then changes (a formatter, `git checkout --`) is reviewed against its
+  content right before that command. A Git-ignored file written by a shell command is
+  outside the evidence, by design. Set `JEVGUARD_CLAUDE_SHELL_GIT_DIFF=0` to turn this
   capture off; shell calls then make the unit `UNAVAILABLE`.
-  The diff has fixed limits per hook call: 2000 dirty entries, 16 MiB of hashed or read
-  content, 40 index reads (two per clean file a command changes), 16 MiB of Git output,
-  2 s per Git call and 3 s in total. These values are not configurable. When any limit is exceeded the
-  unit is `UNAVAILABLE` (`SHELL_DIFF_LIMIT_EXCEEDED`) and is never reviewed with
-  partial evidence, so a very large or heavily dirty repository can make units with
-  shell calls unreviewable.
+  The diff has fixed limits per hook call: 2000 dirty entries (and 2000 paths changed
+  between the two HEADs), 16 MiB of read content, 40 Git object reads (two per file
+  unmodified before the call that the call changes), 16 MiB of Git output, 2 s per Git
+  call and 3 s in total. These values are not configurable. When any limit is exceeded
+  the unit is `UNAVAILABLE` (`SHELL_DIFF_LIMIT_EXCEEDED`) and is never reviewed with
+  partial evidence, so a very large or heavily dirty repository, or a switch between
+  distant branches, can make units with shell calls unreviewable.
 - **Refused evidence.** A blocked path (see the [security model](./security.md)), a
   link, a file that is not UTF-8 text without NUL, or a file over 1 MiB makes the unit
   `UNAVAILABLE`, and its content is never read or stored.
-- **Not provable.** A shell call in the background, a file already modified before the
-  unit that a shell call then changed, an MCP or unknown tool that may write, a prompt
+- **Not provable.** A shell call in the background, an MCP or unknown tool that may
+  write, a prompt
   that is not text, or a write by a process that is not attributed to the unit all make
   the unit `UNAVAILABLE`. A unit with no changed file and no write-capable tool is
   `SKIPPED` without calling Jev.
@@ -736,7 +745,9 @@ The hook keeps bounded state under `${CLAUDE_PLUGIN_DATA}/claude-code/`, with
 directories at mode `0700` and files at `0600` on POSIX (the user-profile ACL applies
 on Windows). When a unit closes it leaves one handoff in `handoff/`; a detached worker
 reviews it, appends the result to `reviews.jsonl`, and deletes it. State and handoffs
-unconsumed for 24 hours are removed, and ending a session deletes its open state. The
+unconsumed for 24 hours are removed, and ending a session deletes its open state.
+Around each shell call the hook also keeps, until the call ends, the content of the
+allowed files that were already modified (at most 16 MiB). The
 hook and worker write only closed codes to `hook-log.jsonl` and `worker-log.jsonl`
 (each bounded to 256 KiB), never a task, patch, path, finding, or credential.
 

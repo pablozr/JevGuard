@@ -68,11 +68,11 @@ function imageFromBlob(unit: UnitState, stored: PostImage): FileImage | null {
 }
 
 function hydrateChange(unit: UnitState, change: StoredShellChange): GitShellChange | null {
-  if (change.preState !== "CLEAN") return change;
+  if (change.preState === "UNREAD") return change;
 
-  const indexImage = imageFromBlob(unit, change.indexImage);
+  const preImage = imageFromBlob(unit, change.preImage);
 
-  return indexImage === null ? null : { ...change, indexImage };
+  return preImage === null ? null : { ...change, preImage };
 }
 
 function hydrateDiff(unit: UnitState, changes: readonly StoredShellChange[]): GitShellDiff | null {

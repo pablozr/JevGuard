@@ -279,14 +279,18 @@ export function unreadChange(path: string): GitShellChange {
 
 export function cleanChange(
   path: string,
-  indexContent: string | null,
+  preContent: string | null,
   after: string | null,
 ): GitShellChange {
-  return { path, preState: "CLEAN", indexImage: image(indexContent), post: postImage(after) };
+  return { path, preState: "CLEAN", preImage: image(preContent), post: postImage(after) };
 }
 
-export function dirtyChange(path: string, after: string | null): GitShellChange {
-  return { path, preState: "DIRTY", post: postImage(after) };
+export function dirtyChange(
+  path: string,
+  preContent: string | null,
+  after: string | null,
+): GitShellChange {
+  return { path, preState: "DIRTY", preImage: image(preContent), post: postImage(after) };
 }
 
 export function git(...changes: GitShellChange[]): GitShellDiff {

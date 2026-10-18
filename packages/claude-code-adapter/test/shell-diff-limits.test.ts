@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { createBudget, narrowBudget } from "../src/capture/budget";
@@ -150,17 +150,143 @@ describe("persisted shell diff failures", () => {
     ).toBeNull();
   });
 
-  test("the pre-call limit marker decodes and a damaged one does not", () => {
-    expect(decodeShellPreRecord({ v: 1, failed: "LIMIT_EXCEEDED" })).toEqual({
+  test("the pre-call limit marker decodes and a damaged or old one does not", () => {
+    expect(decodeShellPreRecord({ v: 2, failed: "LIMIT_EXCEEDED" })).toEqual({
       status: "LIMIT_EXCEEDED",
     });
-    expect(decodeShellPreRecord({ v: 1, failed: "OTHER" })).toBeNull();
-    expect(decodeShellPreRecord({ v: 2, failed: "LIMIT_EXCEEDED" })).toBeNull();
+    expect(decodeShellPreRecord({ v: 2, failed: "OTHER" })).toBeNull();
+    expect(decodeShellPreRecord({ v: 1, failed: "LIMIT_EXCEEDED" })).toBeNull();
   });
 
-  test("a snapshot record still decodes as a taken snapshot", () => {
-    const snapshot = { toplevel: "/r", head: null, indexDigest: "a".repeat(64), entries: [] };
+  test("a v2 snapshot record with its pack slices decodes", () => {
+    const snapshot = {
+      toplevel: "/r",
+      head: null,
+      indexLinks: ["l.md"],
+      entries: [
+        {
+          gitPath: "a.ts",
+          repoPath: "a.ts",
+          kind: "READABLE",
+          state: "PRESENT",
+          fingerprint: "a".repeat(64),
+        },
+        {
+          gitPath: "big.ts",
+          repoPath: "big.ts",
+          kind: "READABLE",
+          state: "PRESENT",
+          fingerprint: "9:1",
+          problem: "CONTENT_TOO_LARGE",
+        },
+      ],
+    };
+    const pack = [{ gitPath: "a.ts", offset: 0, length: 3 }];
 
-    expect(decodeShellPreRecord({ v: 1, ...snapshot })).toEqual({ status: "TAKEN", snapshot });
+    expect(decodeShellPreRecord({ v: 2, ...snapshot, pack })).toEqual({
+      status: "TAKEN",
+      snapshot,
+      pack,
+    });
+  });
+
+  test("a v1 snapshot record, or a damaged pack slice, does not decode", () => {
+    const snapshot = { toplevel: "/r", head: null, indexLinks: [], entries: [] };
+
+    expect(decodeShellPreRecord({ v: 1, ...snapshot, pack: [] })).toBeNull();
+    expect(
+      decodeShellPreRecord({ v: 2, toplevel: "/r", head: null, indexDigest: "a", entries: [] }),
+    ).toBeNull();
+    expect(
+      decodeShellPreRecord({ v: 2, ...snapshot, pack: [{ gitPath: "a", offset: -1, length: 1 }] }),
+    ).toBeNull();
+  });
+
+  test("a stored change in the old index-image form makes the line invalid", () => {
+    const old = {
+      status: "AVAILABLE",
+      changes: [
+        {
+          path: "a.ts",
+          preState: "CLEAN",
+          indexImage: { state: "ABSENT" },
+          post: { state: "ABSENT" },
+        },
+      ],
+    };
+    const current = {
+      status: "AVAILABLE",
+      changes: [
+        {
+          path: "a.ts",
+          preState: "DIRTY",
+          preImage: { state: "ABSENT" },
+          post: { state: "ABSENT" },
+        },
+      ],
+    };
+
+    expect(decodeStateLine(withGitDiff(old))).toBeNull();
+    expect(decodeStateLine(withGitDiff(current))).not.toBeNull();
+  });
+
+  describe("a damaged Pre snapshot is no proof", () => {
+    function tamper(change: (directory: string, names: readonly string[]) => void): void {
+      const directory = join(world.unitDirectory(), "shell");
+      const id = world.nextToolId();
+      const input = { command: "write" };
+
+      world.write("a.ts", "dirty\r\n");
+      world.prompt("rewrite the dirty file");
+      world.preTool("Bash", id, input);
+      change(directory, readdirSync(directory));
+      world.write("a.ts", "dirtier\r\n");
+      world.postTool("Bash", id, input);
+      world.stop();
+    }
+
+    function causes(): readonly string[] {
+      const { resolution } = world.onlyHandoff();
+
+      return resolution.status === "UNAVAILABLE" ? resolution.causes : [];
+    }
+
+    test("a pack whose bytes no longer match their digest", () => {
+      tamper((directory, names) => {
+        const pack = names.find((name) => name.endsWith(".pack"));
+
+        writeFileSync(join(directory, pack ?? ""), "tampered");
+      });
+
+      expect(causes()).toEqual(["SHELL_GIT_DIFF_UNAVAILABLE"]);
+    });
+
+    test("a missing pack", () => {
+      tamper((directory, names) => {
+        const pack = names.find((name) => name.endsWith(".pack"));
+
+        rmSync(join(directory, pack ?? ""));
+      });
+
+      expect(causes()).toEqual(["SHELL_GIT_DIFF_UNAVAILABLE"]);
+    });
+
+    test("a slice outside the pack", () => {
+      tamper((directory, names) => {
+        const record = join(directory, names.find((name) => name.endsWith(".json")) ?? "");
+        const parsed = JSON.parse(readFileSync(record, "utf8"));
+
+        parsed.pack = parsed.pack.map((slice: object) => ({ ...slice, offset: 1000 }));
+        writeFileSync(record, JSON.stringify(parsed));
+      });
+
+      expect(causes()).toEqual(["SHELL_GIT_DIFF_UNAVAILABLE"]);
+    });
+
+    test("an intact pack is verified by the digest of the entry", () => {
+      tamper(() => undefined);
+
+      expect(world.onlyHandoff().resolution.status).toBe("TURN");
+    });
   });
 });

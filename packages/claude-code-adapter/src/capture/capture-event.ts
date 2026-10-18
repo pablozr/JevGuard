@@ -1,10 +1,10 @@
 import { resolve } from "node:path";
-import type {
-  CaptureProblem,
-  FileImage,
-  GitShellChange,
-  GitShellDiffFailure,
-  PostImage,
+import {
+  type CaptureProblem,
+  type GitShellChange,
+  type GitShellDiffFailure,
+  type PostImage,
+  toPostImage,
 } from "../acquisition";
 import type {
   HookEvent,
@@ -14,7 +14,8 @@ import type {
 } from "../hook-event";
 import { assertWithinBudget, narrowBudget } from "./budget";
 import { isReadablePath, readFileImage } from "./file-image";
-import { diffGitSnapshots, takeGitSnapshot } from "./git-shell";
+import { takeGitSnapshot } from "./git-shell";
+import { diffGitSnapshots } from "./git-shell-diff";
 import { createShellDiffMeter } from "./shell-diff-limits";
 import type {
   CaptureContext,
@@ -79,10 +80,6 @@ function readProjectFile(context: CaptureContext, repoPath: string): ImageReadin
   }
 
   return reading;
-}
-
-function toPostImage(image: FileImage): PostImage {
-  return image.state === "ABSENT" ? image : { state: "PRESENT", digest: image.digest };
 }
 
 function readPostImages(
@@ -175,13 +172,13 @@ function overlapsAnotherWriter(context: CaptureContext, toolUseId: string): bool
 }
 
 function toStoredChange(change: GitShellChange, context: CaptureContext): StoredShellChange {
-  if (change.preState !== "CLEAN") return change;
+  if (change.preState === "UNREAD") return change;
 
-  if (change.indexImage.state === "PRESENT") {
-    writeBlob(context.unit, Buffer.from(change.indexImage.content, "utf8"));
+  if (change.preImage.state === "PRESENT") {
+    writeBlob(context.unit, Buffer.from(change.preImage.content, "utf8"));
   }
 
-  return { ...change, indexImage: toPostImage(change.indexImage) };
+  return { ...change, preImage: toPostImage(change.preImage) };
 }
 
 function crossCheckBashEditDiff(
@@ -246,8 +243,7 @@ function capturePostShell(
 
   const shell = shellDiffContext(context);
   const post = takeGitSnapshot(shell, event.cwd);
-  const result =
-    post.status === "TAKEN" ? diffGitSnapshots(shell, pre.snapshot, post.snapshot) : post;
+  const result = post.status === "TAKEN" ? diffGitSnapshots(shell, pre, post) : post;
 
   if (result.status === "FAILED") {
     reportShellFailure(context, result.failure);
@@ -306,7 +302,7 @@ export function captureAfterAppend(event: HookEvent, context: CaptureContext): v
   const result = takeGitSnapshot(shellDiffContext(context), event.cwd);
 
   if (result.status === "TAKEN") {
-    writeShellSnapshot(context.unit, event.tool.toolUseId, result.snapshot);
+    writeShellSnapshot(context.unit, event.tool.toolUseId, result);
     return;
   }
 

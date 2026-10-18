@@ -15,10 +15,10 @@ import { join } from "node:path";
 import { createNodeFileReader, removeTree, runGit } from "../src/capture/node-ports";
 import type {
   GitRunner,
-  GitSnapshot,
   RemovePath,
   ShellDiffLimits,
   SnapshotResult,
+  TakenSnapshot,
 } from "../src/capture/types";
 import { keyOf, sessionDirectoryOf } from "../src/capture/unit-state";
 import type { ClaudeReviewHandoff, HookDependencies, WorkerSpawnResult } from "../src/hook";
@@ -233,10 +233,10 @@ export class HookWorld {
   }
 }
 
-export function takenSnapshot(result: SnapshotResult): GitSnapshot {
+export function takenSnapshot(result: SnapshotResult): TakenSnapshot {
   if (result.status !== "TAKEN") throw new Error("snapshot failed");
 
-  return result.snapshot;
+  return result;
 }
 
 export function causesOf(handoff: ClaudeReviewHandoff): readonly string[] {

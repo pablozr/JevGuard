@@ -12,6 +12,9 @@ import type { TurnResolution } from "../turn";
 export interface FileStat {
   readonly size: number;
   readonly mtimeMs: number;
+  /** Change time: moves when content is rewritten and the mtime is restored. */
+  readonly ctimeMs: number;
+  readonly ino: number;
   readonly isFile: boolean;
   /** `true` for a symlink or junction: `stat` never follows links. */
   readonly isLink: boolean;
@@ -43,9 +46,11 @@ export type ShellDiffLimit =
  * Deterministic bounds of the Git diff around one shell call, applied per hook process.
  */
 export interface ShellDiffLimits {
+  /** Entries of one status and paths listed by a HEAD move. */
   readonly maxStatusEntries: number;
-  /** Sum of the bytes hashed and read by the diff in one hook process. */
+  /** Sum of the bytes read by the diff in one hook process. */
   readonly maxContentBytes: number;
+  /** Git object reads of the HEAD recorded at Pre; two per file clean at Pre that is a candidate. */
   readonly maxIndexReads: number;
   readonly maxGitOutputBytes: number;
   readonly gitCallTimeoutMs: number;
@@ -61,14 +66,23 @@ export type ShellDiffFailure =
     };
 
 export type SnapshotResult =
-  | { readonly status: "TAKEN"; readonly snapshot: GitSnapshot }
+  | ({ readonly status: "TAKEN" } & TakenSnapshot)
   | { readonly status: "FAILED"; readonly failure: ShellDiffFailure };
 
 /** Pre-call snapshot as read back by the Post hook. */
 export type ShellPreSnapshot =
-  | { readonly status: "TAKEN"; readonly snapshot: GitSnapshot }
+  | ({ readonly status: "TAKEN" } & TakenSnapshot)
   | { readonly status: "LIMIT_EXCEEDED" }
   | { readonly status: "MISSING" };
+
+/** Pre-call record as decoded from disk, before its pack is attached. */
+export type ShellPreRecord =
+  | {
+      readonly status: "TAKEN";
+      readonly snapshot: GitSnapshot;
+      readonly pack: readonly PackSlice[];
+    }
+  | { readonly status: "LIMIT_EXCEEDED" };
 
 /** Charges content and index reads against the limits; counting continues past a failure. */
 export interface ShellDiffMeter {
@@ -76,6 +90,11 @@ export interface ShellDiffMeter {
   chargeContent(bytes: number): boolean;
   /** `false` when the charge takes the reads past the limit. */
   chargeIndexRead(): boolean;
+}
+
+export interface BoundedRun extends GitRunOptions {
+  /** Return an output overflow to the caller instead of treating it as a limit. */
+  readonly tolerateOverflow?: boolean;
 }
 
 export interface GitRunOptions {
@@ -124,15 +143,14 @@ export type ImageReading =
   | { readonly kind: "IMAGE"; readonly image: FileImage }
   | { readonly kind: "PROBLEM"; readonly problem: CaptureProblem };
 
-/** A Git shell change as persisted: the index image content lives in a blob. */
+/** A Git shell change as persisted: the pre-image content lives in a blob. */
 export type StoredShellChange =
   | {
       readonly path: string;
-      readonly preState: "CLEAN";
-      readonly indexImage: PostImage;
+      readonly preState: "CLEAN" | "DIRTY";
+      readonly preImage: PostImage;
       readonly post: PostImage;
     }
-  | { readonly path: string; readonly preState: "DIRTY"; readonly post: PostImage }
   | { readonly path: string; readonly preState: "UNREAD" };
 
 export type StoredGitDiff =
@@ -166,16 +184,47 @@ export interface SnapshotEntry {
   readonly repoPath: string | null;
   readonly kind: SnapshotKind;
   readonly state: "PRESENT" | "ABSENT";
-  /** Git blob hash for readable files, `size:mtime` for blocked ones. */
+  /**
+   * sha256 of the raw bytes for a readable file that was read; the stat key (size, mtime,
+   * ctime and inode) for blocked paths and for a readable one that was not read.
+   */
   readonly fingerprint: string | null;
+  /** Only on a present readable entry that was not read; the content cannot be kept. */
+  readonly problem?: UnkeptContentProblem;
 }
 
-/** Read-only picture of the dirty files, HEAD and index around one shell call. */
+/** Why the content of a present readable file could not be kept. */
+export type UnkeptContentProblem = Extract<
+  CaptureProblem,
+  "CONTENT_TOO_LARGE" | "CONTENT_NOT_TEXT"
+>;
+
+/** One path as observed by the shell diff, with its bytes when they were read. */
+export interface ObservedPath {
+  readonly entry: SnapshotEntry;
+  readonly bytes: Uint8Array | null;
+}
+
+/** Read-only picture of the dirty files, HEAD and index links around one shell call. */
 export interface GitSnapshot {
   readonly toplevel: string;
   readonly head: string | null;
-  readonly indexDigest: string;
+  /** Sorted paths the index records as symlinks or gitlinks (modes 120000 and 160000). */
+  readonly indexLinks: readonly string[];
   readonly entries: readonly SnapshotEntry[];
+}
+
+/** A snapshot with the bytes of every readable entry that was read, keyed by `gitPath`. */
+export interface TakenSnapshot {
+  readonly snapshot: GitSnapshot;
+  readonly contents: ReadonlyMap<string, Uint8Array>;
+}
+
+/** Where the content of one entry lies inside a shell call's pack file. */
+export interface PackSlice {
+  readonly gitPath: string;
+  readonly offset: number;
+  readonly length: number;
 }
 
 /** Shell calls are covered by the adapter-owned Git diff, Git-ignored files excluded. */

@@ -6,6 +6,7 @@ import type {
   PreToolUseEvent,
   ToolCall,
 } from "../hook-event";
+import { toPostImage } from "./images";
 import type {
   AcquireUnitInput,
   ClaudeAcquisitionReason,
@@ -160,10 +161,7 @@ function onEditFailed(
 
   if (path === null || preImage === undefined || state.lastPostImages.has(path)) return;
 
-  state.lastPostImages.set(
-    path,
-    preImage.state === "ABSENT" ? preImage : { state: "PRESENT", digest: preImage.digest },
-  );
+  state.lastPostImages.set(path, toPostImage(preImage));
 }
 
 function shellFailureReason(cause: GitShellDiffFailure): ClaudeAcquisitionReason {
@@ -212,13 +210,8 @@ function onShellFinished(
       continue;
     }
 
-    if (change.preState === "DIRTY") {
-      state.reasons.add("SHELL_CHANGED_OUTSIDE_UNIVERSE");
-      continue;
-    }
-
     state.universe.add(change.path);
-    state.preImages.set(change.path, change.indexImage);
+    state.preImages.set(change.path, change.preImage);
     state.lastPostImages.set(change.path, change.post);
   }
 }

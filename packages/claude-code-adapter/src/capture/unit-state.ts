@@ -20,10 +20,12 @@ import { isMissingPathError } from "./node-ports";
 import { decodePreRecord, decodeShellPreRecord, decodeStateLine } from "./state-codec";
 import type {
   GitSnapshot,
+  PackSlice,
   PreRecord,
   RemovePath,
   ShellPreSnapshot,
   StateLine,
+  TakenSnapshot,
   UnitState,
 } from "./types";
 
@@ -343,17 +345,47 @@ function shellRecordPath(unit: UnitState, toolUseId: string): string {
   return join(unit.shellDirectory, `${keyOf(toolUseId)}.json`);
 }
 
-function writeShellRecord(unit: UnitState, toolUseId: string, record: object): void {
-  mkdirSync(unit.shellDirectory, { recursive: true, mode: DIR_MODE });
-  writeAtomic(shellRecordPath(unit, toolUseId), JSON.stringify({ v: 1, ...record }));
+function shellPackPath(unit: UnitState, toolUseId: string): string {
+  return join(unit.shellDirectory, `${keyOf(toolUseId)}.pack`);
 }
 
-export function writeShellSnapshot(
-  unit: UnitState,
-  toolUseId: string,
-  snapshot: GitSnapshot,
-): void {
-  writeShellRecord(unit, toolUseId, snapshot);
+function writeShellRecord(unit: UnitState, toolUseId: string, record: object): void {
+  mkdirSync(unit.shellDirectory, { recursive: true, mode: DIR_MODE });
+  writeAtomic(shellRecordPath(unit, toolUseId), JSON.stringify({ v: 2, ...record }));
+}
+
+function packOf(taken: TakenSnapshot): { slices: PackSlice[]; bytes: Buffer } {
+  const slices: PackSlice[] = [];
+  const parts: Uint8Array[] = [];
+  let offset = 0;
+
+  for (const { gitPath } of taken.snapshot.entries) {
+    const content = taken.contents.get(gitPath);
+
+    if (content === undefined) continue;
+
+    slices.push({ gitPath, offset, length: content.length });
+    parts.push(content);
+    offset += content.length;
+  }
+
+  return { slices, bytes: Buffer.concat(parts) };
+}
+
+/**
+ * Keeps the Pre snapshot of a shell call: the contents go to one pack file, written
+ * before the record that describes it, so a record never points to a missing pack.
+ */
+export function writeShellSnapshot(unit: UnitState, toolUseId: string, taken: TakenSnapshot): void {
+  const { slices, bytes } = packOf(taken);
+
+  mkdirSync(unit.shellDirectory, { recursive: true, mode: DIR_MODE });
+
+  if (slices.length > 0) writeAtomic(shellPackPath(unit, toolUseId), bytes);
+
+  const { toplevel, head, indexLinks, entries } = taken.snapshot;
+
+  writeShellRecord(unit, toolUseId, { toplevel, head, indexLinks, entries, pack: slices });
 }
 
 /** Records that the pre-call snapshot exceeded a limit, so the Post hook skips its own. */
@@ -361,18 +393,69 @@ export function writeShellSnapshotLimit(unit: UnitState, toolUseId: string): voi
   writeShellRecord(unit, toolUseId, { failed: "LIMIT_EXCEEDED" });
 }
 
-/** Reads and deletes the pre-call record; `MISSING` when absent or unreadable. */
+function contentsOfPack(
+  snapshot: GitSnapshot,
+  slices: readonly PackSlice[],
+  pack: Uint8Array,
+): ReadonlyMap<string, Uint8Array> | null {
+  const expected = new Map(
+    snapshot.entries
+      .filter(
+        (entry) =>
+          entry.kind === "READABLE" && entry.state === "PRESENT" && entry.problem === undefined,
+      )
+      .map((entry) => [entry.gitPath, entry]),
+  );
+  const contents = new Map<string, Uint8Array>();
+
+  if (slices.length !== expected.size) return null;
+
+  for (const slice of slices) {
+    const entry = expected.get(slice.gitPath);
+    const end = slice.offset + slice.length;
+
+    if (entry === undefined || contents.has(slice.gitPath) || end > pack.length) return null;
+
+    const bytes = pack.subarray(slice.offset, end);
+
+    if (sha256Hex(bytes) !== entry.fingerprint) return null;
+
+    contents.set(slice.gitPath, bytes);
+  }
+
+  return contents;
+}
+
+function removeQuietly(path: string): void {
+  try {
+    rmSync(path, { force: true });
+  } catch {
+    return;
+  }
+}
+
+/** Reads and deletes the pre-call record and its pack; `MISSING` when absent or unreadable. */
 export function takeShellSnapshot(unit: UnitState, toolUseId: string): ShellPreSnapshot {
   const path = shellRecordPath(unit, toolUseId);
+  const packPath = shellPackPath(unit, toolUseId);
 
   try {
     const record = decodeShellPreRecord(JSON.parse(readFileSync(path, "utf8")));
 
-    rmSync(path, { force: true });
+    if (record === null) return { status: "MISSING" };
+    if (record.status === "LIMIT_EXCEEDED") return record;
 
-    return record ?? { status: "MISSING" };
+    const pack = record.pack.length === 0 ? new Uint8Array() : readFileSync(packPath);
+    const contents = contentsOfPack(record.snapshot, record.pack, pack);
+
+    return contents === null
+      ? { status: "MISSING" }
+      : { status: "TAKEN", snapshot: record.snapshot, contents };
   } catch {
     return { status: "MISSING" };
+  } finally {
+    removeQuietly(path);
+    removeQuietly(packPath);
   }
 }
 

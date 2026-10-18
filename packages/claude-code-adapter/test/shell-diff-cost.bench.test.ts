@@ -5,7 +5,8 @@ import { dirname, join } from "node:path";
 import { afterAll, beforeAll, describe, test, vi } from "vitest";
 import { createBudget } from "../src/capture/budget";
 import { createRepoPathResolver } from "../src/capture/file-image";
-import { diffGitSnapshots, takeGitSnapshot } from "../src/capture/git-shell";
+import { takeGitSnapshot } from "../src/capture/git-shell";
+import { diffGitSnapshots } from "../src/capture/git-shell-diff";
 import { createNodeFileReader, runGit } from "../src/capture/node-ports";
 import { createShellDiffMeter, DEFAULT_SHELL_DIFF_LIMITS } from "../src/capture/shell-diff-limits";
 import type {
@@ -311,7 +312,7 @@ function measure(
   const post = takeGitSnapshot(postContext, root);
   const diff =
     pre.status === "TAKEN" && post.status === "TAKEN"
-      ? diffGitSnapshots(postContext, pre.snapshot, post.snapshot)
+      ? diffGitSnapshots(postContext, pre, post)
       : null;
   const postMs = performance.now() - postStart;
   const outcome =

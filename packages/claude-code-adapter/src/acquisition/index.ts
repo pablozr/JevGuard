@@ -1,4 +1,5 @@
 export { acquireUnit } from "./acquire-unit";
+export { sameImage, toPostImage } from "./images";
 export { isClosingEvent, splitQuiescentUnits } from "./split-units";
 export type {
   AcquiredFile,

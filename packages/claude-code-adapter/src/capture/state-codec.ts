@@ -5,12 +5,14 @@ import type { JsonObject } from "../hook-event/types";
 import type {
   GitSnapshot,
   LineCapture,
+  PackSlice,
   PreRecord,
-  ShellPreSnapshot,
+  ShellPreRecord,
   SnapshotEntry,
   StateLine,
   StoredGitDiff,
   StoredShellChange,
+  UnkeptContentProblem,
 } from "./types";
 
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
@@ -39,6 +41,10 @@ function isProblem(value: unknown): value is CaptureProblem {
   );
 }
 
+function isUnkeptContentProblem(value: unknown): value is UnkeptContentProblem {
+  return value === "CONTENT_TOO_LARGE" || value === "CONTENT_NOT_TEXT";
+}
+
 function decodePostImage(value: unknown): PostImage | null {
   if (!isJsonObject(value)) return null;
   if (value.state === "ABSENT") return hasKeys(value, ["state"]) ? { state: "ABSENT" } : null;
@@ -55,25 +61,18 @@ function decodePostImage(value: unknown): PostImage | null {
 function decodeStoredChange(value: unknown): StoredShellChange | null {
   if (!isJsonObject(value) || typeof value.path !== "string" || value.path === "") return null;
 
-  const { path } = value;
+  const { path, preState } = value;
 
-  if (value.preState === "UNREAD")
+  if (preState === "UNREAD")
     return hasKeys(value, ["path", "preState"]) ? { path, preState: "UNREAD" } : null;
 
+  if (preState !== "CLEAN" && preState !== "DIRTY") return null;
+  if (!hasKeys(value, ["path", "preState", "preImage", "post"])) return null;
+
+  const preImage = decodePostImage(value.preImage);
   const post = decodePostImage(value.post);
 
-  if (post === null) return null;
-  if (value.preState === "DIRTY") {
-    return hasKeys(value, ["path", "preState", "post"]) ? { path, preState: "DIRTY", post } : null;
-  }
-
-  const indexImage = decodePostImage(value.indexImage);
-
-  if (value.preState !== "CLEAN" || indexImage === null) return null;
-
-  return hasKeys(value, ["path", "preState", "indexImage", "post"])
-    ? { path, preState: "CLEAN", indexImage, post }
-    : null;
+  return preImage === null || post === null ? null : { path, preState, preImage, post };
 }
 
 function decodeFailedGitDiff(value: JsonObject): StoredGitDiff | null {
@@ -185,11 +184,14 @@ export function decodePreRecord(value: unknown): PreRecord | null {
   return image !== null && hasKeys(value, ["v", "path", "image"]) ? { v: 1, path, image } : null;
 }
 
+const ENTRY_KEYS = ["gitPath", "repoPath", "kind", "state", "fingerprint"];
+
 function decodeSnapshotEntry(value: unknown): SnapshotEntry | null {
   if (!isJsonObject(value)) return null;
-  if (!hasKeys(value, ["gitPath", "repoPath", "kind", "state", "fingerprint"])) return null;
+  if (!onlyKeys(value, [...ENTRY_KEYS, "problem"])) return null;
+  if (!ENTRY_KEYS.every((key) => Object.hasOwn(value, key))) return null;
 
-  const { gitPath, repoPath, kind, state, fingerprint } = value;
+  const { gitPath, repoPath, kind, state, fingerprint, problem } = value;
 
   if (typeof gitPath !== "string" || gitPath === "") return null;
   if (repoPath !== null && typeof repoPath !== "string") return null;
@@ -197,33 +199,65 @@ function decodeSnapshotEntry(value: unknown): SnapshotEntry | null {
   if (state !== "PRESENT" && state !== "ABSENT") return null;
   if (fingerprint !== null && typeof fingerprint !== "string") return null;
 
-  return { gitPath, repoPath, kind, state, fingerprint };
+  const base: SnapshotEntry = { gitPath, repoPath, kind, state, fingerprint };
+
+  if (!Object.hasOwn(value, "problem")) return base;
+  if (!isUnkeptContentProblem(problem)) return null;
+
+  return kind === "READABLE" && state === "PRESENT" ? { ...base, problem } : null;
+}
+
+function decodePackSlices(value: unknown): readonly PackSlice[] | null {
+  if (!Array.isArray(value)) return null;
+
+  const slices: PackSlice[] = [];
+
+  for (const raw of value) {
+    if (!isJsonObject(raw) || !hasKeys(raw, ["gitPath", "offset", "length"])) return null;
+
+    const { gitPath, offset, length } = raw;
+
+    if (typeof gitPath !== "string" || gitPath === "") return null;
+    if (!Number.isInteger(offset) || !Number.isInteger(length)) return null;
+    if (typeof offset !== "number" || typeof length !== "number") return null;
+    if (offset < 0 || length < 0) return null;
+
+    slices.push({ gitPath, offset, length });
+  }
+
+  return slices;
 }
 
 /** Pre-call record of a shell call: a snapshot, or the marker of an exceeded limit. */
-export function decodeShellPreRecord(value: unknown): ShellPreSnapshot | null {
+export function decodeShellPreRecord(value: unknown): ShellPreRecord | null {
   if (isJsonObject(value) && hasKeys(value, ["v", "failed"])) {
-    return value.v === 1 && value.failed === "LIMIT_EXCEEDED" ? { status: "LIMIT_EXCEEDED" } : null;
+    return value.v === 2 && value.failed === "LIMIT_EXCEEDED" ? { status: "LIMIT_EXCEEDED" } : null;
   }
 
   const snapshot = decodeGitSnapshot(value);
 
-  return snapshot === null ? null : { status: "TAKEN", snapshot };
+  if (snapshot === null || !isJsonObject(value)) return null;
+
+  const pack = decodePackSlices(value.pack);
+
+  return pack === null ? null : { status: "TAKEN", snapshot, pack };
 }
 
-export function decodeGitSnapshot(value: unknown): GitSnapshot | null {
+function decodeGitSnapshot(value: unknown): GitSnapshot | null {
   if (
     !isJsonObject(value) ||
-    !hasKeys(value, ["v", "toplevel", "head", "indexDigest", "entries"])
+    !hasKeys(value, ["v", "toplevel", "head", "indexLinks", "entries", "pack"])
   ) {
     return null;
   }
 
-  const { toplevel, head, indexDigest } = value;
+  const { toplevel, head, indexLinks } = value;
 
-  if (value.v !== 1 || typeof toplevel !== "string" || !Array.isArray(value.entries)) return null;
+  if (value.v !== 2 || typeof toplevel !== "string" || !Array.isArray(value.entries)) return null;
   if (head !== null && typeof head !== "string") return null;
-  if (!isDigest(indexDigest)) return null;
+  if (!Array.isArray(indexLinks) || !indexLinks.every((link) => typeof link === "string")) {
+    return null;
+  }
 
   const entries: SnapshotEntry[] = [];
 
@@ -235,5 +269,5 @@ export function decodeGitSnapshot(value: unknown): GitSnapshot | null {
     entries.push(entry);
   }
 
-  return { toplevel, head, indexDigest, entries };
+  return { toplevel, head, indexLinks, entries };
 }

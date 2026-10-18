@@ -325,13 +325,18 @@ in "Proposal requests" and "Agent delivery" below.
 - **Evidence limits.** Files ignored by Git are outside shell-write evidence. A
   process that rewrites an attributed file and restores the exact attributed bytes
   before the unit closes is undetectable. Writers outside the attributed files are not
-  part of the evidence.
+  part of the evidence. A shell command that brings in other commits (`pull`, `merge`,
+  `switch`) is reviewed as the agent's change.
 - **Shell diff limits.** The Git diff around a shell call is bounded in dirty entries,
-  hashed or read bytes, index reads, Git output and time. File sizes are checked with
+  read bytes, Git object reads, Git output and time. File sizes are checked with
   `stat` before anything is hashed or read, blocked paths are still never hashed or
   read, nothing is written to the repository, and a Git timeout or full output buffer
   is never treated as an absent file. An exceeded limit makes the unit `UNAVAILABLE`;
-  the hook log keeps only the closed code `SHELL_DIFF_LIMIT:<limit>`.
+  the hook log keeps only the closed code `SHELL_DIFF_LIMIT:<limit>`. Before a shell
+  call the hook keeps the content of allowed modified files (never blocked paths) in
+  the unit's private state, at most 16 MiB, and deletes it once the call's Post hook
+  used it, or with the unit. Git is only read (`rev-parse`, `ls-files`, `status`,
+  `diff-tree`, `ls-tree`, `cat-file`).
 - **Logs.** The hook and worker logs hold only closed codes (for example
   `REVIEW_RECORDED:PASS`), never prompts, patches, paths, findings, session ids, or
   credentials.

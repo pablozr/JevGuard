@@ -12,18 +12,18 @@ export type PostImage =
 
 /**
  * One path a foreground shell call changed according to the adapter-owned Git diff.
- * `path` is already repo-relative. A `CLEAN` file carries its index image, which is
- * its trustworthy pre-image; a `DIRTY` file has none; an `UNREAD` file was blocked by
- * the evidence policy and its content was never read.
+ * `path` is already repo-relative. `CLEAN` means the Pre status did not list the path,
+ * and its pre-image comes from the HEAD recorded at Pre; `DIRTY` means it was listed,
+ * and its pre-image comes from the Pre snapshot. An `UNREAD` file was blocked by the
+ * evidence policy and its content was never read.
  */
 export type GitShellChange =
   | {
       readonly path: string;
-      readonly preState: "CLEAN";
-      readonly indexImage: FileImage;
+      readonly preState: "CLEAN" | "DIRTY";
+      readonly preImage: FileImage;
       readonly post: PostImage;
     }
-  | { readonly path: string; readonly preState: "DIRTY"; readonly post: PostImage }
   | { readonly path: string; readonly preState: "UNREAD" };
 
 /** Capture problems that make a unit unavailable without naming any content. */
@@ -79,6 +79,10 @@ export interface UnitSplit {
   readonly open: readonly HookEvent[];
 }
 
+/**
+ * `SHELL_CHANGED_OUTSIDE_UNIVERSE` is no longer produced; it stays in the closed set so
+ * handoffs written by earlier versions still parse.
+ */
 export type ClaudeAcquisitionReason =
   | "TURN_FAILED"
   | "BACKGROUND_STATE_UNKNOWN"
