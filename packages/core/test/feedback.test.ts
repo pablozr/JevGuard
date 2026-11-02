@@ -1,20 +1,20 @@
 import { describe, expect, test } from "vitest";
-import {
-  collectRuleFails,
-  failIdentityKey,
-  FEEDBACK_LIST_LIMIT,
-  latestDecisions,
-  latestFeedbackRecords,
-  listPendingFails,
-  planFeedbackDecision,
-  resolveFeedbackTarget,
-} from "../src/index";
 import type {
   FeedbackDecision,
   FeedbackRecord,
   FeedbackSelection,
   ReportRecord,
   ReportResult,
+} from "../src/index";
+import {
+  collectRuleFails,
+  FEEDBACK_LIST_LIMIT,
+  failIdentityKey,
+  latestDecisions,
+  latestFeedbackRecords,
+  listPendingFails,
+  planFeedbackDecision,
+  resolveFeedbackTarget,
 } from "../src/index";
 
 function record(timestamp: string, turnId: string, results: readonly ReportResult[]): ReportRecord {

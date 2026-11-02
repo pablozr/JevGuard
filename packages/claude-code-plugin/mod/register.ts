@@ -3,16 +3,20 @@ import {
   armWatch,
   baselineWatch,
   chunkText,
+  type DeliveryChain,
   decideDelivery,
   emptyWatch,
+  encodeProposalOutcome,
   type FeedEnvironment,
   type FeedWatch,
+  outcomeOfFailure,
   POLL_INTERVAL_MS,
   PROPOSAL_LOG_CHUNK,
   PROPOSAL_MAX_TOKENS,
   PROPOSAL_TIMEOUT_MS,
   type ProposalDelivery,
   type ProposalFailureCode,
+  type ProposalOutcomeCode,
   type ProposalRequestFile,
   type ProposalView,
   parseProposalRequestFile,
@@ -20,10 +24,14 @@ import {
   proposalFailedToast,
   proposalFailureLine,
   proposalLimitLine,
+  proposalOutcomeFileOf,
   proposalReadyToast,
   proposalRequestFileOf,
   proposalSentLine,
   type ReviewFeedLine,
+  remediationConfigLine,
+  remediationSentLine,
+  remediationStoppedLine,
   reviewFeedFileOf,
   tickWatch,
   toProposalView,
@@ -199,24 +207,84 @@ async function showToUser($: EngineInterface, view: ProposalView): Promise<void>
   for (const chunk of chunkText(view.text, PROPOSAL_LOG_CHUNK)) await $.ui.log(chunk);
 }
 
+/** A line and a toast, so a chain that ended is never silent. */
+async function announceChain($: EngineInterface, line: string): Promise<void> {
+  await $.ui.log(line);
+  await $.ui.toast(line, { timeoutMs: TOAST_TIMEOUT_MS });
+}
+
+async function reportDeliveryFailure($: EngineInterface, view: ProposalView): Promise<void> {
+  if (view.chain === undefined) return reportFailure($, view.turnId, "DELIVERY_FAILED");
+
+  const { attempt, maxAttempts } = view.chain;
+
+  await announceChain(
+    $,
+    remediationStoppedLine(view.unit, attempt, maxAttempts, "DELIVERY_FAILED"),
+  );
+}
+
+/** Tells the worker a chain request ended without reaching the agent; never throws. */
+async function writeOutcome(
+  $: EngineInterface,
+  task: ProposalTask,
+  chain: DeliveryChain | undefined,
+  code: ProposalOutcomeCode,
+): Promise<void> {
+  if (chain === undefined) return;
+
+  try {
+    const path = proposalOutcomeFileOf(
+      await dataEnvironment($),
+      task.target.sessionId,
+      task.turnId,
+    );
+
+    if (path !== null) await $.fs.write(path, encodeProposalOutcome(task.turnId, code));
+  } catch {}
+}
+
+/** `true` when the agent received the message. */
 async function sendToAgent(
   $: EngineInterface,
   view: ProposalView,
   sessionId: string,
-): Promise<void> {
+): Promise<boolean> {
   await countDelivery($, sessionId);
 
   try {
     await $.prompt.submit({ text: agentDeliveryText(view) });
   } catch {
-    await reportFailure($, view.turnId, "DELIVERY_FAILED");
+    await reportDeliveryFailure($, view);
     await showToUser($, { ...view, delivery: "user" });
 
-    return;
+    return false;
   }
 
-  await $.ui.log(proposalSentLine(view.unit));
+  if (view.chain === undefined) await $.ui.log(proposalSentLine(view.unit));
+  else {
+    await announceChain(
+      $,
+      remediationSentLine(view.unit, view.chain.attempt, view.chain.maxAttempts),
+    );
+  }
+
   await announce($, view);
+
+  return true;
+}
+
+async function reportLimit(
+  $: EngineInterface,
+  view: ProposalView,
+  chain: DeliveryChain | undefined,
+): Promise<void> {
+  if (chain === undefined) return $.ui.log(proposalLimitLine(view.unit));
+
+  await announceChain(
+    $,
+    remediationStoppedLine(view.unit, chain.attempt, chain.maxAttempts, "SESSION_LIMIT"),
+  );
 }
 
 async function deliver(
@@ -224,16 +292,25 @@ async function deliver(
   task: ProposalTask,
   text: string,
   requested: ProposalDelivery,
+  chain: DeliveryChain | undefined,
 ): Promise<void> {
   const sessionId = await $.session.id();
   const decided = decideDelivery(requested, await deliveriesIn($, sessionId));
   const effective = decided === "agent" && task.target.sessionId === sessionId ? "agent" : "user";
-  const view = toProposalView(task.turnId, text, effective);
+  const view = toProposalView(task.turnId, text, effective, chain);
 
-  if (requested === "agent" && decided === "user") await $.ui.log(proposalLimitLine(view.unit));
+  if (requested === "agent" && decided === "user") {
+    await reportLimit($, view, chain);
+    await writeOutcome($, task, chain, "SESSION_LIMIT");
+  } else if (requested === "agent" && effective === "user") {
+    await writeOutcome($, task, chain, "SESSION_CHANGED");
+  }
 
-  if (effective === "agent") await sendToAgent($, view, sessionId);
-  else await showToUser($, view);
+  if (effective === "agent") {
+    if (!(await sendToAgent($, view, sessionId))) {
+      await writeOutcome($, task, chain, "DELIVERY_FAILED");
+    }
+  } else await showToUser($, view);
 }
 
 async function runProposal($: EngineInterface, task: ProposalTask): Promise<void> {
@@ -244,9 +321,13 @@ async function runProposal($: EngineInterface, task: ProposalTask): Promise<void
 
   const completion = await completeProposal($, taken.file);
 
-  if (completion.status === "FAILED") return reportFailure($, task.turnId, completion.code);
+  if (completion.status === "FAILED") {
+    await writeOutcome($, task, taken.file.chain, outcomeOfFailure(completion.code));
 
-  await deliver($, task, completion.text, taken.file.delivery);
+    return reportFailure($, task.turnId, completion.code);
+  }
+
+  await deliver($, task, completion.text, taken.file.delivery, taken.file.chain);
 }
 
 async function drainProposals($: EngineInterface): Promise<void> {
@@ -298,6 +379,10 @@ async function showTick($: EngineInterface, current: FeedTarget, owner: number):
     if (display.line !== null) await $.ui.log(display.line);
     if (display.toast !== null) await $.ui.toast(display.toast, { timeoutMs: TOAST_TIMEOUT_MS });
   }
+
+  for (const notice of tick.chains) await announceChain($, notice.text);
+
+  for (const code of tick.configIssues) await announceChain($, remediationConfigLine(code));
 
   if (tick.status !== null) await $.ui.status(tick.status);
 }

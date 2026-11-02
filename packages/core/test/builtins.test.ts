@@ -1,11 +1,4 @@
 import { describe, expect, test } from "vitest";
-import {
-  COMPLEXITY_CHECK_ID,
-  DEFAULT_EVIDENCE_POLICY,
-  SCOPE_CREEP_CHECK_ID,
-  buildBuiltInBatchRequest,
-  evaluateBuiltIns,
-} from "../src/index";
 import type {
   EvaluateBuiltInsInput,
   JevBuiltInAnswerResult,
@@ -18,6 +11,13 @@ import type {
   JevRuleRequest,
   Turn,
   TurnFile,
+} from "../src/index";
+import {
+  buildBuiltInBatchRequest,
+  COMPLEXITY_CHECK_ID,
+  DEFAULT_EVIDENCE_POLICY,
+  evaluateBuiltIns,
+  SCOPE_CREEP_CHECK_ID,
 } from "../src/index";
 
 const LOGIN_PATCH = "diff --git a/src/auth/login.ts b/src/auth/login.ts\n+const limit = 5;";

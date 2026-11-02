@@ -1,4 +1,5 @@
-import { CLAUDE_MODEL_PATTERN, userBaseOf } from "../../presentation";
+import { isAttemptCount, MAX_ATTEMPTS_DEFAULT } from "@jevguard/core";
+import { CLAUDE_MODEL_PATTERN, isRecord, type JsonRecord, userBaseOf } from "../../presentation";
 import { isInsideProject } from "./containment";
 import type {
   ClaudeRemediationSettings,
@@ -10,19 +11,13 @@ import type {
 const CONFIG_SUBPATH = "jevguard/claude-code.yaml";
 const DEFAULT_CONFIG_SUBPATH = ".config";
 const SECTION_KEY = "remediation";
-const SECTION_KEYS = ["enabled", "delivery", "model"];
-
-type JsonRecord = Readonly<Record<string, unknown>>;
+const SECTION_KEYS = ["enabled", "delivery", "model", "mode", "max_attempts"];
 
 const DISABLED: ClaudeRemediationSettingsResult = { status: "DISABLED" };
 const INVALID: ClaudeRemediationSettingsResult = {
   status: "INVALID",
   reason: "USER_CONFIG_INVALID",
 };
-
-function isRecord(value: unknown): value is JsonRecord {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 function modelOf(value: unknown): string | null | undefined {
   if (value === undefined) return null;
@@ -36,23 +31,47 @@ function deliveryOf(value: unknown): ClaudeRemediationSettings["delivery"] | nul
   return value === "user" || value === "agent" ? value : null;
 }
 
+function modeOf(value: unknown): ClaudeRemediationSettings["mode"] | null {
+  if (value === undefined) return "observe";
+
+  return value === "observe" || value === "remediate" ? value : null;
+}
+
+/** An integer in 1..3, only valid with `remediate`; the default is 2. */
+function maxAttemptsOf(value: unknown, mode: ClaudeRemediationSettings["mode"]): number | null {
+  if (value === undefined) return MAX_ATTEMPTS_DEFAULT;
+
+  const valid = mode === "remediate" && isAttemptCount(value);
+
+  return valid ? value : null;
+}
+
 function sectionResult(section: JsonRecord): ClaudeRemediationSettingsResult {
   if (Object.keys(section).some((key) => !SECTION_KEYS.includes(key))) return INVALID;
 
   const { enabled } = section;
   const delivery = deliveryOf(section.delivery);
   const model = modelOf(section.model);
+  const mode = modeOf(section.mode);
 
   if (enabled !== undefined && typeof enabled !== "boolean") return INVALID;
-  if (delivery === null || model === undefined) return INVALID;
+  if (delivery === null || model === undefined || mode === null) return INVALID;
+  if (mode === "remediate" && delivery !== "agent") return INVALID;
 
-  return enabled === true ? { status: "ENABLED", settings: { delivery, model } } : DISABLED;
+  const maxAttempts = maxAttemptsOf(section.max_attempts, mode);
+
+  if (maxAttempts === null) return INVALID;
+
+  return enabled === true
+    ? { status: "ENABLED", settings: { delivery, model, mode, maxAttempts } }
+    : DISABLED;
 }
 
 /**
  * Reads the user's Claude Code remediation file. An absent file or section, or
  * `enabled: false`, is `DISABLED`; any unknown key, wrong type, unknown delivery or a
  * model that is not a Claude alias or id is `INVALID`. Models are never translated.
+ * `mode: remediate` needs `delivery: agent`, and `max_attempts` (1..3) needs `remediate`.
  */
 export function resolveClaudeRemediationSettings(value: unknown): ClaudeRemediationSettingsResult {
   if (value === null || value === undefined) return DISABLED;

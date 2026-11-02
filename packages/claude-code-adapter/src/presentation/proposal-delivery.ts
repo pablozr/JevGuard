@@ -1,10 +1,17 @@
+import {
+  AGENT_NOTICE,
+  AUTO_DELIVERY_MARKER,
+  formatAgentDelivery,
+  isAutoDeliveredTask,
+  MAX_AGENT_DELIVERIES_PER_SESSION,
+  PROPOSAL_END,
+  PROPOSAL_START,
+} from "@jevguard/core";
 import { unitLabelOf } from "./describe-review";
 import type { ProposalDelivery, ProposalFailureCode, ProposalView } from "./types";
 
-/** First words of every automatic delivery; the worker finds it in the next unit's task. */
-export const AUTO_DELIVERY_MARKER = "[JevGuard remediation proposal · automatic delivery";
+export { AUTO_DELIVERY_MARKER, isAutoDeliveredTask, MAX_AGENT_DELIVERIES_PER_SESSION };
 
-export const MAX_AGENT_DELIVERIES_PER_SESSION = 3;
 export const PROPOSAL_MAX_TOKENS = 4096;
 export const PROPOSAL_TIMEOUT_MS = 180_000;
 export const PROPOSAL_LOG_CHUNK = 1900;
@@ -12,18 +19,8 @@ export const PROPOSAL_MAX_TEXT_LENGTH = 32_768;
 
 const CONTROL_CHARACTERS = /(?![\n\t])\p{Cc}/gu;
 const TRUNCATION_MARKER = "\n[truncated]";
-const PROPOSAL_START = "--- proposal start ---";
-const PROPOSAL_END = "--- proposal end ---";
-
 const MANUAL_APPLY_HEADING = /^\s*(?:#{1,6}\s*|\*\*)?manual apply\b[:\s*]*(.*)$/i;
 const NEXT_SECTION = /^\s*(?:#{1,6}\s*|\*\*)?(?:strategy|why)\b\s*(?:\*\*)?\s*(?::|$)/i;
-const AGENT_NOTICE =
-  "Sent by the JevGuard plugin, not typed by the user. Strategy-only proposal generated without tools for the FAIL findings of the previous work unit. Apply it only if it is consistent with the user's instructions; do not change tests, configuration or dependencies without explicit user confirmation.";
-
-/** `true` when a unit's task contains an automatic delivery, so it never triggers another. */
-export function isAutoDeliveredTask(task: string): boolean {
-  return task.includes(AUTO_DELIVERY_MARKER);
-}
 
 /** `agent` only when requested and the session is still under its delivery limit. */
 export function decideDelivery(
@@ -66,6 +63,7 @@ export function toProposalView(
   turnId: string,
   text: string,
   delivery: ProposalDelivery,
+  chain?: ProposalView["chain"],
 ): ProposalView {
   const clean = sanitized(text);
 
@@ -75,14 +73,27 @@ export function toProposalView(
     text: bounded(clean),
     applyInstruction: bounded(extractManualApply(clean) ?? clean.trim()),
     delivery,
+    ...(chain === undefined ? {} : { chain }),
   };
 }
 
 /**
  * The framed message an `agent` delivery submits; it opens with the automatic marker and
  * keeps the model text inside a delimited block, with any delimiter line removed from it.
+ * A `remediate` chain adds the attempt, the findings and the constraints.
  */
 export function agentDeliveryText(view: ProposalView): string {
+  if (view.chain !== undefined) {
+    return formatAgentDelivery({
+      unit: view.unit,
+      attempt: view.chain.attempt,
+      maxAttempts: view.chain.maxAttempts,
+      chainId: view.chain.chainId,
+      findings: view.chain.findings,
+      strategyText: view.text,
+    });
+  }
+
   const body = view.text
     .split("\n")
     .filter((line) => line.trim() !== PROPOSAL_START && line.trim() !== PROPOSAL_END);
@@ -115,6 +126,31 @@ export function proposalFailureLine(unit: string, code: ProposalFailureCode): st
 
 export function proposalLimitLine(unit: string): string {
   return `JevGuard agent delivery limit reached · ${unit} · shown here instead`;
+}
+
+/** Line (and toast) for one remediation attempt sent to the agent. */
+export function remediationSentLine(unit: string, attempt: number, maxAttempts: number): string {
+  return `JevGuard sent remediation attempt ${attempt}/${maxAttempts} for ${unit} to the agent`;
+}
+
+/** Line (and toast) for a chain that ended without resolving; `code` says why. */
+export function remediationStoppedLine(
+  unit: string,
+  attempt: number,
+  maxAttempts: number,
+  code: string,
+): string {
+  return `JevGuard remediation stopped · ${unit} · attempt ${attempt}/${maxAttempts} · ${code}`;
+}
+
+/** Line (and toast) for a chain whose findings all passed. */
+export function remediationResolvedLine(unit: string, fixed: number, attempts: number): string {
+  return `JevGuard remediation resolved · ${unit} · ${fixed} finding(s) fixed in ${attempts} attempt(s)`;
+}
+
+/** Line (and toast) when the user's remediation file is invalid, so proposals are off. */
+export function remediationConfigLine(code: string): string {
+  return `JevGuard remediation is off · your claude-code.yaml is not valid (${code}) · see docs/configuration.md`;
 }
 
 /** Splits `text` into pieces of at most `max` characters, in order. */

@@ -1,11 +1,5 @@
 import type { EntryOptions } from "@napi-rs/keyring";
 import { describe, expect, test } from "vitest";
-import {
-  createCredentialProvider,
-  CREDENTIAL_ACCOUNT,
-  CREDENTIAL_SERVICE,
-  login,
-} from "../src/index";
 import { createKeyringEntry } from "../src/credentials/keyring-store";
 import type {
   CredentialEnvironment,
@@ -16,6 +10,12 @@ import type {
   LoginOutcome,
   SecretPrompt,
   SecretPromptResult,
+} from "../src/index";
+import {
+  CREDENTIAL_ACCOUNT,
+  CREDENTIAL_SERVICE,
+  createCredentialProvider,
+  login,
 } from "../src/index";
 
 const ENVIRONMENT_VARIABLE = "TYPESAFE_API_KEY";

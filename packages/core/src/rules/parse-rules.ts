@@ -1,5 +1,5 @@
-import type { RuleParseResults } from "./types";
 import { collectRuleBlocks, isValidRuleId, parseRuleBlock, ruleCandidateFailure } from "./blocks";
+import type { RuleParseResults } from "./types";
 
 /**
  * Parses every rule block in a `.jev/rules.md` document in source order. Each

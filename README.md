@@ -33,7 +33,9 @@ coding agent.
 > results but never alter the agent context or block a task. When remediation is
 > enabled and a review has any `FAIL`, the plugin asks a hidden `jevguard-proposer`
 > subagent for a proposal in an isolated child session and shows a generic toast; the
-> proposer never edits code.
+> proposer never edits code. On Claude Code, a user who opts in with `mode: remediate`
+> in their own `claude-code.yaml` gets a bounded chain of at most 3 visible correction
+> messages to the agent; see [Remediation proposals](docs/configuration.md#remediation-proposals).
 
 ## Why JevGuard
 

@@ -1,18 +1,19 @@
 import type { OperationalStatus, ReviewCounts, SemanticVerdict } from "@jevguard/core";
+import { CHAIN_ID_PATTERN, FINDING_ID_PATTERN, isAttemptCount } from "@jevguard/core";
+import { hasKeys, isRecord, type JsonRecord } from "./json-record";
 import { TURN_ID_PREFIX } from "./turn-id";
-import type { ReviewFeedLane, ReviewFeedLine, ReviewFeedRecorded, ReviewFeedResult } from "./types";
+import type {
+  ReviewFeedChain,
+  ReviewFeedLane,
+  ReviewFeedLine,
+  ReviewFeedRecorded,
+  ReviewFeedResult,
+} from "./types";
 
 const MAX_TURN_ID_LENGTH = 512;
 const MAX_RESULTS = 200;
 const MAX_CAUSES = 32;
-const RESULT_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const TYPED_CODE = /^[A-Z][A-Z_]{0,63}$/;
-
-type JsonRecord = Readonly<Record<string, unknown>>;
-
-function isRecord(value: unknown): value is JsonRecord {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 function isCount(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 0;
@@ -98,7 +99,7 @@ function resultOf(value: unknown): ReviewFeedResult | null {
   const { lane, id, sliceCount, outcome, probability, reason } = value;
 
   if (!isLane(lane)) return null;
-  if (id !== null && !(typeof id === "string" && RESULT_ID.test(id))) return null;
+  if (id !== null && !(typeof id === "string" && FINDING_ID_PATTERN.test(id))) return null;
   if (sliceCount !== null && !isCount(sliceCount)) return null;
 
   const identity = { lane, id, sliceCount };
@@ -116,17 +117,50 @@ function resultsOf(value: unknown): readonly ReviewFeedResult[] | null {
   return listOf(value, MAX_RESULTS, resultOf);
 }
 
+const CHAIN_KEYS = ["chainId", "attempt", "maxAttempts", "result", "fixed"];
+
+function chainOf(value: unknown): ReviewFeedChain | null {
+  if (!isRecord(value)) return null;
+
+  if (!hasKeys(value, CHAIN_KEYS)) return null;
+
+  const { chainId, attempt, maxAttempts, result, fixed } = value;
+
+  if (typeof chainId !== "string" || !CHAIN_ID_PATTERN.test(chainId)) return null;
+  if (!isAttemptCount(attempt) || !isAttemptCount(maxAttempts) || attempt > maxAttempts)
+    return null;
+  if (!isTypedCode(result) || !isCount(fixed)) return null;
+
+  return { chainId, attempt, maxAttempts, result, fixed };
+}
+
 function recordedOf(record: JsonRecord, turnId: string, at: string): ReviewFeedRecorded | null {
   const counts = countsOf(record.counts);
   const causes = causesOf(record.causes);
   const results = resultsOf(record.results);
 
   if (counts === null || causes === null || results === null) return null;
-  if (record.proposal === undefined)
-    return { v: 1, kind: "RECORDED", turnId, at, counts, causes, results };
-  if (record.proposal !== true) return null;
+  if (record.proposal !== undefined && record.proposal !== true) return null;
 
-  return { v: 1, kind: "RECORDED", turnId, at, counts, causes, results, proposal: true };
+  const chain = record.chain === undefined ? undefined : chainOf(record.chain);
+
+  if (chain === null) return null;
+  if (record.remediationConfig !== undefined && !isTypedCode(record.remediationConfig)) return null;
+
+  return {
+    v: 1,
+    kind: "RECORDED",
+    turnId,
+    at,
+    counts,
+    causes,
+    results,
+    ...(record.proposal === true ? { proposal: true as const } : {}),
+    ...(chain === undefined ? {} : { chain }),
+    ...(record.remediationConfig === undefined
+      ? {}
+      : { remediationConfig: record.remediationConfig }),
+  };
 }
 
 function lineOf(value: unknown): ReviewFeedLine | null {

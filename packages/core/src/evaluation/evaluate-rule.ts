@@ -1,8 +1,8 @@
 import type { RuleReviewResult } from "../domain/types";
 import { selectRuleEvidence } from "../evidence/select-evidence";
 import { evaluateGate } from "../gate/evaluate-gate";
-import { buildJevRequest } from "./build-request";
 import { buildReviewContext } from "./build-context";
+import { buildJevRequest } from "./build-request";
 import { evaluateWithPort } from "./evaluate-with-port";
 import type { EvaluateRuleDependencies, EvaluateRuleInput } from "./types";
 

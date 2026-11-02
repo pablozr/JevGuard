@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { parseRule, parseRules } from "../src/index";
 import type { ParsedRule, RuleParseErrorCode, RuleParseResult } from "../src/index";
+import { parseRule, parseRules } from "../src/index";
 
 const validRule = [
   "## ARCH-001",

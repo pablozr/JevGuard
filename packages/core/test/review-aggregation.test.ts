@@ -1,5 +1,4 @@
 import { describe, expect, test } from "vitest";
-import { aggregateReview } from "../src/index";
 import type {
   BuiltInReviewResult,
   ReviewLevelResult,
@@ -8,6 +7,7 @@ import type {
   SkippedReason,
   UnavailableReason,
 } from "../src/index";
+import { aggregateReview } from "../src/index";
 
 function semantic(
   outcome: "PASS" | "WARN" | "FAIL",

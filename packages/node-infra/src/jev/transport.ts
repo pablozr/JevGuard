@@ -1,4 +1,3 @@
-import { TypeSafeClient } from "@typesafe-ai/sdk";
 import type {
   CredentialProvider,
   CredentialResolution,
@@ -16,6 +15,7 @@ import type {
   JevRuleRequest,
 } from "@jevguard/core";
 import { COMPLEXITY_ANSWER, SCOPE_CREEP_ANSWER } from "@jevguard/core";
+import { TypeSafeClient } from "@typesafe-ai/sdk";
 import {
   JEV_MODEL,
   type JevTransportChange,

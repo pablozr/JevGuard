@@ -698,6 +698,8 @@ remediation:
   enabled: true      # default false
   delivery: user     # user | agent
   model: sonnet      # optional; Claude alias or id; default: the session's model
+  mode: observe      # observe | remediate; default observe
+  max_attempts: 2    # 1 to 3; default 2; only with mode: remediate
 ```
 
 The file is read by the worker. `XDG_CONFIG_HOME` is used only when it is an absolute
@@ -729,6 +731,47 @@ code and never applies anything; there is no retry. The result is shown as follo
   a session is shown in the panel instead, with a line saying the limit was reached. The
   panel opens as a record of what was sent. The proposal text is shown without control
   characters and capped at 32768 characters.
+
+#### `mode: remediate` (bounded chain)
+
+`mode: remediate` requires `delivery: agent`; with `delivery: user` (explicit or by
+default) the whole file is invalid and the worker log holds `REMEDIATION_USER_CONFIG_INVALID`.
+`max_attempts` is an integer from 1 to 3 (default 2) and is accepted only with
+`mode: remediate`. Only your own `claude-code.yaml` can turn this on: the repository's
+`.jev/config.yaml` can only veto it with `remediation.auto_propose: false`, and it
+cannot set `mode`, `max_attempts` or `delivery`.
+
+When a turn you started has a `FAIL` of an `error` rule or a built-in check, with complete
+safe evidence, the module sends the agent a visible message marked
+`attempt n/m` that lists the failing rule ids, severities, scoped paths, the rule's
+violation and allowed text, the strategy and a constraint not to touch tests,
+configuration, dependencies or `.jev/`. The agent's next turn is reviewed normally. The
+chain then:
+
+- **resolves** when every finding of the chain passes in a turn that judged it
+  (`RESOLVED`: a line and a toast say how many were fixed and in how many attempts);
+- **delivers attempt 2 or 3** only when the failure set changed, nothing new failed and
+  the attempt limit was not reached;
+- **stops** with a visible line and toast carrying one closed code and writes no
+  further request:
+
+| Code | Meaning |
+| --- | --- |
+| `LIMIT` | `max_attempts` was reached with findings still failing. |
+| `REPEATED_FAILURE` | The same findings over the same paths failed again. |
+| `REGRESSION_INTRODUCED` | A finding outside the chain failed. |
+| `UNVERIFIED` | A finding of the chain was not judged, its scope shrank, evidence was incomplete or the chain state was lost. |
+| `SESSION_LIMIT` | The session already sent 3 agent deliveries; the proposal is shown in the panel. |
+| `DELIVERY_FAILED` | The message could not be submitted; the proposal is shown in the panel. |
+
+Warnings, `UNAVAILABLE` and `SKIPPED` never start a chain, and a message from a previous
+version (without an attempt) never continues one. Each ended chain appends one line to
+`<XDG_DATA_HOME or ~/.local/share>/jevguard/remediation-chains.jsonl` (ids, attempt
+counts, failure-set hashes, resolved and remaining ids and the result; never a task,
+patch, rule text or path), bounded to 1 MiB and 500 lines. The per-chain state sits
+beside the private proposal requests and expires with them. `SESSION_LIMIT` and
+`DELIVERY_FAILED` are known only to the module, so they are shown but not written to that
+file.
 
 A failure shows a generic toast and one transcript line with a closed code
 (`REQUEST_UNREADABLE`, `REQUEST_INVALID`, `MODEL_REFUSED`, `MODEL_API_ERROR`,

@@ -5,7 +5,6 @@ export {
   createTypeSafeSystemOneClient,
   RULE_BATCH_CONCURRENCY,
 } from "./transport";
-export { JEV_MODEL } from "./types";
 export type {
   JevTransport,
   JevTransportChange,
@@ -22,3 +21,4 @@ export type {
   TypeSafeSystemOneClient,
   TypeSafeSystemOneRequest,
 } from "./types";
+export { JEV_MODEL } from "./types";
