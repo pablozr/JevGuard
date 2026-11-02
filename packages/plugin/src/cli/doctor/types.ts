@@ -32,6 +32,11 @@ export type ConfigCheckCode =
 
 export type OpenCodeCheckCode = "REGISTERED" | "NOT_REGISTERED" | "INSPECTION_FAILED";
 
+export type OpenCodeVersionCheckCode =
+  | "VERSION_SUPPORTED"
+  | "VERSION_UNSUPPORTED"
+  | "VERSION_UNKNOWN";
+
 export interface InvalidRuleSummary {
   readonly ruleId: string | null;
   readonly code: RuleParseErrorCode;
@@ -66,7 +71,20 @@ export type OpenCodeCheck = {
   readonly targets: readonly InstallInspection[];
 };
 
-export type DoctorCheck = CredentialCheck | RulesCheck | ConfigCheck | OpenCodeCheck;
+export type OpenCodeVersionCheck = {
+  readonly id: "opencode-version";
+  readonly status: DoctorStatus;
+  readonly code: OpenCodeVersionCheckCode;
+  /** The version `opencode --version` reported, or `null` when none could be read. */
+  readonly version: string | null;
+};
+
+export type DoctorCheck =
+  | CredentialCheck
+  | RulesCheck
+  | ConfigCheck
+  | OpenCodeCheck
+  | OpenCodeVersionCheck;
 
 /** Local, network-free diagnosis. It carries typed codes and paths only, never a credential. */
 export interface DoctorReport {
@@ -82,4 +100,6 @@ export interface DoctorDependencies {
   readonly policy: PolicyLoader;
   readonly parseConfig: PolicyConfigParser;
   readonly inspectOpenCode: (target: InstallTarget) => Promise<InstallInspection>;
+  /** Output of `opencode --version`, or `null` when it could not run. */
+  readonly readOpenCodeVersion: () => string | null;
 }

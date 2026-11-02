@@ -223,14 +223,14 @@ skills must never read or reproduce secret values or secret files.
 ## Plugin registration
 
 `jevguard install` (and `jevguard install --project`) registers the plugin by editing
-only the `plugin` array of the target `opencode.json` — the global config under
+only the `plugins` array of the target `opencode.json` — the global config under
 `~/.config/opencode/` or the project config at `./opencode.json`. It requires an
 explicit interactive `y/N` confirmation before any write and refuses when stdin is not
 a TTY. It never creates or edits a `.jsonc` file, never falls back to a different
-document, and never reads the credential store or `auth.json`. It only edits a
-`plugin` array of plain strings; OpenCode's `[["pkg", { "options": {} }]]` tuple form
-is a known limitation, so the installer leaves the file unchanged and prints the
-manual snippet instead.
+document, and never reads the credential store or `auth.json`. It never writes the
+legacy `plugin` key. It only edits a `plugins` array of package strings or
+`{ "package": "..." }` objects; for any other shape the installer leaves the file
+unchanged and prints the manual snippet instead.
 
 ## Credentials
 

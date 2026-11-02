@@ -82,6 +82,7 @@ interface Overrides {
   credentials?: CredentialResolution | Error;
   policy?: PolicyLoadResult | Error;
   inspect?: (target: InstallTarget) => Promise<InstallInspection>;
+  version?: string | null;
 }
 
 function run(overrides: Overrides = {}): Promise<DoctorReport> {
@@ -93,6 +94,7 @@ function run(overrides: Overrides = {}): Promise<DoctorReport> {
     policy: new FakePolicy(overrides.policy ?? loaded(validRule("ARCH-001"))),
     parseConfig: parsePolicyConfig,
     inspectOpenCode: overrides.inspect ?? registration("REGISTERED"),
+    readOpenCodeVersion: () => (overrides.version === undefined ? "2.2.2\n" : overrides.version),
   });
 }
 
@@ -284,6 +286,32 @@ describe("doctor OpenCode check", () => {
       code: "INSPECTION_FAILED",
     });
     expect(describeDoctorReport(report)).toContain(PROJECT_PATH);
+  });
+});
+
+describe("doctor OpenCode version check", () => {
+  test.each([
+    ["2.2.2\n", "OK", "VERSION_SUPPORTED", "2.2.2"],
+    ["2.2.7", "OK", "VERSION_SUPPORTED", "2.2.7"],
+    ["2.1.1", "FAIL", "VERSION_UNSUPPORTED", "2.1.1"],
+    ["2.3.0", "FAIL", "VERSION_UNSUPPORTED", "2.3.0"],
+    [null, "WARN", "VERSION_UNKNOWN", null],
+  ] as const)("classifies %j", async (version, status, code, reported) => {
+    const report = await run({ version });
+
+    expect(check(report, "opencode-version")).toEqual({
+      id: "opencode-version",
+      status,
+      code,
+      version: reported,
+    });
+  });
+
+  test("names the supported range when the version is unsupported", async () => {
+    const report = await run({ version: "2.1.1" });
+
+    expect(describeDoctorReport(report)).toContain("OpenCode 2.1.1 is not supported.");
+    expect(describeDoctorReport(report)).toContain(">=2.2.2 <2.3");
   });
 });
 

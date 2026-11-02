@@ -20,7 +20,7 @@ import type { CliDependencies, CliIO } from "../src/cli/types";
 
 const GLOBAL_PATH = "C:/home/.config/opencode/opencode.json";
 const PROJECT_PATH = "C:/repo/opencode.json";
-const MANUAL_SNIPPET = '{ "plugin": ["@pablozrrrr/jevguard"] }';
+const MANUAL_SNIPPET = '{ "plugins": ["@pablozrrrr/jevguard"] }';
 
 const PATH_SENTINEL = "src/SECRET_PATH_SENTINEL.ts";
 

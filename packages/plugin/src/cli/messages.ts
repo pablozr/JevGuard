@@ -32,7 +32,7 @@ export const LOGIN_SAVED_MESSAGE = "Credential saved to the OS credential store.
 
 export const LOGIN_ABORTED_MESSAGE = "Login cancelled. No credential was saved.";
 
-export const MANUAL_INSTALL_SNIPPET = `{ "plugin": ["${JEVGUARD_PLUGIN_ENTRY}"] }`;
+export const MANUAL_INSTALL_SNIPPET = `{ "plugins": ["${JEVGUARD_PLUGIN_ENTRY}"] }`;
 
 export function describeLoginFailure(reason: LoginFailureReason): string {
   switch (reason) {
@@ -71,7 +71,7 @@ export function describeInstallFailure(reason: InstallFailureReason, path: strin
       return manualSnippetFailure(`Could not parse ${path} as JSON.`);
     case "INVALID_CONFIG_SHAPE":
       return manualSnippetFailure(
-        `The plugin entry in ${path} is not an array of strings, so JevGuard did not change it.`,
+        `The plugins list in ${path} is not an array of package entries, so JevGuard did not change it.`,
       );
     case "READ_FAILURE":
       return `Could not read ${path}. Check the file permissions and try again.`;
@@ -81,7 +81,7 @@ export function describeInstallFailure(reason: InstallFailureReason, path: strin
 }
 
 function manualSnippetFailure(message: string): string {
-  return [message, "Add this to the plugin array manually:", MANUAL_INSTALL_SNIPPET].join("\n");
+  return [message, "Add this to the plugins array manually:", MANUAL_INSTALL_SNIPPET].join("\n");
 }
 
 /** Serializable JSON form of the aggregation for `jevguard report --json`. */

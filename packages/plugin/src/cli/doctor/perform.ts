@@ -3,7 +3,11 @@ import {
   createPolicyFileLoader,
   parsePolicyConfig,
 } from "@jevguard/node-infra";
-import { createNodeConfigFileSystem, inspectInstall } from "@jevguard/opencode-adapter";
+import {
+  createNodeConfigFileSystem,
+  inspectInstall,
+  readInstalledOpenCodeVersion,
+} from "@jevguard/opencode-adapter";
 import { homedir } from "node:os";
 import { createDefaultCredentialProvider } from "../../jev-port";
 import { resolveProjectRoot } from "../project-root";
@@ -32,5 +36,6 @@ export function performDoctor(): Promise<DoctorReport> {
         environment: process.env,
         homedir: homedir(),
       }),
+    readOpenCodeVersion: readInstalledOpenCodeVersion,
   });
 }

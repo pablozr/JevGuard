@@ -18,3 +18,9 @@ export type {
   InstallTarget,
   PluginEntryMutation,
 } from "./types";
+export {
+  checkOpenCodeVersion,
+  OPENCODE_ENGINE_RANGE,
+  type OpenCodeVersionCheck,
+  readInstalledOpenCodeVersion,
+} from "./version";

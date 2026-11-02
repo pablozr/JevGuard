@@ -1,4 +1,4 @@
-import type { InstallInspection } from "@jevguard/opencode-adapter";
+import { type InstallInspection, OPENCODE_ENGINE_RANGE } from "@jevguard/opencode-adapter";
 import { describeInstallFailure } from "../messages";
 import type {
   ConfigCheck,
@@ -7,6 +7,7 @@ import type {
   DoctorReport,
   InvalidRuleSummary,
   OpenCodeCheck,
+  OpenCodeVersionCheck,
   RulesCheck,
 } from "./types";
 
@@ -74,6 +75,25 @@ function describeCheckLine(check: DoctorCheck): CheckLine {
       return describeConfig(check);
     case "opencode-plugin":
       return describeOpenCode(check);
+    case "opencode-version":
+      return describeOpenCodeVersion(check);
+  }
+}
+
+function describeOpenCodeVersion(check: OpenCodeVersionCheck): CheckLine {
+  switch (check.code) {
+    case "VERSION_SUPPORTED":
+      return line(`OpenCode ${check.version} is supported.`);
+    case "VERSION_UNSUPPORTED":
+      return line(
+        `OpenCode ${check.version} is not supported.`,
+        hint(`JevGuard needs OpenCode ${OPENCODE_ENGINE_RANGE}.`),
+      );
+    case "VERSION_UNKNOWN":
+      return line(
+        "The OpenCode version could not be read from `opencode --version`.",
+        hint(`Check that OpenCode ${OPENCODE_ENGINE_RANGE} is installed and on PATH.`),
+      );
   }
 }
 

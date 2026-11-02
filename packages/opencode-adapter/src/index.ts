@@ -34,12 +34,15 @@ export type {
 } from "./attribution";
 export {
   addPluginEntry,
+  checkOpenCodeVersion,
   createConfirmationPrompt,
   createDefaultConfigDocument,
   createNodeConfigFileSystem,
   inspectInstall,
   install,
   JEVGUARD_PLUGIN_ENTRY,
+  OPENCODE_ENGINE_RANGE,
+  readInstalledOpenCodeVersion,
   resolveConfigPath,
 } from "./opencode-config";
 export type {
@@ -54,6 +57,7 @@ export type {
   InstallOutcome,
   InstallPathContext,
   InstallTarget,
+  OpenCodeVersionCheck,
   PluginEntryMutation,
 } from "./opencode-config";
 export {

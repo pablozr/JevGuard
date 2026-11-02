@@ -396,12 +396,16 @@ A local diagnosis: no network, no Jev transport, no writes. Checks, in order:
 | `rules` | `RULES_VALID`, `RULES_INVALID`, `RULES_MISSING`, `RULES_READ_FAILURE`, `RULES_NOT_CHECKED` |
 | `config` | `CONFIG_DEFAULTS`, `CONFIG_VALID`, `CONFIG_PARSE_INVALID`, `CONFIG_INVALID`, `REMEDIATION_INVALID`, `CONFIG_READ_FAILURE`, `CONFIG_NOT_CHECKED` |
 | `opencode-plugin` | `REGISTERED`, `NOT_REGISTERED`, `INSPECTION_FAILED` |
+| `opencode-version` | `VERSION_SUPPORTED`, `VERSION_UNSUPPORTED`, `VERSION_UNKNOWN` |
 
-A missing credential, missing or invalid rules, and an invalid or unreadable config
-are `FAIL`. An unregistered or uninspectable OpenCode plugin is `WARN`, and so is a
-check skipped because the other policy file could not be read. The overall status is
-the worst check. The OpenCode check inspects the global `opencode.json` and the
-`opencode.json` in the current directory, and passes when either registers the plugin.
+A missing credential, missing or invalid rules, an invalid or unreadable config, and an
+OpenCode version outside `>=2.2.2 <2.3` (pre-releases included) are `FAIL`. An
+unregistered or uninspectable OpenCode plugin is `WARN`, and so is an OpenCode version
+that `opencode --version` could not report, and a check skipped because the other
+policy file could not be read. The overall status is the worst check. The OpenCode
+check inspects the global `opencode.json` and the `opencode.json` in the current
+directory, and passes when either registers the plugin in its `plugins` list (or the
+legacy `plugin` list). The version check runs the `opencode` on `PATH` locally.
 Claude Code installs are not diagnosed yet.
 
 Exit codes: `0` when no check is `FAIL` (warnings included), `1` when any check is

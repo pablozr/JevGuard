@@ -4,46 +4,60 @@ export const JEVGUARD_PLUGIN_ENTRY = "@pablozrrrr/jevguard";
 
 const CONFIG_SCHEMA_URL = "https://opencode.ai/config.json";
 
+/** The OpenCode 2.x plugin list key. */
+const PLUGINS_KEY = "plugins";
+
+/** The 1.x key, still read (the host normalizes it) but never written. */
+const LEGACY_PLUGIN_KEY = "plugin";
+
 /** Empty config document used when the target file does not exist yet. */
 export function createDefaultConfigDocument(): Readonly<Record<string, unknown>> {
   return { $schema: CONFIG_SCHEMA_URL };
 }
 
 /**
- * Adds the JevGuard entry to a parsed `opencode.json` document without mutating the
- * input. It preserves every other key and every existing `plugin` entry, and refuses
- * an existing `plugin` value that is not an array of strings rather than clobbering it.
+ * Adds the JevGuard entry to the `plugins` list of a parsed `opencode.json` document
+ * without mutating the input. It preserves every other key and entry, and refuses a
+ * list that is not an array of package strings or `{ package }` objects rather than
+ * clobbering it. An entry already in the legacy `plugin` list counts as present.
  */
 export function addPluginEntry(document: unknown, entry: string): PluginEntryMutation {
   if (!isPlainObject(document)) {
     return { status: "INVALID_SHAPE" };
   }
 
-  const existing = document.plugin;
+  const existing = document[PLUGINS_KEY] ?? [];
+  const legacy = document[LEGACY_PLUGIN_KEY] ?? [];
 
-  if (existing === undefined) {
-    return { status: "ADDED", document: { ...document, plugin: [entry] } };
-  }
-
-  if (!isStringArray(existing)) {
+  if (!isPluginList(existing) || !isPluginList(legacy)) {
     return { status: "INVALID_SHAPE" };
   }
 
-  if (existing.some((value) => isPluginEntryFor(value, entry))) {
+  if ([...existing, ...legacy].some((value) => isPluginEntryFor(value, entry))) {
     return { status: "PRESENT" };
   }
 
-  return { status: "ADDED", document: { ...document, plugin: [...existing, entry] } };
+  return { status: "ADDED", document: { ...document, [PLUGINS_KEY]: [...existing, entry] } };
 }
+
+type PluginListEntry = string | { readonly package: string };
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((item) => typeof item === "string");
+function isPluginList(value: unknown): value is PluginListEntry[] {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (item) =>
+        typeof item === "string" || (isPlainObject(item) && typeof item.package === "string"),
+    )
+  );
 }
 
-function isPluginEntryFor(value: string, entry: string): boolean {
-  return value === entry || value.startsWith(`${entry}@`);
+function isPluginEntryFor(value: PluginListEntry, entry: string): boolean {
+  const spec = typeof value === "string" ? value : value.package;
+
+  return spec === entry || spec.startsWith(`${entry}@`);
 }

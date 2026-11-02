@@ -7,7 +7,7 @@ import {
   type RuleParseResults,
 } from "@jevguard/core";
 import { policyFilePaths } from "@jevguard/node-infra";
-import type { InstallInspection } from "@jevguard/opencode-adapter";
+import { checkOpenCodeVersion, type InstallInspection } from "@jevguard/opencode-adapter";
 import type {
   ConfigCheck,
   ConfigCheckCode,
@@ -20,6 +20,7 @@ import type {
   InvalidRuleSummary,
   OpenCodeCheck,
   OpenCodeCheckCode,
+  OpenCodeVersionCheck,
   RulesCheck,
 } from "./types";
 
@@ -44,7 +45,8 @@ export async function diagnose(dependencies: DoctorDependencies): Promise<Doctor
   const rules = checkRules(paths.rules, loaded);
   const config = checkConfig(dependencies, paths.config, loaded);
   const openCode = await checkOpenCode(dependencies);
-  const checks = [credential, rules, config, openCode];
+  const version = checkVersion(dependencies);
+  const checks = [credential, rules, config, openCode, version];
 
   return {
     version: 1,
@@ -177,6 +179,25 @@ function openCodeCode(targets: readonly InstallInspection[]): OpenCodeCheckCode 
   }
 
   return "NOT_REGISTERED";
+}
+
+const VERSION_CHECKS = {
+  SUPPORTED: { status: "OK", code: "VERSION_SUPPORTED" },
+  UNSUPPORTED: { status: "FAIL", code: "VERSION_UNSUPPORTED" },
+  UNKNOWN: { status: "WARN", code: "VERSION_UNKNOWN" },
+} as const satisfies Record<
+  ReturnType<typeof checkOpenCodeVersion>["status"],
+  Pick<OpenCodeVersionCheck, "status" | "code">
+>;
+
+function checkVersion(dependencies: DoctorDependencies): OpenCodeVersionCheck {
+  const result = checkOpenCodeVersion(dependencies.readOpenCodeVersion());
+
+  return {
+    id: "opencode-version",
+    ...VERSION_CHECKS[result.status],
+    version: result.status === "UNKNOWN" ? null : result.version,
+  };
 }
 
 function aggregateStatus(checks: readonly DoctorCheck[]): DoctorStatus {

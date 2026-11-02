@@ -10,7 +10,7 @@ import type {
   InstallTarget,
 } from "./types";
 
-const CONFIRMATION_MESSAGE = "Add JevGuard to the opencode.json plugin list?";
+const CONFIRMATION_MESSAGE = "Add JevGuard to the opencode.json plugins list?";
 
 /**
  * Registers the JevGuard plugin in the target `opencode.json`. It is idempotent,

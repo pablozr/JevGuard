@@ -54,7 +54,7 @@ function inspect(
 }
 
 function pluginDocument(...plugins: readonly string[]): string {
-  return JSON.stringify({ plugin: plugins });
+  return JSON.stringify({ plugins });
 }
 
 describe("inspectInstall", () => {
@@ -116,8 +116,8 @@ describe("inspectInstall", () => {
 
   test.each([
     ["a non-object document", "[]"],
-    ["a non-array plugin value", JSON.stringify({ plugin: "x" })],
-    ["a non-string plugin item", JSON.stringify({ plugin: [1] })],
+    ["a non-array plugins value", JSON.stringify({ plugins: "x" })],
+    ["a non-package plugins item", JSON.stringify({ plugins: [1] })],
   ])("reports INVALID_CONFIG_SHAPE for %s", async (_name, contents) => {
     const fileSystem = new FakeFileSystem();
     fileSystem.files.set(GLOBAL_PATH, contents);

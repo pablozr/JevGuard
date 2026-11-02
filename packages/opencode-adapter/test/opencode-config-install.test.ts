@@ -4,10 +4,12 @@ import { dirname, join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import {
   addPluginEntry,
+  checkOpenCodeVersion,
   createConfirmationPrompt,
   createNodeConfigFileSystem,
   install,
   JEVGUARD_PLUGIN_ENTRY,
+  OPENCODE_ENGINE_RANGE,
   resolveConfigPath,
 } from "../src/index";
 import type {
@@ -27,7 +29,7 @@ const XDG_PATH = join(XDG, "opencode", "opencode.json");
 const PROJECT_PATH = join(CWD, "opencode.json");
 const JSONC_PATH = join(dirname(GLOBAL_PATH), "opencode.jsonc");
 const DEFAULT_DOCUMENT = `${JSON.stringify(
-  { $schema: "https://opencode.ai/config.json", plugin: [JEVGUARD_PLUGIN_ENTRY] },
+  { $schema: "https://opencode.ai/config.json", plugins: [JEVGUARD_PLUGIN_ENTRY] },
   null,
   2,
 )}\n`;
@@ -110,27 +112,27 @@ function harness(target: InstallTarget = "global"): Harness {
 }
 
 describe("addPluginEntry", () => {
-  test("adds the entry when the plugin key is absent", () => {
+  test("adds the entry when the plugins key is absent", () => {
     const result = addPluginEntry({ $schema: "schema" }, JEVGUARD_PLUGIN_ENTRY);
 
     expect(result).toEqual({
       status: "ADDED",
-      document: { $schema: "schema", plugin: [JEVGUARD_PLUGIN_ENTRY] },
+      document: { $schema: "schema", plugins: [JEVGUARD_PLUGIN_ENTRY] },
     });
   });
 
   test("detects the exact entry and a version-suffixed entry as present", () => {
-    expect(addPluginEntry({ plugin: [JEVGUARD_PLUGIN_ENTRY] }, JEVGUARD_PLUGIN_ENTRY)).toEqual({
+    expect(addPluginEntry({ plugins: [JEVGUARD_PLUGIN_ENTRY] }, JEVGUARD_PLUGIN_ENTRY)).toEqual({
       status: "PRESENT",
     });
     expect(
-      addPluginEntry({ plugin: [`${JEVGUARD_PLUGIN_ENTRY}@1.2.3`] }, JEVGUARD_PLUGIN_ENTRY),
+      addPluginEntry({ plugins: [`${JEVGUARD_PLUGIN_ENTRY}@1.2.3`] }, JEVGUARD_PLUGIN_ENTRY),
     ).toEqual({ status: "PRESENT" });
   });
 
   test("preserves unknown keys, their order, and existing plugin entries", () => {
     const result = addPluginEntry(
-      { $schema: "schema", model: "gpt", plugin: ["other-plugin"] },
+      { $schema: "schema", model: "gpt", plugins: ["other-plugin"] },
       JEVGUARD_PLUGIN_ENTRY,
     );
 
@@ -140,8 +142,8 @@ describe("addPluginEntry", () => {
       throw new Error("expected ADDED");
     }
 
-    expect(Object.keys(result.document)).toEqual(["$schema", "model", "plugin"]);
-    expect(result.document.plugin).toEqual(["other-plugin", JEVGUARD_PLUGIN_ENTRY]);
+    expect(Object.keys(result.document)).toEqual(["$schema", "model", "plugins"]);
+    expect(result.document.plugins).toEqual(["other-plugin", JEVGUARD_PLUGIN_ENTRY]);
   });
 
   test("refuses a non-object document", () => {
@@ -149,13 +151,66 @@ describe("addPluginEntry", () => {
     expect(addPluginEntry(null, JEVGUARD_PLUGIN_ENTRY)).toEqual({ status: "INVALID_SHAPE" });
   });
 
-  test("refuses a plugin value that is not an array of strings", () => {
+  test("refuses a plugins value that is not a list of package entries", () => {
+    expect(addPluginEntry({ plugins: "x" }, JEVGUARD_PLUGIN_ENTRY)).toEqual({
+      status: "INVALID_SHAPE",
+    });
+    expect(addPluginEntry({ plugins: [42] }, JEVGUARD_PLUGIN_ENTRY)).toEqual({
+      status: "INVALID_SHAPE",
+    });
     expect(addPluginEntry({ plugin: "x" }, JEVGUARD_PLUGIN_ENTRY)).toEqual({
       status: "INVALID_SHAPE",
     });
-    expect(addPluginEntry({ plugin: [42] }, JEVGUARD_PLUGIN_ENTRY)).toEqual({
-      status: "INVALID_SHAPE",
+  });
+
+  test("counts an entry in the legacy plugin list as present", () => {
+    expect(addPluginEntry({ plugin: [JEVGUARD_PLUGIN_ENTRY] }, JEVGUARD_PLUGIN_ENTRY)).toEqual({
+      status: "PRESENT",
     });
+  });
+
+  test("counts a package object entry as present", () => {
+    expect(
+      addPluginEntry(
+        { plugins: [{ package: `${JEVGUARD_PLUGIN_ENTRY}@1.0.0` }] },
+        JEVGUARD_PLUGIN_ENTRY,
+      ),
+    ).toEqual({ status: "PRESENT" });
+  });
+
+  test("writes only to plugins, keeping package objects and the legacy list", () => {
+    const document = { plugin: ["other"], plugins: [{ package: "file:/x" }] };
+
+    expect(addPluginEntry(document, JEVGUARD_PLUGIN_ENTRY)).toEqual({
+      status: "ADDED",
+      document: {
+        plugin: ["other"],
+        plugins: [{ package: "file:/x" }, JEVGUARD_PLUGIN_ENTRY],
+      },
+    });
+  });
+});
+
+describe("checkOpenCodeVersion", () => {
+  test.each([
+    ["2.2.2", "SUPPORTED"],
+    ["opencode 2.2.9\n", "SUPPORTED"],
+    ["2.2.1", "UNSUPPORTED"],
+    ["2.3.0", "UNSUPPORTED"],
+    ["2.1.1", "UNSUPPORTED"],
+    ["3.2.2", "UNSUPPORTED"],
+    ["2.2.3-beta.1", "UNSUPPORTED"],
+  ] as const)("classifies %j as %s", (output, status) => {
+    expect(checkOpenCodeVersion(output).status).toBe(status);
+  });
+
+  test("returns UNKNOWN without a readable version", () => {
+    expect(checkOpenCodeVersion(null)).toEqual({ status: "UNKNOWN" });
+    expect(checkOpenCodeVersion("opencode")).toEqual({ status: "UNKNOWN" });
+  });
+
+  test("names the range the package declares", () => {
+    expect(OPENCODE_ENGINE_RANGE).toBe(">=2.2.2 <2.3");
   });
 });
 
@@ -204,7 +259,7 @@ describe("install", () => {
 
   test("does not write or prompt when the entry is already present", async () => {
     const { fileSystem, confirmation, dependencies } = harness();
-    fileSystem.files.set(GLOBAL_PATH, `${JSON.stringify({ plugin: [JEVGUARD_PLUGIN_ENTRY] })}\n`);
+    fileSystem.files.set(GLOBAL_PATH, `${JSON.stringify({ plugins: [JEVGUARD_PLUGIN_ENTRY] })}\n`);
 
     const outcome = await install(dependencies);
 
@@ -255,7 +310,7 @@ describe("install", () => {
   test("prefers opencode.json over an existing sibling opencode.jsonc", async () => {
     const { fileSystem, dependencies } = harness();
     fileSystem.files.set(JSONC_PATH, "{ /* comment */ }\n");
-    fileSystem.files.set(GLOBAL_PATH, `${JSON.stringify({ plugin: [] })}\n`);
+    fileSystem.files.set(GLOBAL_PATH, `${JSON.stringify({ plugins: [] })}\n`);
 
     const outcome = await install(dependencies);
 
@@ -295,7 +350,7 @@ describe("install", () => {
 
   test("refuses an invalid plugin shape and writes nothing", async () => {
     const { fileSystem, dependencies } = harness();
-    fileSystem.files.set(GLOBAL_PATH, `${JSON.stringify({ plugin: "x" })}\n`);
+    fileSystem.files.set(GLOBAL_PATH, `${JSON.stringify({ plugins: "x" })}\n`);
 
     const outcome = await install(dependencies);
 
@@ -393,7 +448,7 @@ describe("node config file system", () => {
     expect(outcome).toEqual({ status: "INSTALLED", target: "project", path });
     expect(JSON.parse(await readFile(path, "utf8"))).toEqual({
       $schema: "schema",
-      plugin: [JEVGUARD_PLUGIN_ENTRY],
+      plugins: [JEVGUARD_PLUGIN_ENTRY],
     });
     expect(await readdir(directory)).toEqual(["opencode.json"]);
   });
