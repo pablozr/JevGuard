@@ -2,6 +2,7 @@ import {
   buildProposalText,
   parseModelSpecifier,
   PROPOSER_AGENT_PROMPT,
+  type RemediationMode,
   type RemediationProposalRequest,
   type RemediationProposalStore,
 } from "@jevguard/core";
@@ -31,7 +32,38 @@ export interface ProposalDependencies {
 }
 
 /**
- * Creates at most one automatic proposal for an evaluated turn (OpenCode 2.2.x).
+ * What one proposer run produced. `SHOWN` is an observe proposal left for the user in its
+ * child session; `DUPLICATE` means another review already claimed the turn.
+ */
+export type ProposalDraft =
+  | { readonly status: "SHOWN" }
+  | { readonly status: "READY"; readonly text: string }
+  | { readonly status: "NO_MODEL" }
+  | { readonly status: "FAILED" }
+  | { readonly status: "DUPLICATE" };
+
+/**
+ * Creates at most one automatic proposal for an evaluated turn (OpenCode 2.2.x) and
+ * shows it to the user in the child session (observe).
+ */
+export async function proposeForTurn(
+  request: RemediationProposalRequest | null,
+  dependencies: ProposalDependencies,
+): Promise<void> {
+  if (request === null) {
+    return;
+  }
+
+  const draft = await draftProposal(request, dependencies, "observe");
+
+  if (draft.status === "SHOWN") {
+    await contain(() => dependencies.notifier.proposalReady());
+  }
+}
+
+/**
+ * Runs the proposer once for an evaluated turn. In `observe` the child is opened for the
+ * user; in `remediate` it stays in the background and its answer is returned.
  *
  * - The evaluation identity is claimed before any session call, so a duplicate review
  *   cannot create a second proposal.
@@ -42,28 +74,26 @@ export interface ProposalDependencies {
  *   the prompt so its own executions are never reviewed. The proposer contract leads
  *   the prompt text.
  * - The child execution is awaited through its lifecycle events; past the time budget
- *   it is interrupted and `REMEDIATION_PROPOSAL_TIMEOUT` is reported.
+ *   it is interrupted and `REMEDIATION_PROPOSAL_TIMEOUT` is reported. In `remediate`, a
+ *   succeeded child's answer is its last assistant text.
  *
  * Every failure is a safe typed log plus a generic toast, each contained; nothing
  * reaches the originating review or session.
  */
-export async function proposeForTurn(
-  request: RemediationProposalRequest | null,
+export async function draftProposal(
+  request: RemediationProposalRequest,
   dependencies: ProposalDependencies,
-): Promise<void> {
-  if (request === null) {
-    return;
-  }
-
+  mode: RemediationMode,
+): Promise<ProposalDraft> {
   const configured = request.model === null ? null : parseModelSpecifier(request.model);
 
   if (request.model !== null && configured === null) {
     await reportProposalFailure("MODEL_SPECIFIER_INVALID", dependencies);
-    return;
+    return FAILED;
   }
 
   if (!dependencies.proposals.claim(request.evaluationId)) {
-    return;
+    return { status: "DUPLICATE" };
   }
 
   const model =
@@ -71,7 +101,7 @@ export async function proposeForTurn(
 
   if (model === null) {
     await contain(() => dependencies.failures.write("REMEDIATION_PROPOSAL_SKIPPED_NO_MODEL"));
-    return;
+    return { status: "NO_MODEL" };
   }
 
   let sessionID: string;
@@ -84,12 +114,15 @@ export async function proposeForTurn(
     });
   } catch {
     await reportProposalFailure("CHILD_SESSION_FAILED", dependencies);
-    return;
+    return FAILED;
   }
 
   dependencies.proposals.registerChildSession(sessionID);
 
-  await contain(() => dependencies.navigator.navigate(sessionID));
+  if (mode === "observe") {
+    await contain(() => dependencies.navigator.navigate(sessionID));
+  }
+
   await contain(() => dependencies.notifier.proposalPreparing());
 
   const outcome = dependencies.childExecutions.wait(sessionID, dependencies.proposalTimeoutMs);
@@ -97,28 +130,51 @@ export async function proposeForTurn(
   try {
     await dependencies.proposalFacade.prompt({
       sessionID,
-      text: `${PROPOSER_AGENT_PROMPT}\n\n${buildProposalText(request)}`,
+      text: `${PROPOSER_AGENT_PROMPT}
+
+${buildProposalText(request)}`,
     });
   } catch {
     // Release the waiter and its timer: the child never ran.
     dependencies.childExecutions.settle(sessionID, "ENDED");
     await outcome;
     await reportProposalFailure("PROPOSAL_PROMPT_FAILED", dependencies);
-    return;
+    return FAILED;
   }
 
   switch (await outcome) {
     case "SUCCEEDED":
-      await contain(() => dependencies.notifier.proposalReady());
-      return;
+      return mode === "observe" ? { status: "SHOWN" } : readAnswer(sessionID, dependencies);
     case "ENDED":
       await reportProposalFailure("PROPOSAL_PROMPT_FAILED", dependencies);
-      return;
+      return FAILED;
     case "TIMEOUT":
       await contain(() => dependencies.proposalFacade.interrupt(sessionID));
       await reportProposalFailure("REMEDIATION_PROPOSAL_TIMEOUT", dependencies);
-      return;
+      return FAILED;
   }
+}
+
+const FAILED: ProposalDraft = { status: "FAILED" };
+
+async function readAnswer(
+  sessionID: string,
+  dependencies: ProposalDependencies,
+): Promise<ProposalDraft> {
+  let text: string | null;
+
+  try {
+    text = await dependencies.proposalFacade.readProposal(sessionID);
+  } catch {
+    text = null;
+  }
+
+  if (text === null) {
+    await reportProposalFailure("PROPOSAL_PROMPT_FAILED", dependencies);
+    return FAILED;
+  }
+
+  return { status: "READY", text };
 }
 
 async function readOriginModel(
@@ -140,7 +196,7 @@ async function reportProposalFailure(
   await contain(() => dependencies.notifier.proposalFailed());
 }
 
-async function contain(work: () => Promise<unknown>): Promise<void> {
+export async function contain(work: () => Promise<unknown>): Promise<void> {
   try {
     await work();
   } catch {

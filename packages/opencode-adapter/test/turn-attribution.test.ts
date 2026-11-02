@@ -2,6 +2,7 @@ import type { Turn } from "@jevguard/core";
 import { describe, expect, test } from "vitest";
 import {
   createTurnTracker,
+  executionDelivery,
   executionTask,
   InMemoryTurnDeduplicator,
   locateExecution,
@@ -463,5 +464,41 @@ describe("turn tracker", () => {
     facade.messages.set("ses_0", [user("u1", "task"), assistant("a1")]);
 
     expect(await tracker.finish("ses_0")).toMatchObject({ reason: "MISSING_TURN_START" });
+  });
+});
+
+describe("executionDelivery", () => {
+  const mark = { chainId: "msg_a", attempt: 1, maxAttempts: 2 };
+  const marked = (id: string, value: unknown = mark): OpenCodeMessage => ({
+    id,
+    type: "synthetic",
+    completed: false,
+    text: "frame",
+    metadata: { jevguard: value },
+  });
+  const human: OpenCodeMessage = { id: "u1", type: "user", completed: false, text: "task" };
+
+  test("reads the mark only from a synthetic message's metadata", () => {
+    expect(executionDelivery([marked("s1")])).toEqual({ mark, mixed: false });
+    expect(executionDelivery([human])).toEqual({ mark: null, mixed: false });
+    expect(
+      executionDelivery([{ ...human, metadata: { jevguard: mark } } as OpenCodeMessage]),
+    ).toEqual({ mark: null, mixed: false });
+  });
+
+  test("is mixed when a marked delivery shares the execution with an unmarked input", () => {
+    expect(executionDelivery([human, marked("s1")])).toEqual({ mark, mixed: true });
+  });
+
+  test("ignores a malformed mark", () => {
+    for (const value of [
+      { chainId: "bad id", attempt: 1, maxAttempts: 2 },
+      { chainId: "msg_a", attempt: 3, maxAttempts: 2 },
+      { chainId: "msg_a", attempt: 0, maxAttempts: 2 },
+      "msg_a",
+      null,
+    ]) {
+      expect(executionDelivery([marked("s1", value)])).toEqual({ mark: null, mixed: false });
+    }
   });
 });

@@ -7,7 +7,10 @@ export {
   failureSignature,
   unresolvedIds,
 } from "./chain";
+export type { ChainClosure, ChainEndRecord, ChainEndSink } from "./closures";
+export { chainEndOf, recordClosures } from "./closures";
 export { parseModelSpecifier, resolveRemediationConfig } from "./config";
+export { deliveryFindingsOf } from "./delivery-findings";
 export { formatAgentDelivery, isAutoDeliveredTask, parseAutoDelivery } from "./delivery-frame";
 export { buildProposalText, PROPOSER_AGENT_PROMPT } from "./prompt";
 export { buildProposalRequest } from "./request";

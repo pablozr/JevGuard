@@ -1,3 +1,5 @@
+import type { DeliveryMark } from "../attribution/types";
+
 /**
  * Model identity for one proposer invocation, already split into the provider and
  * model IDs the host expects.
@@ -22,5 +24,19 @@ export interface ProposalSessionFacade {
     readonly model: ProposalModel;
   }): Promise<string>;
   prompt(input: { readonly sessionID: string; readonly text: string }): Promise<void>;
+  /**
+   * The proposer's answer once its execution succeeded: the text parts of the last
+   * assistant message of the child session, or `null` when it has none.
+   */
+  readProposal(sessionID: string): Promise<string | null>;
   interrupt(sessionID: string): Promise<void>;
+}
+
+/**
+ * Sends one remediation message to the originating session (OpenCode 2.2.x): a visible
+ * synthetic message, queued behind any running execution, tagged with the chain mark.
+ * It rejects on a host failure; the plugin orchestration contains it.
+ */
+export interface OriginSessionPromptFacade {
+  promptVisible(sessionID: string, text: string, mark: DeliveryMark): Promise<void>;
 }

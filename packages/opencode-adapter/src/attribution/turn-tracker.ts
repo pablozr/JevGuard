@@ -1,5 +1,5 @@
 import type { Turn } from "@jevguard/core";
-import { executionTask, locateExecution } from "./execution";
+import { executionDelivery, executionTask, locateExecution } from "./execution";
 import {
   attributeSnapshotDiff,
   captureSnapshot,
@@ -254,7 +254,7 @@ export function createTurnTracker(dependencies: TurnTrackerDependencies): TurnTr
 
     const turn: Turn = { id: execution.assistant.id, task, files };
 
-    return { status: "ATTRIBUTED", turn };
+    return { status: "ATTRIBUTED", turn, delivery: executionDelivery(execution.inputs) };
   }
 }
 

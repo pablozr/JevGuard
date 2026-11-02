@@ -74,7 +74,35 @@ export interface ProposalSessionNavigator {
  */
 export type OperationalEvent =
   | { readonly kind: "TURN_SKIPPED"; readonly reason: "interrupted" | "failed" }
-  | { readonly kind: "ATTRIBUTION_UNAVAILABLE"; readonly reason: AttributionFailureReason };
+  | { readonly kind: "ATTRIBUTION_UNAVAILABLE"; readonly reason: AttributionFailureReason }
+  | RemediationChainEvent;
+
+/**
+ * One step of a remediation chain, as the log shows it: ids, counts and typed codes only.
+ * `REMEDIATION_CONFIG_INVALID` says the user's `opencode.yaml` was refused, so remediation
+ * stays off.
+ */
+export type RemediationChainEvent =
+  | {
+      readonly kind: "REMEDIATION_SENT";
+      readonly chainId: string;
+      readonly attempt: number;
+      readonly maxAttempts: number;
+    }
+  | {
+      readonly kind: "REMEDIATION_STOPPED";
+      readonly chainId: string;
+      readonly attempt: number;
+      readonly maxAttempts: number;
+      readonly code: string;
+    }
+  | {
+      readonly kind: "REMEDIATION_RESOLVED";
+      readonly chainId: string;
+      readonly fixed: number;
+      readonly attempts: number;
+    }
+  | { readonly kind: "REMEDIATION_CONFIG_INVALID"; readonly reason: string };
 
 export interface OperationalLogSink {
   write(event: OperationalEvent): Promise<DeliveryStatus>;

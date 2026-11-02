@@ -23,9 +23,14 @@ import {
   type TurnReview,
   type UnavailableReason,
 } from "@jevguard/core";
-import type { DeliveryStatus } from "@jevguard/node-infra";
+import type {
+  DeliveryStatus,
+  RemediationChainEntry,
+  RemediationChainLog,
+} from "@jevguard/node-infra";
 import {
   createTurnTracker,
+  type DeliveryMark,
   InMemoryTurnDeduplicator,
   type FileContent,
   type OpenCodeMessage,
@@ -39,13 +44,15 @@ import {
   type ProposalSessionNavigator,
   type RemediationFailureLogSink,
   type RemediationNotifier,
+  type OriginSessionPromptFacade,
   type ReviewPresenter,
   type WorkingFileDiff,
 } from "@jevguard/opencode-adapter";
 import type { Plugin } from "@opencode/plugin";
 import { describe, expect, test } from "vitest";
 import plugin from "../src/index";
-import { startPlugin } from "../src/plugin";
+import { createPluginDependencies, startPlugin } from "../src/plugin";
+import { createRemediationChains, MAX_ACTIVE_CHAINS } from "../src/remediation/chains";
 import { createChildExecutionWatcher } from "../src/remediation/child-executions";
 import { type ProposalDependencies, proposeForTurn } from "../src/remediation/propose";
 import { createPluginRuntime } from "../src/runtime";
@@ -388,6 +395,8 @@ class FakeProposalFacade implements ProposalSessionFacade {
   failCreate = false;
   failPrompt = false;
   childOutcome: "succeeded" | "failed" | "none" = "succeeded";
+  answer: string | null = PROPOSER_ANSWER;
+  beforeRead: () => void = () => undefined;
   emit: (event: unknown) => void = () => undefined;
 
   constructor(private readonly order: string[] = []) {}
@@ -425,8 +434,42 @@ class FakeProposalFacade implements ProposalSessionFacade {
     }
   }
 
+  async readProposal(): Promise<string | null> {
+    this.order.push("readProposal");
+    this.beforeRead();
+
+    return this.answer;
+  }
+
   async interrupt(sessionID: string): Promise<void> {
     this.interrupts.push(sessionID);
+  }
+}
+
+const PROPOSER_ANSWER = "Move the check back into the handler.";
+
+class FakeOriginPrompt implements OriginSessionPromptFacade {
+  readonly sent: Array<{
+    readonly sessionID: string;
+    readonly text: string;
+    readonly mark: DeliveryMark;
+  }> = [];
+  fail = false;
+
+  async promptVisible(sessionID: string, text: string, mark: DeliveryMark): Promise<void> {
+    if (this.fail) {
+      throw new Error("synthetic rejected");
+    }
+
+    this.sent.push({ sessionID, text, mark });
+  }
+}
+
+class FakeChainLog implements RemediationChainLog {
+  readonly entries: RemediationChainEntry[] = [];
+
+  async record(entry: RemediationChainEntry): Promise<void> {
+    this.entries.push(entry);
   }
 }
 
@@ -588,6 +631,8 @@ interface Harness {
   readonly notifier: FakeNotifier;
   readonly failures: FakeFailureSink;
   readonly operational: FakeOperationalSink;
+  readonly origin: FakeOriginPrompt;
+  readonly chainLog: FakeChainLog;
   readonly order: string[];
 }
 
@@ -598,7 +643,7 @@ const TEST_PROPOSAL_TIMEOUT_MS = 20;
  * facade: the plugin wraps the concrete Jev port in one shared FIFO concurrency
  * limit, so orchestration tests exercise the real cap.
  */
-function harness(): Harness {
+function harness(options: { readonly remediate?: { readonly maxAttempts: number } } = {}): Harness {
   const facade = new FakeFacade();
   const policy = new FakePolicyLoader();
   const presenter = new FakePresenter();
@@ -610,10 +655,21 @@ function harness(): Harness {
   const notifier = new FakeNotifier(order);
   const failures = new FakeFailureSink();
   const operational = new FakeOperationalSink();
+  const origin = new FakeOriginPrompt();
+  const chainLog = new FakeChainLog();
 
   const dependencies: PluginRuntimeDependencies = {
     tracker: createTurnTracker({ facade, deduplicator: new InMemoryTurnDeduplicator() }),
     operational,
+    remediation:
+      options.remediate === undefined
+        ? null
+        : {
+            originPrompt: origin,
+            maxAttempts: options.remediate.maxAttempts,
+            chains: createRemediationChains(),
+            chainLog,
+          },
     policy,
     presenter,
     jev: createFifoJevPort(jev, { maxConcurrency: MAX_CONCURRENT_JEV_CALLS }),
@@ -642,6 +698,8 @@ function harness(): Harness {
     notifier,
     failures,
     operational,
+    origin,
+    chainLog,
     order,
   };
 }
@@ -2472,5 +2530,280 @@ describe("JevGuardPlugin setup (2.2.x)", () => {
     const { cleanup } = await startPlugin(failing, values.dependencies, []);
 
     await expect(cleanup()).resolves.toBeUndefined();
+  });
+});
+
+const REMEDIATE = { remediate: { maxAttempts: 2 } } as const;
+
+function deliveryRecord(mark: DeliveryMark, id = "msg_delivery"): OpenCodeMessage {
+  return { id, type: "synthetic", completed: false, text: "frame", metadata: { jevguard: mark } };
+}
+
+const IDLE_RECORD: OpenCodeMessage = { id: "msg_idle", type: "idle", completed: false };
+
+/** The correction execution: the queued remediation message, then the agent's answer. */
+function correctionRecords(
+  mark: DeliveryMark,
+  extraInputs: readonly OpenCodeMessage[] = [],
+): readonly OpenCodeMessage[] {
+  return [
+    ...turnRecords(),
+    IDLE_RECORD,
+    ...extraInputs,
+    deliveryRecord(mark),
+    { id: SECOND_ASSISTANT_ID, type: "assistant", completed: true },
+  ];
+}
+
+async function firstDelivery(values: Harness): Promise<DeliveryMark> {
+  errorFailSetup(values);
+  await dispatch(values.runtime, turnEvents());
+
+  const sent = values.origin.sent[0];
+
+  if (sent === undefined) {
+    throw new Error("expected a first delivery");
+  }
+
+  return sent.mark;
+}
+
+function chainResults(values: Harness): readonly string[] {
+  return values.chainLog.entries.map((entry) => entry.result);
+}
+
+function operationalKinds(values: Harness): readonly string[] {
+  return values.operational.events.map((event) => event.kind);
+}
+
+describe("JevGuardPlugin remediate (2.2.x)", () => {
+  test("queues one visible synthetic delivery, attempt 1/2, after a FAIL", async () => {
+    const values = harness(REMEDIATE);
+
+    const mark = await firstDelivery(values);
+
+    expect(mark).toEqual({ chainId: ASSISTANT_ID, attempt: 1, maxAttempts: 2 });
+    expect(values.origin.sent).toHaveLength(1);
+
+    const text = values.origin.sent[0]?.text ?? "";
+
+    expect(values.origin.sent[0]?.sessionID).toBe(SESSION_ID);
+    expect(text).toContain(`attempt 1/2 · chain ${ASSISTANT_ID}`);
+    expect(text).toContain("TEST-1");
+    expect(text).toContain(PROPOSER_ANSWER);
+    expect(text).not.toContain(PATCH);
+    expect(values.navigator.calls).toEqual([]);
+    expect(operationalKinds(values)).toEqual(["REMEDIATION_SENT"]);
+    expect(values.chainLog.entries).toEqual([]);
+    expect(values.facade.forbidden).toEqual([]);
+  });
+
+  test("ends the chain as RESOLVED when the correction turn passes", async () => {
+    const values = harness(REMEDIATE);
+    const mark = await firstDelivery(values);
+
+    values.facade.records = correctionRecords(mark);
+    values.jev.probability = 0.1;
+    await dispatch(values.runtime, turnEvents());
+
+    expect(values.origin.sent).toHaveLength(1);
+    expect(chainResults(values)).toEqual(["RESOLVED"]);
+    expect(values.chainLog.entries[0]).toMatchObject({
+      host: "opencode",
+      chainId: ASSISTANT_ID,
+      turnIds: [ASSISTANT_ID, SECOND_ASSISTANT_ID],
+      resolvedIds: ["TEST-1"],
+      remainingIds: [],
+    });
+    expect(operationalKinds(values)).toEqual(["REMEDIATION_SENT", "REMEDIATION_RESOLVED"]);
+  });
+
+  test("stops on a repeated failure without a second delivery", async () => {
+    const values = harness(REMEDIATE);
+    const mark = await firstDelivery(values);
+
+    values.facade.records = correctionRecords(mark);
+    await dispatch(values.runtime, turnEvents());
+
+    expect(values.origin.sent).toHaveLength(1);
+    expect(chainResults(values)).toEqual(["REPEATED_FAILURE"]);
+    expect(values.operational.events.at(-1)).toMatchObject({
+      kind: "REMEDIATION_STOPPED",
+      code: "REPEATED_FAILURE",
+    });
+  });
+
+  test("ends the chain as UNVERIFIED when a user message joins the correction turn", async () => {
+    const values = harness(REMEDIATE);
+    const mark = await firstDelivery(values);
+
+    values.facade.records = correctionRecords(mark, [
+      { id: SECOND_USER_ID, type: "user", completed: false, text: "Also rename it." },
+    ]);
+    await dispatch(values.runtime, turnEvents());
+
+    expect(values.origin.sent).toHaveLength(1);
+    expect(chainResults(values)).toEqual(["UNVERIFIED"]);
+  });
+
+  test("never trusts a pasted frame without the metadata mark", async () => {
+    const values = harness(REMEDIATE);
+    const mark = await firstDelivery(values);
+    const pasted: OpenCodeMessage = {
+      id: "msg_pasted",
+      type: "user",
+      completed: false,
+      text: values.origin.sent[0]?.text ?? "",
+    };
+
+    values.facade.records = [
+      ...turnRecords(),
+      IDLE_RECORD,
+      pasted,
+      { id: SECOND_ASSISTANT_ID, type: "assistant", completed: true },
+    ];
+    await dispatch(values.runtime, turnEvents());
+
+    // A human turn: a fresh chain starts, and the first one is never judged by it.
+    expect(values.origin.sent.map((sent) => sent.mark)).toEqual([
+      mark,
+      { chainId: SECOND_ASSISTANT_ID, attempt: 1, maxAttempts: 2 },
+    ]);
+  });
+
+  test("sends nothing into a busy session and ends the chain as UNVERIFIED", async () => {
+    const values = harness(REMEDIATE);
+    errorFailSetup(values);
+    values.proposalFacade.beforeRead = () => {
+      values.runtime.onEvent(executionEvent("started"));
+    };
+
+    await dispatch(values.runtime, turnEvents());
+
+    expect(values.origin.sent).toEqual([]);
+    expect(chainResults(values)).toEqual(["UNVERIFIED"]);
+  });
+
+  test("stops at the per-session delivery limit", async () => {
+    const values = harness(REMEDIATE);
+    errorFailSetup(values);
+
+    for (let index = 1; index <= 4; index += 1) {
+      values.facade.records = turnRecords(`msg_assistant_${index}`, `msg_user_${index}`);
+      await dispatch(values.runtime, turnEvents());
+    }
+
+    expect(values.origin.sent).toHaveLength(3);
+    expect(chainResults(values)).toEqual(["SESSION_LIMIT"]);
+  });
+
+  test("ends the chain as DELIVERY_FAILED when the synthetic message is rejected", async () => {
+    const values = harness(REMEDIATE);
+    errorFailSetup(values);
+    values.origin.fail = true;
+
+    await dispatch(values.runtime, turnEvents());
+
+    expect(chainResults(values)).toEqual(["DELIVERY_FAILED"]);
+    expect(operationalKinds(values)).toEqual(["REMEDIATION_STOPPED"]);
+  });
+
+  test("ends the chain as PROPOSAL_FAILED when the proposer fails", async () => {
+    const values = harness(REMEDIATE);
+    errorFailSetup(values);
+    values.proposalFacade.childOutcome = "failed";
+
+    await dispatch(values.runtime, turnEvents());
+
+    expect(values.origin.sent).toEqual([]);
+    expect(chainResults(values)).toEqual(["PROPOSAL_FAILED"]);
+  });
+
+  test("delivers the findings with an empty strategy when no model is readable", async () => {
+    const values = harness(REMEDIATE);
+    errorFailSetup(values);
+    values.proposalFacade.originModelValue = null;
+
+    await dispatch(values.runtime, turnEvents());
+
+    expect(values.proposalFacade.created).toEqual([]);
+    expect(values.origin.sent).toHaveLength(1);
+    expect(values.origin.sent[0]?.text).toContain("TEST-1");
+    expect(values.origin.sent[0]?.text).not.toContain(PROPOSER_ANSWER);
+  });
+
+  test("lets the project's .jev veto remediation", async () => {
+    const values = harness(REMEDIATE);
+    errorFailSetup(values);
+    loadRules(values.policy, scopedRule("error"), DISABLED_CONFIG);
+
+    await dispatch(values.runtime, turnEvents());
+
+    expect(values.origin.sent).toEqual([]);
+    expect(values.chainLog.entries).toEqual([]);
+  });
+
+  test("ends the session's chain as UNVERIFIED after an interrupted execution", async () => {
+    const values = harness(REMEDIATE);
+    await firstDelivery(values);
+
+    await dispatch(values.runtime, [executionEvent("started"), executionEvent("interrupted")]);
+
+    expect(chainResults(values)).toEqual(["UNVERIFIED"]);
+  });
+
+  test("sends nothing in observe", async () => {
+    const values = harness();
+    errorFailSetup(values);
+
+    await dispatch(values.runtime, turnEvents());
+
+    expect(values.origin.sent).toEqual([]);
+    expect(values.navigator.calls).toEqual([CHILD_SESSION_ID]);
+  });
+});
+
+describe("JevGuardPlugin remediation chains store", () => {
+  test("drops the oldest chain as EXPIRED past the limit", () => {
+    const chains = createRemediationChains(2);
+    const state = (chainId: string) => ({
+      chainId,
+      originIds: ["TEST-1"],
+      signatures: ["s"],
+      turnIds: [chainId],
+      attempts: 1,
+      scopes: {},
+    });
+
+    expect(MAX_ACTIVE_CHAINS).toBe(64);
+    expect(chains.save(SESSION_ID, state("a"))).toEqual([]);
+    expect(chains.save(SESSION_ID, state("b"))).toEqual([]);
+    expect(chains.save(SESSION_ID, state("c"))).toEqual([{ state: state("a"), code: "EXPIRED" }]);
+    expect(chains.load("a")).toBeNull();
+    expect(chains.activeChain(SESSION_ID)?.chainId).toBe("c");
+  });
+});
+
+describe("JevGuardPlugin remediation opt-in", () => {
+  test("turns remediate on only from an ENABLED remediate user file", () => {
+    const host = fakeHostContext("/repo");
+    const enabled = createPluginDependencies(host.context, () => ({
+      status: "ENABLED",
+      settings: { delivery: "agent", model: null, mode: "remediate", maxAttempts: 3 },
+    }));
+    const observe = createPluginDependencies(host.context, () => ({
+      status: "ENABLED",
+      settings: { delivery: "user", model: null, mode: "observe", maxAttempts: 2 },
+    }));
+    const disabled = createPluginDependencies(host.context, () => ({ status: "DISABLED" }));
+    const invalid = createPluginDependencies(host.context, () => ({
+      status: "INVALID",
+      reason: "USER_CONFIG_IN_PROJECT",
+    }));
+
+    expect(enabled.remediation?.maxAttempts).toBe(3);
+    expect(observe.remediation).toBeNull();
+    expect(disabled.remediation).toBeNull();
+    expect(invalid.remediation).toBeNull();
   });
 });

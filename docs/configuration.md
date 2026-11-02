@@ -542,6 +542,55 @@ apply instruction into their normal coding agent, and applies it there. That app
 an ordinary execution, so the server plugin reviews it normally when it succeeds,
 exactly like any other turn.
 
+### OpenCode `mode: remediate` (bounded chain)
+
+By default OpenCode only observes: the proposal stays in its child session. You can opt
+into a bounded correction chain in your own file, never in the repository:
+
+```yaml
+# <XDG_CONFIG_HOME | USERPROFILE | HOME/.config>/jevguard/opencode.yaml
+remediation:
+  enabled: true      # default false
+  delivery: agent    # user | agent; remediate requires agent
+  mode: remediate    # observe | remediate; default observe
+  max_attempts: 2    # 1 to 3; default 2; only with mode: remediate
+```
+
+The file has no `model` key (the proposer uses `remediation.model` from `.jev/config.yaml`
+or the session's model). It is located, refused inside the project or its Git working
+tree, and validated exactly like Claude Code's `claude-code.yaml`; a refused file leaves
+remediation off and logs one `warn` line, `JevGuard remediation is off · your
+opencode.yaml is not valid (<reason>)`, with `USER_CONFIG_INVALID`,
+`USER_CONFIG_IN_PROJECT` or `USER_CONFIG_UNREADABLE`. The repository's `.jev/config.yaml`
+can only veto it with `remediation.auto_propose: false`.
+
+With `mode: remediate`, a reviewed execution with a `FAIL` of an `error` rule or a
+built-in check, with complete safe evidence, runs the proposer in its deny-all child
+session in the background (it is not opened), then queues one visible synthetic message
+into the originating session (description `JevGuard remediation`). It is sent only after
+the execution succeeded and only while the session is idle; it never steers a running
+execution and never hides the agent's reply. The message is marked `attempt n/m` and
+lists the failing findings, the strategy (capped at 32768 characters; empty when no model
+is readable) and the same constraints as on Claude Code. Its chain mark travels in the
+message metadata (`jevguard`), never in its text, so a pasted copy of a message is read as
+your own turn.
+
+The agent's next execution is reviewed normally and the chain resolves, continues or
+stops under the same rules and codes as on Claude Code (`LIMIT`, `REPEATED_FAILURE`,
+`REGRESSION_INTRODUCED`, `UNVERIFIED`, `SESSION_LIMIT`, `DELIVERY_FAILED`), plus:
+
+| Code | Meaning on OpenCode |
+| --- | --- |
+| `UNVERIFIED` | Also: you sent a message into the correction execution, the session was busy when the message was ready, or the next execution was interrupted, failed or not attributable. |
+| `PROPOSAL_FAILED` | The proposer failed or timed out; nothing was sent. |
+| `DELIVERY_FAILED` | The host refused the synthetic message. |
+| `EXPIRED` | More than 64 chains were open at once; the oldest one was dropped. |
+
+At most 3 messages are sent per session for the plugin's lifetime. Chains live in memory
+only: a restart ends them, and the next correction execution then stops as `UNVERIFIED`.
+Every ended chain logs one line and appends one record to the same
+`remediation-chains.jsonl` file (`host: opencode`).
+
 ### OpenCode 2.2.x scope
 
 - The plugin requires OpenCode `2.2.2` or later within `2.2.x` (`>=2.2.2 <2.3`).

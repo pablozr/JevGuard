@@ -148,7 +148,10 @@ export {
   failureSignature,
   unresolvedIds,
 } from "./remediation/chain";
+export type { ChainClosure, ChainEndRecord, ChainEndSink } from "./remediation/closures";
+export { chainEndOf, recordClosures } from "./remediation/closures";
 export { parseModelSpecifier, resolveRemediationConfig } from "./remediation/config";
+export { deliveryFindingsOf } from "./remediation/delivery-findings";
 export type { AgentDeliveryInput, DeliveryFinding } from "./remediation/delivery-frame";
 export {
   AGENT_NOTICE,

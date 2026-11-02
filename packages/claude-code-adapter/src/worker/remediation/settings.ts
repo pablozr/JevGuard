@@ -1,130 +1,35 @@
-import { isAttemptCount, MAX_ATTEMPTS_DEFAULT } from "@jevguard/core";
-import { CLAUDE_MODEL_PATTERN, isRecord, type JsonRecord, userBaseOf } from "../../presentation";
-import { isInsideProject } from "./containment";
-import type {
-  ClaudeRemediationSettings,
-  ClaudeRemediationSettingsResult,
-  UserConfigEnvironment,
-  UserConfigLoadInput,
-} from "./types";
+import {
+  loadRemediationUserSettings,
+  type RemediationUserSettingsRules,
+  resolveRemediationUserSettings,
+  type UserConfigEnvironment,
+  type UserConfigLoadInput,
+  userConfigFileOf as userConfigFileFor,
+} from "@jevguard/node-infra";
+import { CLAUDE_MODEL_PATTERN } from "../../presentation";
+import type { ClaudeRemediationSettingsResult } from "./types";
 
-const CONFIG_SUBPATH = "jevguard/claude-code.yaml";
-const DEFAULT_CONFIG_SUBPATH = ".config";
-const SECTION_KEY = "remediation";
-const SECTION_KEYS = ["enabled", "delivery", "model", "mode", "max_attempts"];
+/** The user's Claude Code file under `jevguard/`. */
+export const CLAUDE_CONFIG_FILE_NAME = "claude-code.yaml";
 
-const DISABLED: ClaudeRemediationSettingsResult = { status: "DISABLED" };
-const INVALID: ClaudeRemediationSettingsResult = {
-  status: "INVALID",
-  reason: "USER_CONFIG_INVALID",
+/** Claude Code accepts a `model` key: a Claude alias or id, never translated. */
+export const CLAUDE_SETTINGS_RULES: RemediationUserSettingsRules = {
+  isModel: (value) => CLAUDE_MODEL_PATTERN.test(value),
 };
 
-function modelOf(value: unknown): string | null | undefined {
-  if (value === undefined) return null;
-
-  return typeof value === "string" && CLAUDE_MODEL_PATTERN.test(value) ? value : undefined;
-}
-
-function deliveryOf(value: unknown): ClaudeRemediationSettings["delivery"] | null {
-  if (value === undefined) return "user";
-
-  return value === "user" || value === "agent" ? value : null;
-}
-
-function modeOf(value: unknown): ClaudeRemediationSettings["mode"] | null {
-  if (value === undefined) return "observe";
-
-  return value === "observe" || value === "remediate" ? value : null;
-}
-
-/** An integer in 1..3, only valid with `remediate`; the default is 2. */
-function maxAttemptsOf(value: unknown, mode: ClaudeRemediationSettings["mode"]): number | null {
-  if (value === undefined) return MAX_ATTEMPTS_DEFAULT;
-
-  const valid = mode === "remediate" && isAttemptCount(value);
-
-  return valid ? value : null;
-}
-
-function sectionResult(section: JsonRecord): ClaudeRemediationSettingsResult {
-  if (Object.keys(section).some((key) => !SECTION_KEYS.includes(key))) return INVALID;
-
-  const { enabled } = section;
-  const delivery = deliveryOf(section.delivery);
-  const model = modelOf(section.model);
-  const mode = modeOf(section.mode);
-
-  if (enabled !== undefined && typeof enabled !== "boolean") return INVALID;
-  if (delivery === null || model === undefined || mode === null) return INVALID;
-  if (mode === "remediate" && delivery !== "agent") return INVALID;
-
-  const maxAttempts = maxAttemptsOf(section.max_attempts, mode);
-
-  if (maxAttempts === null) return INVALID;
-
-  return enabled === true
-    ? { status: "ENABLED", settings: { delivery, model, mode, maxAttempts } }
-    : DISABLED;
-}
-
-/**
- * Reads the user's Claude Code remediation file. An absent file or section, or
- * `enabled: false`, is `DISABLED`; any unknown key, wrong type, unknown delivery or a
- * model that is not a Claude alias or id is `INVALID`. Models are never translated.
- * `mode: remediate` needs `delivery: agent`, and `max_attempts` (1..3) needs `remediate`.
- */
+/** Validates the user's Claude Code remediation file; see `resolveRemediationUserSettings`. */
 export function resolveClaudeRemediationSettings(value: unknown): ClaudeRemediationSettingsResult {
-  if (value === null || value === undefined) return DISABLED;
-  if (!isRecord(value)) return INVALID;
-  if (Object.keys(value).some((key) => key !== SECTION_KEY)) return INVALID;
-
-  const section = value[SECTION_KEY];
-
-  if (section === undefined) return DISABLED;
-
-  return isRecord(section) ? sectionResult(section) : INVALID;
+  return resolveRemediationUserSettings(value, CLAUDE_SETTINGS_RULES);
 }
 
-/**
- * The user's config file, `<XDG_CONFIG_HOME | USERPROFILE | HOME/.config>/jevguard/claude-code.yaml`,
- * or `null` when no absolute base exists.
- */
+/** `<XDG_CONFIG_HOME | USERPROFILE | HOME/.config>/jevguard/claude-code.yaml`, or `null`. */
 export function userConfigFileOf(environment: UserConfigEnvironment): string | null {
-  const base = userBaseOf(
-    environment.xdgConfigHome,
-    environment.userProfile,
-    environment.home,
-    DEFAULT_CONFIG_SUBPATH,
-  );
-
-  return base === null ? null : `${base}/${CONFIG_SUBPATH}`;
+  return userConfigFileFor(environment, CLAUDE_CONFIG_FILE_NAME);
 }
 
-/**
- * Loads and validates the user's file. A file whose canonical path is inside the project
- * root or its Git working tree is refused, on every platform and whatever the letter case:
- * a cloned repository must never be able to switch remediation on.
- */
+/** Loads the user's Claude Code file; one inside the project or its Git tree is refused. */
 export function loadClaudeRemediationSettings(
   input: UserConfigLoadInput,
 ): ClaudeRemediationSettingsResult {
-  try {
-    const realFile = input.realPath(input.file);
-
-    if (realFile === null) return DISABLED;
-
-    if (isInsideProject(realFile, input.projectRoot, input)) {
-      return { status: "INVALID", reason: "USER_CONFIG_IN_PROJECT" };
-    }
-
-    const text = input.readText(realFile);
-
-    if (text === null) return DISABLED;
-
-    const parsed = input.parse(text);
-
-    return parsed.status === "PARSED" ? resolveClaudeRemediationSettings(parsed.value) : INVALID;
-  } catch {
-    return { status: "INVALID", reason: "USER_CONFIG_UNREADABLE" };
-  }
+  return loadRemediationUserSettings(input, CLAUDE_SETTINGS_RULES);
 }

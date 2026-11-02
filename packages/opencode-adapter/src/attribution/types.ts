@@ -14,6 +14,22 @@ export interface OpenCodeMessage {
   readonly completed: boolean;
 }
 
+/** The chain mark a remediation delivery carries in its metadata. */
+export interface DeliveryMark {
+  readonly chainId: string;
+  readonly attempt: number;
+  readonly maxAttempts: number;
+}
+
+/**
+ * The delivery behind an execution: the chain mark of its synthetic inputs, or `null`
+ * for a human turn; `mixed` when a human input ran in the same execution as a delivery.
+ */
+export interface TurnDelivery {
+  readonly mark: DeliveryMark | null;
+  readonly mixed: boolean;
+}
+
 /** One file of a working-tree diff against `HEAD`, as returned by `vcs.diff`. */
 export interface WorkingFileDiff {
   readonly file: string;
@@ -78,7 +94,7 @@ export type AttributionFailureReason =
  * evaluation; `UNAVAILABLE` is never collapsed into a verdict.
  */
 export type TurnAttribution =
-  | { readonly status: "ATTRIBUTED"; readonly turn: Turn }
+  | { readonly status: "ATTRIBUTED"; readonly turn: Turn; readonly delivery: TurnDelivery }
   | { readonly status: "ALREADY_PROCESSED" }
   | { readonly status: "UNAVAILABLE"; readonly reason: AttributionFailureReason }
   | { readonly status: "NONE" };

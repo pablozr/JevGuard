@@ -1,5 +1,5 @@
 import type { RemediationProposalRequest } from "@jevguard/core";
-import { buildProposalText, PROPOSER_AGENT_PROMPT } from "@jevguard/core";
+import { buildProposalText, deliveryFindingsOf, PROPOSER_AGENT_PROMPT } from "@jevguard/core";
 import { ORPHAN_TTL_MS } from "../../capture/unit-state";
 import type { DeliveryChain } from "../../presentation";
 import {
@@ -16,25 +16,16 @@ export interface ChainDelivery {
   readonly maxAttempts: number;
 }
 
+function clipped(text: string | null): string | null {
+  return text === null ? null : text.slice(0, DELIVERY_MAX_FINDING_TEXT_LENGTH);
+}
+
 function findingsOf(request: RemediationProposalRequest): DeliveryChain["findings"] {
-  return [
-    ...request.ruleFindings.map((finding) => ({
-      id: finding.ruleId,
-      severity: finding.severity,
-      probability: finding.probability,
-      paths: finding.scopedPaths,
-      violation: finding.rule.violation.slice(0, DELIVERY_MAX_FINDING_TEXT_LENGTH),
-      allowed: finding.rule.allowed.slice(0, DELIVERY_MAX_FINDING_TEXT_LENGTH),
-    })),
-    ...request.builtInFindings.map((finding) => ({
-      id: finding.checkId,
-      severity: finding.severity,
-      probability: finding.probability,
-      paths: finding.scopedPaths,
-      violation: null,
-      allowed: null,
-    })),
-  ];
+  return deliveryFindingsOf(request).map((finding) => ({
+    ...finding,
+    violation: clipped(finding.violation),
+    allowed: clipped(finding.allowed),
+  }));
 }
 
 /**

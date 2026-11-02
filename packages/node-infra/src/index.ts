@@ -86,6 +86,31 @@ export {
   policyFilePaths,
 } from "./policy";
 export type {
+  ProjectProbe,
+  RemediationDelivery,
+  RemediationUserSettings,
+  RemediationUserSettingsInvalidReason,
+  RemediationUserSettingsResult,
+  RemediationUserSettingsRules,
+  UserConfigEnvironment,
+  UserConfigLoadInput,
+  UserConfigParse,
+  UserRemediationSettingsDependencies,
+} from "./remediation";
+export {
+  createNodeProjectProbe,
+  createUserRemediationSettings,
+  isInsidePath,
+  isInsideProject,
+  isMissingPathError,
+  loadRemediationUserSettings,
+  orNullWhenMissing,
+  parentOf,
+  realPathOfNearest,
+  resolveRemediationUserSettings,
+  userConfigFileOf,
+} from "./remediation";
+export type {
   DeliveryStatus,
   ReviewLogEntry,
   ReviewLogResult,

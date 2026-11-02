@@ -32,6 +32,7 @@ export type {
   OpenCodeLogRecord,
   OpenCodeLogWriter,
   OperationalEvent,
+  RemediationChainEvent,
   OperationalLogSink,
   PresentationDelivery,
   PresentationPorts,

@@ -1,13 +1,25 @@
 import type { Plugin } from "@opencode/plugin";
-import type { ProposalModel, ProposalSessionFacade } from "./types";
+import { DELIVERY_METADATA_KEY } from "../attribution/execution";
+import type { DeliveryMark } from "../attribution/types";
+import type { OriginSessionPromptFacade, ProposalModel, ProposalSessionFacade } from "./types";
 
 /** The slice of the 2.2.x plugin context the proposal facade uses. */
 export interface ProposalContext {
   readonly session: Pick<
     Plugin.Context["session"],
-    "get" | "create" | "prompt" | "interrupt" | "hook"
+    "get" | "create" | "prompt" | "context" | "interrupt" | "hook"
   >;
 }
+
+/** The slice of the 2.2.x plugin context the origin delivery uses. */
+export interface OriginPromptContext {
+  readonly session: Pick<Plugin.Context["session"], "synthetic">;
+}
+
+type ContextMessage = Awaited<ReturnType<Plugin.Context["session"]["context"]>>[number];
+
+/** Description shown with every synthetic remediation message. */
+export const DELIVERY_DESCRIPTION = "JevGuard remediation";
 
 /** Denies every permission in the proposer child session: no tools, no edits. */
 export const PROPOSER_PERMISSIONS = [{ action: "*", resource: "*", effect: "deny" }] as const;
@@ -43,8 +55,54 @@ export function createOpenCodeProposalSessionFacade(
       await context.session.prompt({ sessionID: input.sessionID, text: input.text });
     },
 
+    async readProposal(sessionID): Promise<string | null> {
+      const messages = await context.session.context({ sessionID });
+
+      return lastAssistantText(messages);
+    },
+
     async interrupt(sessionID): Promise<void> {
       await context.session.interrupt({ sessionID });
+    },
+  };
+}
+
+function lastAssistantText(messages: readonly ContextMessage[]): string | null {
+  const assistant = [...messages].reverse().find((message) => message.type === "assistant");
+
+  if (assistant?.type !== "assistant") return null;
+
+  const text = assistant.content
+    .flatMap((part) => (part.type === "text" ? [part.text] : []))
+    .join("\n")
+    .trim();
+
+  return text === "" ? null : text;
+}
+
+/**
+ * Concrete origin delivery over the OpenCode 2.2.x session API: one visible synthetic
+ * message, queued (never steering a running execution), whose metadata carries the
+ * chain mark under `jevguard`. It never asks the host to skip the reply.
+ */
+export function createOpenCodeOriginPromptFacade(
+  context: OriginPromptContext,
+): OriginSessionPromptFacade {
+  return {
+    async promptVisible(sessionID: string, text: string, mark: DeliveryMark): Promise<void> {
+      await context.session.synthetic({
+        sessionID,
+        text,
+        description: DELIVERY_DESCRIPTION,
+        metadata: {
+          [DELIVERY_METADATA_KEY]: {
+            chainId: mark.chainId,
+            attempt: mark.attempt,
+            maxAttempts: mark.maxAttempts,
+          },
+        },
+        delivery: "queue",
+      });
     },
   };
 }

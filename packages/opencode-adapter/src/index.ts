@@ -3,6 +3,8 @@ export {
   captureSnapshot,
   createOpenCodeSessionFacade,
   createTurnTracker,
+  DELIVERY_METADATA_KEY,
+  executionDelivery,
   executionTask,
   InMemoryTurnDeduplicator,
   locateExecution,
@@ -15,6 +17,7 @@ export {
 export type {
   AttributionContext,
   AttributionFailureReason,
+  DeliveryMark,
   FileContent,
   LocatedExecution,
   OpenCodeFileDiff,
@@ -23,6 +26,7 @@ export type {
   PatchNormalization,
   TurnAttribution,
   TurnDeduplicator,
+  TurnDelivery,
   TurnTracker,
   TurnTrackerDependencies,
   WorkingFileDiff,
@@ -69,15 +73,24 @@ export {
   toastVariantFor,
 } from "./presentation";
 export {
+  createOpenCodeOriginPromptFacade,
   createOpenCodeProposalSessionFacade,
+  DELIVERY_DESCRIPTION,
   PROPOSER_PERMISSIONS,
   registerProposalRetryGuard,
 } from "./remediation";
-export type { ProposalContext, ProposalModel, ProposalSessionFacade } from "./remediation";
+export type {
+  OriginPromptContext,
+  OriginSessionPromptFacade,
+  ProposalContext,
+  ProposalModel,
+  ProposalSessionFacade,
+} from "./remediation";
 export type {
   OpenCodeLogRecord,
   OpenCodeLogWriter,
   OperationalEvent,
+  RemediationChainEvent,
   OperationalLogSink,
   PresentationDelivery,
   PresentationPorts,

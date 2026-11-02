@@ -1,5 +1,11 @@
 export { InMemoryTurnDeduplicator } from "./deduplicator";
-export { executionTask, type LocatedExecution, locateExecution } from "./execution";
+export {
+  DELIVERY_METADATA_KEY,
+  executionDelivery,
+  executionTask,
+  type LocatedExecution,
+  locateExecution,
+} from "./execution";
 export { normalizeFileDiff } from "./normalize-patch";
 export { type AttributionContext, createOpenCodeSessionFacade } from "./opencode";
 export {
@@ -18,6 +24,7 @@ export {
 export { writtenPaths } from "./written-paths";
 export type {
   AttributionFailureReason,
+  DeliveryMark,
   FileContent,
   OpenCodeFileDiff,
   OpenCodeMessage,
@@ -25,5 +32,6 @@ export type {
   PatchNormalization,
   TurnAttribution,
   TurnDeduplicator,
+  TurnDelivery,
   WorkingFileDiff,
 } from "./types";

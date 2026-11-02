@@ -1,18 +1,18 @@
-import type { ChainOutcomeIds, ChainState, ChainStep } from "@jevguard/core";
+import type { ChainClosure, ChainOutcomeIds, ChainState, ChainStep } from "@jevguard/core";
 import {
   abandonDeliver,
   chainIdsOf,
   decideChainStep,
   decideOrphanStep,
   parseAutoDelivery,
-  unresolvedIds,
+  recordClosures as recordChainClosures,
 } from "@jevguard/core";
 import type { ClaudeReviewHandoff } from "../../capture/types";
 import type { ReviewFeedChain } from "../../presentation";
 import type { ReviewedHandoff, WorkerDependencies } from "../types";
 import type { ChainDelivery } from "./request-file";
 import { fitsChainRequest } from "./request-file";
-import type { ChainClosure, ClaudeRemediationSettingsResult } from "./types";
+import type { ClaudeRemediationSettingsResult } from "./types";
 
 function isRemediate(
   settings: ClaudeRemediationSettingsResult,
@@ -116,25 +116,17 @@ async function recordEnd(
 
 /**
  * Records the chains that ended outside a review (the mod reported that a delivery did not
- * happen, or the state expired). Nothing about them counts as fixed.
+ * happen, or the state expired), through the core's shared rule.
  */
 export async function recordClosures(
   closures: readonly ChainClosure[],
   maxAttempts: number,
   dependencies: WorkerDependencies,
 ): Promise<void> {
-  for (const { state, code } of closures) {
-    dependencies.log(`CHAIN_STOPPED:${code}`);
-
-    await recordEnd(
-      state,
-      Math.max(maxAttempts, state.attempts),
-      code,
-      unresolvedIds(state),
-      state.turnIds,
-      dependencies,
-    );
-  }
+  await recordChainClosures(closures, maxAttempts, {
+    stopped: (code) => dependencies.log(`CHAIN_STOPPED:${code}`),
+    record: (entry) => dependencies.chainLog.record({ host: "claude-code", ...entry }),
+  });
 }
 
 async function endChain(

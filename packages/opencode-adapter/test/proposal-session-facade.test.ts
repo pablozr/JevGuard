@@ -1,6 +1,9 @@
 import { describe, expect, test } from "vitest";
 import {
+  createOpenCodeOriginPromptFacade,
   createOpenCodeProposalSessionFacade,
+  DELIVERY_DESCRIPTION,
+  type OriginPromptContext,
   PROPOSER_PERMISSIONS,
   type ProposalContext,
   registerProposalRetryGuard,
@@ -143,5 +146,72 @@ describe("registerProposalRetryGuard", () => {
 
     expect(child.decision).toEqual({ retry: false });
     expect(other.decision).toBeUndefined();
+  });
+});
+
+describe("readProposal", () => {
+  function contextWith(messages: unknown[]): ProposalContext {
+    return {
+      session: { context: async () => messages },
+    } as unknown as ProposalContext;
+  }
+
+  test("returns the last assistant's text parts joined by newlines", async () => {
+    const context = contextWith([
+      { type: "assistant", content: [{ type: "text", text: "old" }] },
+      { type: "user", text: "next" },
+      {
+        type: "assistant",
+        content: [
+          { type: "text", text: "first" },
+          { type: "tool", name: "x" },
+          { type: "text", text: "second" },
+        ],
+      },
+    ]);
+
+    await expect(
+      createOpenCodeProposalSessionFacade(context).readProposal("ses_child"),
+    ).resolves.toBe("first\nsecond");
+  });
+
+  test("returns null without an assistant or with blank text", async () => {
+    await expect(
+      createOpenCodeProposalSessionFacade(contextWith([])).readProposal("ses_child"),
+    ).resolves.toBeNull();
+    await expect(
+      createOpenCodeProposalSessionFacade(
+        contextWith([{ type: "assistant", content: [{ type: "text", text: "  " }] }]),
+      ).readProposal("ses_child"),
+    ).resolves.toBeNull();
+  });
+});
+
+describe("createOpenCodeOriginPromptFacade", () => {
+  test("queues one visible synthetic message with the chain mark in its metadata", async () => {
+    const calls: unknown[] = [];
+    const context = {
+      session: {
+        synthetic: async (input: unknown) => {
+          calls.push(input);
+        },
+      },
+    } as unknown as OriginPromptContext;
+
+    await createOpenCodeOriginPromptFacade(context).promptVisible("ses_1", "frame", {
+      chainId: "msg_a",
+      attempt: 1,
+      maxAttempts: 2,
+    });
+
+    expect(calls).toEqual([
+      {
+        sessionID: "ses_1",
+        text: "frame",
+        description: DELIVERY_DESCRIPTION,
+        metadata: { jevguard: { chainId: "msg_a", attempt: 1, maxAttempts: 2 } },
+        delivery: "queue",
+      },
+    ]);
   });
 });
