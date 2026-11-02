@@ -4,100 +4,64 @@ import type {
   ReviewLogResult,
   StructuredLogSink,
 } from "@jevguard/node-infra";
-import type { OpencodeClient } from "@opencode-ai/sdk";
 import { displayOutcome } from "./display";
 import { logLevelFor, reviewLogMessage } from "./log";
-import type { OpenCodePresentationClient, ReviewToast, ToastSink } from "./types";
+import type { OpenCodeLogRecord, OpenCodeLogWriter, ToastSink } from "./types";
 
-const SERVICE_NAME = "jevguard";
-const TOAST_DURATION_MS = 5000;
-
-/**
- * Minimal publish surface for the TUI session-select event. The installed 1.18.32
- * v1 SDK publish body union omits `tui.session.select` although the server accepts
- * it (the event is defined in the v2 schema), so the concrete client is narrowed
- * here once at the adapter boundary.
- */
-interface TuiSessionSelectPublisher {
-  readonly tui: {
-    publish(input: {
-      readonly body: {
-        readonly type: "tui.session.select";
-        readonly properties: { readonly sessionID: string };
-      };
-    }): Promise<{ readonly error?: unknown }>;
-  };
-}
+export const SERVICE_NAME = "jevguard";
 
 /**
- * Adapts the concrete OpenCode client to the narrow presentation surface. Typing
- * the parameter as the SDK client keeps compilation pinned to the supported
- * OpenCode SDK version.
+ * Default log writer: one JSON line per record on standard error. `print` is
+ * injectable for tests.
  */
-export function createOpenCodePresentationClient(
-  client: OpencodeClient,
-): OpenCodePresentationClient {
-  const publisher = client as unknown as TuiSessionSelectPublisher;
-
+export function createConsoleLogWriter(
+  print: (line: string) => void = (line) => console.error(line),
+): OpenCodeLogWriter {
   return {
-    app: {
-      log: (input) => client.app.log({ body: input.body }),
-    },
-    tui: {
-      showToast: (input) => client.tui.showToast({ body: input.body }),
-      selectSession: (input) =>
-        publisher.tui.publish({
-          body: { type: "tui.session.select", properties: { sessionID: input.sessionID } },
-        }),
+    write(record: OpenCodeLogRecord): void {
+      print(JSON.stringify(record));
     },
   };
 }
 
-/**
- * OpenCode structured-log sink. Only the allowlisted aggregate fields are sent as
- * `extra`; the SDK's non-throwing result is still checked and every rejection is
- * swallowed into a typed status.
- */
-export function createOpenCodeLogSink(client: OpenCodePresentationClient): StructuredLogSink {
-  return {
-    async write(entry: ReviewLogEntry): Promise<DeliveryStatus> {
-      try {
-        const result = await client.app.log({
-          body: {
-            service: SERVICE_NAME,
-            level: logLevelFor(displayOutcome(entry.summary.counts)),
-            message: reviewLogMessage(entry),
-            extra: toLogExtra(entry),
-          },
-        });
+/** Writes one record and maps any failure to `FAILED`; never throws. */
+export async function writeLogRecord(
+  writer: OpenCodeLogWriter,
+  record: OpenCodeLogRecord,
+): Promise<DeliveryStatus> {
+  try {
+    await writer.write(record);
 
-        return result.error === undefined ? "DELIVERED" : "FAILED";
-      } catch {
-        return "FAILED";
-      }
+    return "DELIVERED";
+  } catch {
+    return "FAILED";
+  }
+}
+
+/**
+ * Structured review-log sink. Only the allowlisted aggregate fields are sent as
+ * `extra`; every failure is swallowed into a typed status.
+ */
+export function createOpenCodeLogSink(writer: OpenCodeLogWriter): StructuredLogSink {
+  return {
+    write(entry: ReviewLogEntry): Promise<DeliveryStatus> {
+      return writeLogRecord(writer, {
+        service: SERVICE_NAME,
+        level: logLevelFor(displayOutcome(entry.summary.counts)),
+        message: reviewLogMessage(entry),
+        extra: toLogExtra(entry),
+      });
     },
   };
 }
 
-/** OpenCode transient-toast sink; never adds a session message or prompt. */
-export function createOpenCodeToastSink(client: OpenCodePresentationClient): ToastSink {
+/**
+ * Toast sink for the 2.2.x server plugin, which has no TUI surface: a no-op that
+ * reports `DELIVERED` until the `./tui` phase. It never adds a session message.
+ */
+export function createNullToastSink(): ToastSink {
   return {
-    async show(toast: ReviewToast): Promise<DeliveryStatus> {
-      try {
-        const result = await client.tui.showToast({
-          body: {
-            title: toast.title,
-            message: toast.message,
-            variant: toast.variant,
-            duration: TOAST_DURATION_MS,
-          },
-        });
-
-        return result.error === undefined ? "DELIVERED" : "FAILED";
-      } catch {
-        return "FAILED";
-      }
-    },
+    show: async (): Promise<DeliveryStatus> => "DELIVERED",
   };
 }
 

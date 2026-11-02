@@ -1,5 +1,6 @@
 import type { TurnReview } from "@jevguard/core";
 import type { DeliveryStatus, StructuredLogSink } from "@jevguard/node-infra";
+import type { AttributionFailureReason } from "../attribution/types";
 
 export type ToastVariant = "info" | "success" | "warning" | "error";
 
@@ -35,7 +36,9 @@ export interface ReviewPresenter {
 export type ProposalFailureReason =
   | "MODEL_SPECIFIER_INVALID"
   | "CHILD_SESSION_FAILED"
-  | "PROPOSAL_PROMPT_FAILED";
+  | "PROPOSAL_PROMPT_FAILED"
+  | "REMEDIATION_PROPOSAL_SKIPPED_NO_MODEL"
+  | "REMEDIATION_PROPOSAL_TIMEOUT";
 
 /**
  * Safe, transient status surface for the automatic proposal. It carries no rule,
@@ -58,59 +61,37 @@ export interface RemediationFailureLogSink {
 }
 
 /**
- * Safe TUI navigation surface for the automatic proposal. It moves the client to
- * the proposal's child session and carries no rule, task, diff, finding, or secret.
- * Every delivery failure is contained as `FAILED`.
+ * Navigation to the proposal's child session. The OpenCode 2.2.x server plugin has
+ * no TUI surface, so the concrete navigator is a no-op until the `./tui` phase.
  */
 export interface ProposalSessionNavigator {
   navigate(sessionID: string): Promise<DeliveryStatus>;
 }
 
-export interface OpenCodeLogInput {
-  readonly body: {
-    readonly service: string;
-    readonly level: "debug" | "info" | "error" | "warn";
-    readonly message: string;
-    readonly extra: Readonly<Record<string, unknown>>;
-  };
+/**
+ * Operational lines that are not a review: an execution skipped because it was
+ * interrupted or failed, or an attribution failure. They carry only the typed code.
+ */
+export type OperationalEvent =
+  | { readonly kind: "TURN_SKIPPED"; readonly reason: "interrupted" | "failed" }
+  | { readonly kind: "ATTRIBUTION_UNAVAILABLE"; readonly reason: AttributionFailureReason };
+
+export interface OperationalLogSink {
+  write(event: OperationalEvent): Promise<DeliveryStatus>;
 }
 
-export interface OpenCodeLogResult {
-  readonly error?: unknown;
-}
-
-export interface OpenCodeToastInput {
-  readonly body: {
-    readonly title: string;
-    readonly message: string;
-    readonly variant: ToastVariant;
-    readonly duration: number;
-  };
-}
-
-export interface OpenCodeToastResult {
-  readonly error?: unknown;
-}
-
-export interface OpenCodeSessionSelectInput {
-  readonly sessionID: string;
-}
-
-export interface OpenCodeSessionSelectResult {
-  readonly error?: unknown;
+/** One structured log record; `extra` holds only allowlisted fields. */
+export interface OpenCodeLogRecord {
+  readonly service: string;
+  readonly level: "debug" | "info" | "error" | "warn";
+  readonly message: string;
+  readonly extra: Readonly<Record<string, unknown>>;
 }
 
 /**
- * Narrow OpenCode client surface for presentation. Structural typing keeps the
- * adapter decoupled from the SDK runtime and lets tests fake log/toast/navigation
- * delivery.
+ * Destination of structured log records. The 2.2.x server plugin context has no log
+ * API, so the default writer prints one JSON line to standard error.
  */
-export interface OpenCodePresentationClient {
-  readonly app: {
-    log(input: OpenCodeLogInput): Promise<OpenCodeLogResult>;
-  };
-  readonly tui: {
-    showToast(input: OpenCodeToastInput): Promise<OpenCodeToastResult>;
-    selectSession(input: OpenCodeSessionSelectInput): Promise<OpenCodeSessionSelectResult>;
-  };
+export interface OpenCodeLogWriter {
+  write(record: OpenCodeLogRecord): void | Promise<void>;
 }

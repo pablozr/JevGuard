@@ -23,7 +23,7 @@
   },
   "engines": {
     "bun": ">=1.1.0",
-    "opencode": ">=1.18.32 <2"
+    "opencode": ">=2.2.2 <2.3"
   },
   "keywords": [
     "opencode",
@@ -45,6 +45,10 @@
     "@jevguard/opencode-adapter": "workspace:*"
   },
   "devDependencies": {
-    "@opencode-ai/plugin": "1.18.32"
+    "@opencode/plugin": "2.2.2"
+  },
+  "peerDependencies": {
+    "@opencode/plugin": "2.2.2",
+    "effect": "4.0.6"
   }
 }

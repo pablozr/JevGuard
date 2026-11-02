@@ -1,23 +1,29 @@
-export { attributeTurn } from "./attribute-turn";
 export { InMemoryTurnDeduplicator } from "./deduplicator";
-export {
-  findCompletedAssistant,
-  findDirectParentRecord,
-  isCompletedAssistantMessage,
-} from "./locate-turn";
+export { executionTask, type LocatedExecution, locateExecution } from "./execution";
 export { normalizeFileDiff } from "./normalize-patch";
-export { createOpenCodeSessionFacade } from "./opencode";
-export { extractTask } from "./task";
+export { type AttributionContext, createOpenCodeSessionFacade } from "./opencode";
+export {
+  attributeSnapshotDiff,
+  captureSnapshot,
+  MAX_SNAPSHOT_FILE_BYTES,
+  MAX_SNAPSHOT_TOTAL_BYTES,
+  type WorkingSnapshot,
+} from "./turn-snapshot";
+export {
+  createTurnTracker,
+  MAX_OPEN_SNAPSHOTS,
+  type TurnTracker,
+  type TurnTrackerDependencies,
+} from "./turn-tracker";
+export { writtenPaths } from "./written-paths";
 export type {
-  AttributeTurnDependencies,
   AttributionFailureReason,
+  FileContent,
   OpenCodeFileDiff,
-  OpenCodeMessageInfo,
-  OpenCodeMessageRecord,
-  OpenCodeMessageTime,
-  OpenCodePart,
+  OpenCodeMessage,
   OpenCodeSessionFacade,
   PatchNormalization,
   TurnAttribution,
   TurnDeduplicator,
+  WorkingFileDiff,
 } from "./types";

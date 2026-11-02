@@ -1,2 +1,7 @@
-export { createOpenCodeProposalSessionFacade } from "./opencode";
-export type { ProposalModel, ProposalPromptInput, ProposalSessionFacade } from "./types";
+export {
+  createOpenCodeProposalSessionFacade,
+  PROPOSER_PERMISSIONS,
+  type ProposalContext,
+  registerProposalRetryGuard,
+} from "./opencode";
+export type { ProposalModel, ProposalSessionFacade } from "./types";

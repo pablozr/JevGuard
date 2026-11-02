@@ -4,6 +4,7 @@ import {
   createFifoJevPort,
   createRemediationProposalStore,
   DEFAULT_EVIDENCE_POLICY,
+  PROPOSER_AGENT_PROMPT,
   type JevBuiltInAnswerResult,
   type JevEvaluationPort,
   type JevEvaluationResult,
@@ -24,24 +25,29 @@ import {
 } from "@jevguard/core";
 import type { DeliveryStatus } from "@jevguard/node-infra";
 import {
+  createTurnTracker,
   InMemoryTurnDeduplicator,
-  type OpenCodeFileDiff,
-  type OpenCodeMessageRecord,
+  type FileContent,
+  type OpenCodeMessage,
   type OpenCodeSessionFacade,
+  type OperationalEvent,
+  type OperationalLogSink,
   type PresentationDelivery,
   type ProposalFailureReason,
-  type ProposalPromptInput,
+  type ProposalModel,
   type ProposalSessionFacade,
   type ProposalSessionNavigator,
   type RemediationFailureLogSink,
   type RemediationNotifier,
   type ReviewPresenter,
+  type WorkingFileDiff,
 } from "@jevguard/opencode-adapter";
-import type { Plugin } from "@opencode-ai/plugin";
+import type { Plugin } from "@opencode/plugin";
 import { describe, expect, test } from "vitest";
-import { JevGuardPlugin } from "../src/index";
-import { registerRemediationConfig } from "../src/remediation/config";
-import { proposeForTurn } from "../src/remediation/propose";
+import plugin from "../src/index";
+import { startPlugin } from "../src/plugin";
+import { createChildExecutionWatcher } from "../src/remediation/child-executions";
+import { type ProposalDependencies, proposeForTurn } from "../src/remediation/propose";
 import { createPluginRuntime } from "../src/runtime";
 import type { PluginRuntime, PluginRuntimeDependencies } from "../src/types";
 
@@ -63,7 +69,6 @@ const TASK_SENTINEL = "TASK_SENTINEL_PROPOSAL_71c3";
 const DIFF_SENTINEL = "DIFF_SENTINEL_PROPOSAL_71c3";
 const DOCS_SENTINEL = "DOCS_SENTINEL_PATCH";
 const GLOBAL_SENTINEL = "GLOBAL_SENTINEL_PATCH";
-const HIDDEN_REASONING_SENTINEL = "HIDDEN_REASONING_SENTINEL";
 
 function ruleText(id: string, severity: "error" | "warning", scope: string | null): string {
   const lines = [`## ${id}`, "", `severity: ${severity}`];
@@ -123,72 +128,43 @@ function scopedRule(severity: "error" | "warning"): string {
   ].join("\n");
 }
 
-function idleEvent(sessionID: string = SESSION_ID): unknown {
-  return { type: "session.status", properties: { sessionID, status: { type: "idle" } } };
+function executionEvent(
+  kind: "started" | "succeeded" | "interrupted" | "failed",
+  sessionID: string = SESSION_ID,
+): unknown {
+  return { type: `session.execution.${kind}`, data: { sessionID } };
+}
+
+/** One complete execution of a session: `started`, then `succeeded`. */
+function turnEvents(sessionID: string = SESSION_ID): readonly unknown[] {
+  return [executionEvent("started", sessionID), executionEvent("succeeded", sessionID)];
 }
 
 function turnRecords(
   assistantID: string = ASSISTANT_ID,
   userID: string = USER_ID,
-): readonly OpenCodeMessageRecord[] {
+): readonly OpenCodeMessage[] {
   return [
-    {
-      info: { id: userID, role: "user" },
-      parts: [{ type: "text", text: "Implement the thing." }],
-    },
-    {
-      info: {
-        id: assistantID,
-        role: "assistant",
-        parentID: userID,
-        time: { created: 1, completed: 2 },
-      },
-      parts: [],
-    },
+    { id: userID, type: "user", completed: false, text: "Implement the thing." },
+    { id: assistantID, type: "assistant", completed: true },
   ];
 }
 
-function patchDiffs(): readonly OpenCodeFileDiff[] {
+function patchDiffs(): readonly WorkingFileDiff[] {
   return [{ file: "src/a.ts", patch: PATCH }];
 }
 
-function distractorRecords(): readonly OpenCodeMessageRecord[] {
+function distractorRecords(): readonly OpenCodeMessage[] {
   return [
-    {
-      info: { id: "msg_user_prior", role: "user" },
-      parts: [{ type: "text", text: "Prior distractor task." }],
-    },
-    {
-      info: {
-        id: "msg_assistant_prior",
-        role: "assistant",
-        parentID: "msg_user_prior",
-        time: { created: 1, completed: 2 },
-      },
-      parts: [],
-    },
-    {
-      info: { id: USER_ID, role: "user" },
-      parts: [
-        { type: "text", text: "Add the guard." },
-        { type: "reasoning", text: HIDDEN_REASONING_SENTINEL },
-        { type: "tool" },
-        { type: "text", text: "Keep it scoped." },
-      ],
-    },
-    {
-      info: {
-        id: ASSISTANT_ID,
-        role: "assistant",
-        parentID: USER_ID,
-        time: { created: 3, completed: 4 },
-      },
-      parts: [],
-    },
+    { id: "msg_user_prior", type: "user", completed: false, text: "Prior distractor task." },
+    { id: "msg_assistant_prior", type: "assistant", completed: true },
+    { id: USER_ID, type: "user", completed: false, text: "Add the guard." },
+    { id: "msg_synthetic", type: "synthetic", completed: false, text: "Keep it scoped." },
+    { id: ASSISTANT_ID, type: "assistant", completed: true },
   ];
 }
 
-function mixedDiffs(): readonly OpenCodeFileDiff[] {
+function mixedDiffs(): readonly WorkingFileDiff[] {
   return [
     { file: "src/a.ts", patch: PATCH },
     { file: "docs/readme.md", patch: DOCS_SENTINEL },
@@ -196,30 +172,50 @@ function mixedDiffs(): readonly OpenCodeFileDiff[] {
   ];
 }
 
-interface MessageQuery {
-  readonly sessionID: string;
-}
-
-interface DiffQuery {
-  readonly sessionID: string;
-  readonly messageID: string;
-}
-
+/**
+ * Session facade fake over the 2.2.x read model. The tracker reads the parent first
+ * when an execution starts and the messages first when it finishes, so the working
+ * diff answers `startDiffs` (clean by default) at start and `diffs` at the end.
+ */
 class FakeFacade implements OpenCodeSessionFacade {
   readonly calls: string[] = [];
-  readonly messageQueries: MessageQuery[] = [];
-  readonly diffQueries: DiffQuery[] = [];
   readonly forbidden: string[] = [];
-  readonly recordsBySession = new Map<string, readonly OpenCodeMessageRecord[]>();
-  records: readonly OpenCodeMessageRecord[] = turnRecords();
-  diffs: readonly OpenCodeFileDiff[] = patchDiffs();
+  readonly recordsBySession = new Map<string, readonly OpenCodeMessage[]>();
+  readonly parents = new Map<string, string>();
+  records: readonly OpenCodeMessage[] = turnRecords();
+  startDiffs: readonly WorkingFileDiff[] = [];
+  diffs: readonly WorkingFileDiff[] = patchDiffs();
   failure: "none" | "messages" | "diff" = "none";
   block = false;
+  private phase: "start" | "end" = "start";
   private releaseMessagesGate: (() => void) | null = null;
 
-  async listMessages(input: MessageQuery): Promise<readonly OpenCodeMessageRecord[]> {
+  async parentSessionID(sessionID: string): Promise<string | null> {
+    this.calls.push("parentSessionID");
+    this.phase = "start";
+
+    return this.parents.get(sessionID) ?? null;
+  }
+
+  async snapshotWorking(): Promise<readonly WorkingFileDiff[]> {
+    this.calls.push("snapshotWorking");
+
+    if (this.failure === "diff") {
+      throw new Error("diff unavailable");
+    }
+
+    return this.phase === "start" ? this.startDiffs : this.diffs;
+  }
+
+  async readFiles(paths: readonly string[]): Promise<ReadonlyMap<string, FileContent>> {
+    this.calls.push("readFiles");
+
+    return new Map(paths.map((path) => [path, { kind: "MISSING" } as const]));
+  }
+
+  async listMessages(sessionID: string): Promise<readonly OpenCodeMessage[]> {
     this.calls.push("listMessages");
-    this.messageQueries.push({ sessionID: input.sessionID });
+    this.phase = "end";
 
     if (this.block) {
       await new Promise<void>((resolve) => {
@@ -231,18 +227,7 @@ class FakeFacade implements OpenCodeSessionFacade {
       throw new Error("messages unavailable");
     }
 
-    return this.recordsBySession.get(input.sessionID) ?? this.records;
-  }
-
-  async fetchDiff(input: DiffQuery): Promise<readonly OpenCodeFileDiff[]> {
-    this.calls.push("fetchDiff");
-    this.diffQueries.push({ sessionID: input.sessionID, messageID: input.messageID });
-
-    if (this.failure === "diff") {
-      throw new Error("diff unavailable");
-    }
-
-    return this.diffs;
+    return this.recordsBySession.get(sessionID) ?? this.records;
   }
 
   releaseMessages(): void {
@@ -254,12 +239,12 @@ class FakeFacade implements OpenCodeSessionFacade {
     this.forbidden.push("prompt");
   }
 
-  updateMessage(): void {
-    this.forbidden.push("updateMessage");
+  synthetic(): void {
+    this.forbidden.push("synthetic");
   }
 
-  transformChatMessages(): void {
-    this.forbidden.push("transformChatMessages");
+  updateMessage(): void {
+    this.forbidden.push("updateMessage");
   }
 }
 
@@ -380,20 +365,43 @@ class RecordingProposalStore implements RemediationProposalStore {
   }
 }
 
+const ORIGIN_MODEL: ProposalModel = { providerID: "anthropic", modelID: "claude-sonnet-5-5" };
+
+interface CreatedChild {
+  readonly parentID: string;
+  readonly title: string;
+  readonly model: ProposalModel;
+}
+
+/**
+ * Proposal facade fake. A successful prompt makes the host run the child: the fake
+ * emits the child's terminal lifecycle event through `emit` (wired to the runtime),
+ * or nothing when `childOutcome` is `"none"`, which leaves the proposal to time out.
+ */
 class FakeProposalFacade implements ProposalSessionFacade {
-  readonly created: Array<{ readonly parentID: string; readonly title: string }> = [];
-  readonly prompts: ProposalPromptInput[] = [];
+  readonly created: CreatedChild[] = [];
+  readonly prompts: Array<{ readonly sessionID: string; readonly text: string }> = [];
+  readonly interrupts: string[] = [];
   nextSessionID = "ses_child";
+  originModelValue: ProposalModel | null = ORIGIN_MODEL;
+  failOrigin = false;
   failCreate = false;
   failPrompt = false;
+  childOutcome: "succeeded" | "failed" | "none" = "succeeded";
+  emit: (event: unknown) => void = () => undefined;
 
   constructor(private readonly order: string[] = []) {}
 
-  async createChildSession(input: {
-    readonly parentID: string;
-    readonly title: string;
-  }): Promise<string> {
-    this.created.push({ parentID: input.parentID, title: input.title });
+  async originModel(): Promise<ProposalModel | null> {
+    if (this.failOrigin) {
+      throw new Error("origin session unavailable");
+    }
+
+    return this.originModelValue;
+  }
+
+  async createChildSession(input: CreatedChild): Promise<string> {
+    this.created.push({ parentID: input.parentID, title: input.title, model: input.model });
     this.order.push("create");
 
     if (this.failCreate) {
@@ -403,13 +411,32 @@ class FakeProposalFacade implements ProposalSessionFacade {
     return this.nextSessionID;
   }
 
-  async prompt(input: ProposalPromptInput): Promise<void> {
+  async prompt(input: { readonly sessionID: string; readonly text: string }): Promise<void> {
     this.prompts.push(input);
     this.order.push("prompt");
 
     if (this.failPrompt) {
       throw new Error("proposal prompt unavailable");
     }
+
+    if (this.childOutcome !== "none") {
+      this.emit(executionEvent("started", input.sessionID));
+      this.emit(executionEvent(this.childOutcome, input.sessionID));
+    }
+  }
+
+  async interrupt(sessionID: string): Promise<void> {
+    this.interrupts.push(sessionID);
+  }
+}
+
+class FakeOperationalSink implements OperationalLogSink {
+  readonly events: OperationalEvent[] = [];
+
+  async write(event: OperationalEvent): Promise<DeliveryStatus> {
+    this.events.push(event);
+
+    return "DELIVERED";
   }
 }
 
@@ -550,6 +577,7 @@ class FakeJev implements JevEvaluationPort {
 
 interface Harness {
   readonly runtime: PluginRuntime;
+  readonly dependencies: PluginRuntimeDependencies;
   readonly facade: FakeFacade;
   readonly policy: FakePolicyLoader;
   readonly presenter: FakePresenter;
@@ -559,12 +587,16 @@ interface Harness {
   readonly navigator: FakeNavigator;
   readonly notifier: FakeNotifier;
   readonly failures: FakeFailureSink;
+  readonly operational: FakeOperationalSink;
   readonly order: string[];
 }
 
+const TEST_PROPOSAL_TIMEOUT_MS = 20;
+
 /**
- * Mirrors the composition root: the plugin wraps the concrete Jev port in one
- * shared FIFO concurrency limit, so orchestration tests exercise the real cap.
+ * Mirrors the composition root with the real turn tracker over the fake session
+ * facade: the plugin wraps the concrete Jev port in one shared FIFO concurrency
+ * limit, so orchestration tests exercise the real cap.
  */
 function harness(): Harness {
   const facade = new FakeFacade();
@@ -577,10 +609,11 @@ function harness(): Harness {
   const navigator = new FakeNavigator(order);
   const notifier = new FakeNotifier(order);
   const failures = new FakeFailureSink();
+  const operational = new FakeOperationalSink();
 
   const dependencies: PluginRuntimeDependencies = {
-    facade,
-    deduplicator: new InMemoryTurnDeduplicator(),
+    tracker: createTurnTracker({ facade, deduplicator: new InMemoryTurnDeduplicator() }),
+    operational,
     policy,
     presenter,
     jev: createFifoJevPort(jev, { maxConcurrency: MAX_CONCURRENT_JEV_CALLS }),
@@ -589,10 +622,16 @@ function harness(): Harness {
     navigator,
     notifier,
     failures,
+    childExecutions: createChildExecutionWatcher(),
+    proposalTimeoutMs: TEST_PROPOSAL_TIMEOUT_MS,
   };
+  const runtime = createPluginRuntime(dependencies);
+
+  proposalFacade.emit = (event) => runtime.onEvent(event);
 
   return {
-    runtime: createPluginRuntime(dependencies),
+    runtime,
+    dependencies,
     facade,
     policy,
     presenter,
@@ -602,12 +641,20 @@ function harness(): Harness {
     navigator,
     notifier,
     failures,
+    operational,
     order,
   };
 }
 
-async function dispatch(runtime: PluginRuntime, event: unknown): Promise<void> {
-  await runtime.hooks.event({ event });
+/** Hands events to the runtime without waiting for the queued or detached work. */
+function send(runtime: PluginRuntime, events: unknown): void {
+  for (const event of Array.isArray(events) ? events : [events]) {
+    runtime.onEvent(event);
+  }
+}
+
+async function dispatch(runtime: PluginRuntime, events: unknown): Promise<void> {
+  send(runtime, events);
   await runtime.drain();
 }
 
@@ -862,32 +909,28 @@ const invalidConfigShape = [
 ].join("\n");
 
 describe("JevGuardPlugin composition", () => {
-  test("root entrypoint exports a typed OpenCode Plugin", () => {
-    const plugin: Plugin = JevGuardPlugin;
+  test("root entrypoint default-exports a typed OpenCode 2.2.x plugin", () => {
+    const typed: Plugin.Plugin = plugin;
 
-    expect(typeof plugin).toBe("function");
+    expect(typed.id).toBe("jevguard");
+    expect(typeof typed.setup).toBe("function");
   });
 
-  test("exposes only the observation hook with no command hook", () => {
-    const { runtime } = harness();
+  test("ignores events that are not an execution lifecycle event in the data shape", async () => {
+    const { runtime, facade, policy, presenter, jev, operational } = harness();
 
-    expect(Object.keys(runtime.hooks)).toEqual(["event"]);
-  });
-
-  test("ignores events that are not an idle session status", async () => {
-    const { runtime, facade, policy, presenter, jev } = harness();
-
-    await dispatch(runtime, { type: "session.idle", properties: { sessionID: SESSION_ID } });
-    await dispatch(runtime, {
-      type: "session.status",
-      properties: { sessionID: SESSION_ID, status: { type: "busy" } },
-    });
-    await dispatch(runtime, { type: "message.updated", properties: {} });
+    await dispatch(runtime, [
+      { type: "session.idle", properties: { sessionID: SESSION_ID } },
+      { type: "session.status", properties: { sessionID: SESSION_ID, status: { type: "idle" } } },
+      { type: "session.execution.succeeded", properties: { sessionID: SESSION_ID } },
+      { type: "message.updated", data: { sessionID: SESSION_ID } },
+    ]);
 
     expect(facade.calls).toEqual([]);
     expect(policy.calls).toEqual([]);
     expect(presenter.attempts).toBe(0);
     expect(jev.requests).toHaveLength(0);
+    expect(operational.events).toEqual([]);
   });
 
   test.each([
@@ -902,9 +945,15 @@ describe("JevGuardPlugin composition", () => {
       jev.probabilities.set(SCOPE_CREEP_ID, 0.1);
       jev.probabilities.set(COMPLEXITY_ID, 0.1);
 
-      await dispatch(runtime, idleEvent());
+      await dispatch(runtime, turnEvents());
 
-      expect(facade.calls).toEqual(["listMessages", "fetchDiff"]);
+      expect(facade.calls).toEqual([
+        "parentSessionID",
+        "snapshotWorking",
+        "readFiles",
+        "listMessages",
+        "snapshotWorking",
+      ]);
       expect(policy.calls).toEqual(["load"]);
       expect(jevCalls(jev)).toEqual(["TEST-1", BUILT_IN_BATCH_LABEL]);
       expect(jevRequestedChecks(jev)).toEqual(["TEST-1", SCOPE_CREEP_ID, COMPLEXITY_ID]);
@@ -922,7 +971,7 @@ describe("JevGuardPlugin composition", () => {
     const { runtime, facade, presenter, jev } = harness();
     facade.diffs = [];
 
-    await dispatch(runtime, idleEvent());
+    await dispatch(runtime, turnEvents());
 
     expect(jev.requests).toHaveLength(0);
     expect(lastResults(presenter)).toEqual([
@@ -940,18 +989,22 @@ describe("JevGuardPlugin composition", () => {
   test("never invokes message mutation or prompt APIs", async () => {
     const { runtime, facade } = harness();
 
-    await dispatch(runtime, idleEvent());
+    await dispatch(runtime, turnEvents());
 
     expect(facade.forbidden).toEqual([]);
   });
 });
 
 describe("JevGuardPlugin event returns before background work", () => {
-  test("resolves the event hook while attribution is still blocked, then drains", async () => {
+  test("returns from the event while attribution is still blocked, then drains", async () => {
     const { runtime, facade, presenter } = harness();
     facade.block = true;
 
-    await runtime.hooks.event({ event: idleEvent() });
+    send(runtime, turnEvents());
+
+    while (!facade.calls.includes("listMessages")) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
 
     expect(presenter.reviews).toHaveLength(0);
 
@@ -962,11 +1015,11 @@ describe("JevGuardPlugin event returns before background work", () => {
     expect(lastResults(presenter)[0]?.outcome).toBe("PASS");
   });
 
-  test("resolves the event hook while Jev is still blocked, then drains to results", async () => {
+  test("returns from the event while Jev is still blocked, then drains to results", async () => {
     const { runtime, presenter, jev } = harness();
     jev.block = true;
 
-    await runtime.hooks.event({ event: idleEvent() });
+    send(runtime, turnEvents());
     await jev.waitForActivations(2);
 
     expect(jev.maxActive).toBe(2);
@@ -989,7 +1042,7 @@ describe("JevGuardPlugin operational failures", () => {
     const { runtime, facade, policy, presenter, jev } = harness();
     facade.failure = "messages";
 
-    await dispatch(runtime, idleEvent());
+    await dispatch(runtime, turnEvents());
 
     expect(policy.calls).toEqual([]);
     expect(jev.requests).toHaveLength(0);
@@ -1002,7 +1055,7 @@ describe("JevGuardPlugin operational failures", () => {
     const { runtime, facade, presenter, jev } = harness();
     facade.failure = "diff";
 
-    await dispatch(runtime, idleEvent());
+    await dispatch(runtime, turnEvents());
 
     expect(jev.requests).toHaveLength(0);
     expect(lastResults(presenter)).toEqual([
@@ -1014,7 +1067,7 @@ describe("JevGuardPlugin operational failures", () => {
     const { runtime, policy, presenter, jev } = harness();
     policy.result = { status: "LOADED", source: { rules: null, config: null } };
 
-    await dispatch(runtime, idleEvent());
+    await dispatch(runtime, turnEvents());
 
     expect(jevCalls(jev)).toEqual([BUILT_IN_BATCH_LABEL]);
     expect(jevRequestedChecks(jev)).toEqual([SCOPE_CREEP_ID, COMPLEXITY_ID]);
@@ -1034,7 +1087,7 @@ describe("JevGuardPlugin operational failures", () => {
     const { runtime, policy, presenter, jev } = harness();
     policy.result = { status: "FAILED", reason: "RULES_READ_FAILURE" };
 
-    await dispatch(runtime, idleEvent());
+    await dispatch(runtime, turnEvents());
 
     expect(jevCalls(jev)).toEqual([BUILT_IN_BATCH_LABEL]);
     expect(lastResults(presenter)).toEqual([
@@ -1048,7 +1101,7 @@ describe("JevGuardPlugin operational failures", () => {
     const { runtime, policy, presenter, jev } = harness();
     policy.result = { status: "LOADED", source: { rules: "not a rule document", config: null } };
 
-    await dispatch(runtime, idleEvent());
+    await dispatch(runtime, turnEvents());
 
     expect(jevCalls(jev)).toEqual([BUILT_IN_BATCH_LABEL]);
     expect(lastResults(presenter)).toEqual([
@@ -1062,7 +1115,7 @@ describe("JevGuardPlugin operational failures", () => {
     const { runtime, policy, presenter, jev } = harness();
     policy.result = { status: "LOADED", source: { rules: VALID_RULE, config: "a: [unclosed" } };
 
-    await dispatch(runtime, idleEvent());
+    await dispatch(runtime, turnEvents());
 
     expect(jevCalls(jev)).toEqual([BUILT_IN_BATCH_LABEL]);
     expect(lastResults(presenter)).toEqual([
@@ -1076,7 +1129,7 @@ describe("JevGuardPlugin operational failures", () => {
     const { runtime, policy, presenter, jev } = harness();
     policy.result = { status: "LOADED", source: { rules: VALID_RULE, config: invalidConfigShape } };
 
-    await dispatch(runtime, idleEvent());
+    await dispatch(runtime, turnEvents());
 
     expect(jevCalls(jev)).toEqual([BUILT_IN_BATCH_LABEL]);
     expect(lastResults(presenter)[0]).toEqual(ruleUnavailable("TEST-1", "error", "INVALID_CONFIG"));
@@ -1088,7 +1141,7 @@ describe("JevGuardPlugin operational failures", () => {
     const { runtime, policy, presenter, jev } = harness();
     policy.result = { status: "FAILED", reason: "CONFIG_READ_FAILURE" };
 
-    await dispatch(runtime, idleEvent());
+    await dispatch(runtime, turnEvents());
 
     expect(jevCalls(jev)).toEqual([BUILT_IN_BATCH_LABEL]);
     expect(lastResults(presenter)).toEqual([
@@ -1102,7 +1155,7 @@ describe("JevGuardPlugin operational failures", () => {
     const { runtime, presenter, jev } = harness();
     jev.fail = true;
 
-    await dispatch(runtime, idleEvent());
+    await dispatch(runtime, turnEvents());
 
     expect(jevCalls(jev)).toEqual(["TEST-1", BUILT_IN_BATCH_LABEL]);
     expect(lastResults(presenter)).toEqual([
@@ -1114,30 +1167,31 @@ describe("JevGuardPlugin operational failures", () => {
 });
 
 describe("JevGuardPlugin deduplication and containment", () => {
-  test("evaluates a repeated idle only once and presents one aggregate", async () => {
+  test("evaluates a repeated execution of the same assistant message only once", async () => {
     const { runtime, presenter, jev } = harness();
 
-    await dispatch(runtime, idleEvent());
-    await dispatch(runtime, idleEvent());
+    await dispatch(runtime, turnEvents());
+    await dispatch(runtime, turnEvents());
 
     expect(jevCalls(jev)).toEqual(["TEST-1", BUILT_IN_BATCH_LABEL]);
     expect(presenter.reviews).toHaveLength(1);
   });
 
-  test("evaluates concurrent idle events only once", async () => {
-    const { runtime, presenter, jev } = harness();
+  test("evaluates a duplicated succeeded event only once and stays silent on the duplicate", async () => {
+    const { runtime, presenter, jev, operational } = harness();
 
-    await Promise.all([dispatch(runtime, idleEvent()), dispatch(runtime, idleEvent())]);
+    await dispatch(runtime, [...turnEvents(), executionEvent("succeeded")]);
 
     expect(jevCalls(jev)).toEqual(["TEST-1", BUILT_IN_BATCH_LABEL]);
     expect(presenter.reviews).toHaveLength(1);
+    expect(operational.events).toEqual([]);
   });
 
   test("contains a presentation failure without retry or replacement review", async () => {
     const { runtime, presenter, jev } = harness();
     presenter.fail = true;
 
-    await expect(dispatch(runtime, idleEvent())).resolves.toBeUndefined();
+    await expect(dispatch(runtime, turnEvents())).resolves.toBeUndefined();
 
     expect(jevCalls(jev)).toEqual(["TEST-1", BUILT_IN_BATCH_LABEL]);
     expect(presenter.attempts).toBe(1);
@@ -1148,7 +1202,7 @@ describe("JevGuardPlugin deduplication and containment", () => {
     const { runtime, policy, presenter, jev } = harness();
     policy.failure = new Error("programming bug");
 
-    await expect(dispatch(runtime, idleEvent())).resolves.toBeUndefined();
+    await expect(dispatch(runtime, turnEvents())).resolves.toBeUndefined();
 
     expect(policy.calls).toEqual(["load"]);
     expect(jevCalls(jev)).toEqual([BUILT_IN_BATCH_LABEL]);
@@ -1161,16 +1215,16 @@ describe("JevGuardPlugin deduplication and containment", () => {
     expect(JSON.stringify(lastReview(presenter))).not.toContain("programming bug");
   });
 
-  test("keeps handling later idle events after a contained failure", async () => {
+  test("keeps handling later executions after a contained failure", async () => {
     const { runtime, facade, presenter, jev } = harness();
     facade.failure = "messages";
 
-    await dispatch(runtime, idleEvent());
+    await dispatch(runtime, turnEvents());
     expect(jev.requests).toHaveLength(0);
     expect(presenter.reviews).toHaveLength(1);
 
     facade.failure = "none";
-    await dispatch(runtime, idleEvent());
+    await dispatch(runtime, turnEvents());
 
     expect(jevCalls(jev)).toEqual(["TEST-1", BUILT_IN_BATCH_LABEL]);
     expect(presenter.reviews).toHaveLength(2);
@@ -1181,12 +1235,12 @@ describe("JevGuardPlugin deduplication and containment", () => {
     const { runtime, facade, presenter, jev } = harness();
     jev.fail = true;
 
-    await dispatch(runtime, idleEvent());
+    await dispatch(runtime, turnEvents());
     expect(lastResults(presenter)[0]?.outcome).toBe("UNAVAILABLE");
 
     facade.records = turnRecords(SECOND_ASSISTANT_ID, SECOND_USER_ID);
     jev.fail = false;
-    await dispatch(runtime, idleEvent());
+    await dispatch(runtime, turnEvents());
 
     expect(presenter.reviews).toHaveLength(2);
     expect(lastResults(presenter)[0]?.outcome).toBe("PASS");
@@ -1202,7 +1256,7 @@ describe("JevGuardPlugin concurrency", () => {
     );
     jev.block = true;
 
-    const pendingReview = dispatch(runtime, idleEvent());
+    const pendingReview = dispatch(runtime, turnEvents());
 
     await jev.waitForActivations(2);
 
@@ -1236,8 +1290,8 @@ describe("JevGuardPlugin concurrency", () => {
     );
     jev.block = true;
 
-    await runtime.hooks.event({ event: idleEvent(SESSION_ID) });
-    await runtime.hooks.event({ event: idleEvent(SECOND_SESSION_ID) });
+    send(runtime, turnEvents(SESSION_ID));
+    send(runtime, turnEvents(SECOND_SESSION_ID));
     await jev.waitForActivations(2);
 
     expect(jev.maxActive).toBe(2);
@@ -1259,7 +1313,7 @@ describe("JevGuardPlugin concurrency", () => {
     jev.block = true;
     jev.failingIds.add(COMPLEXITY_ID);
 
-    const pendingReview = dispatch(runtime, idleEvent());
+    const pendingReview = dispatch(runtime, turnEvents());
 
     await jev.waitForActivations(2);
 
@@ -1298,7 +1352,7 @@ describe("JevGuardPlugin multi-rule end-to-end", () => {
       { file: "docs/readme.md", patch: DOCS_SENTINEL },
     ];
 
-    await dispatch(runtime, idleEvent());
+    await dispatch(runtime, turnEvents());
 
     expect(presenter.reviews).toHaveLength(1);
     expect(jevCalls(jev)).toEqual(["SRC-1", BUILT_IN_BATCH_LABEL, "GLOBAL-3"]);
@@ -1334,7 +1388,7 @@ describe("JevGuardPlugin multi-rule end-to-end", () => {
     ].join("\n\n");
     loadRules(policy, rules);
 
-    await dispatch(runtime, idleEvent());
+    await dispatch(runtime, turnEvents());
 
     expect(jevCheckSet(jev)).toEqual(new Set(["GOOD-1", SCOPE_CREEP_ID, COMPLEXITY_ID, "GOOD-3"]));
     expect(lastResults(presenter)).toEqual([
@@ -1358,7 +1412,7 @@ describe("JevGuardPlugin multi-rule end-to-end", () => {
     );
     loadRules(policy, rules);
 
-    await dispatch(runtime, idleEvent());
+    await dispatch(runtime, turnEvents());
 
     expect(jevCalls(jev)).toEqual([BUILT_IN_BATCH_LABEL]);
     expect(lastResults(presenter)).toEqual([
@@ -1377,7 +1431,7 @@ describe("JevGuardPlugin multi-rule end-to-end", () => {
     loadRules(policy, rules);
     jev.failingIds.add("FAIL-1");
 
-    await dispatch(runtime, idleEvent());
+    await dispatch(runtime, turnEvents());
 
     expect(jevCheckSet(jev)).toEqual(new Set(["FAIL-1", SCOPE_CREEP_ID, COMPLEXITY_ID, "OK-2"]));
     expect(lastResults(presenter)).toEqual([
@@ -1393,7 +1447,7 @@ describe("JevGuardPlugin multi-rule end-to-end", () => {
     loadRules(policy, ruleText("OK-1", "error", "src/**"));
     jev.failingIds.add(COMPLEXITY_ID);
 
-    await dispatch(runtime, idleEvent());
+    await dispatch(runtime, turnEvents());
 
     expect(jevCheckSet(jev)).toEqual(new Set(["OK-1", SCOPE_CREEP_ID, COMPLEXITY_ID]));
     expect(lastResults(presenter)).toEqual([
@@ -1418,7 +1472,7 @@ describe("JevGuardPlugin multi-rule end-to-end", () => {
       { file: "clean/a.ts", patch: PATCH },
     ];
 
-    await dispatch(runtime, idleEvent());
+    await dispatch(runtime, turnEvents());
 
     expect(jevCalls(jev)).toEqual(["CLEAN-3"]);
     expect(lastResults(presenter).map((result) => result.outcome)).toEqual([
@@ -1449,7 +1503,7 @@ describe("JevGuardPlugin multi-rule end-to-end", () => {
     );
     loadRules(policy, rules, invalidConfigShape);
 
-    await dispatch(runtime, idleEvent());
+    await dispatch(runtime, turnEvents());
 
     expect(jevCalls(jev)).toEqual([BUILT_IN_BATCH_LABEL]);
     expect(lastResults(presenter)).toEqual([
@@ -1469,8 +1523,8 @@ describe("JevGuardPlugin multi-rule end-to-end", () => {
     loadRules(policy, rules);
     facade.diffs = [{ file: "src/a.ts", patch: PATCH }];
 
-    await dispatch(runtime, idleEvent());
-    await dispatch(runtime, idleEvent());
+    await dispatch(runtime, turnEvents());
+    await dispatch(runtime, turnEvents());
 
     expect(jevCheckSet(jev)).toEqual(new Set(["SRC-1", SCOPE_CREEP_ID, COMPLEXITY_ID, "GLOBAL-2"]));
     expect(presenter.reviews).toHaveLength(1);
@@ -1495,7 +1549,7 @@ describe("JevGuardPlugin gate propagation", () => {
       jev.probabilities.set(SCOPE_CREEP_ID, 0.1);
       jev.probabilities.set(COMPLEXITY_ID, 0.1);
 
-      await dispatch(runtime, idleEvent());
+      await dispatch(runtime, turnEvents());
 
       expect(jevCalls(jev)).toEqual(["TEST-1", BUILT_IN_BATCH_LABEL]);
       expect(lastResults(presenter)[0]).toEqual(
@@ -1512,7 +1566,7 @@ describe("JevGuardPlugin runtime short-circuits", () => {
     loadRules(policy, scopedRule("error"));
     facade.diffs = [{ file: "docs/readme.md", patch: DOCS_SENTINEL }];
 
-    await dispatch(runtime, idleEvent());
+    await dispatch(runtime, turnEvents());
 
     expect(jevCalls(jev)).toEqual([BUILT_IN_BATCH_LABEL]);
     expect(lastResults(presenter)).toEqual([
@@ -1529,7 +1583,7 @@ describe("JevGuardPlugin runtime short-circuits", () => {
       { file: "src/a.ts", patch: "x".repeat(DEFAULT_EVIDENCE_POLICY.maxDiffLength + 1) },
     ];
 
-    await dispatch(runtime, idleEvent());
+    await dispatch(runtime, turnEvents());
 
     expect(jev.requests).toHaveLength(0);
     expect(lastResults(presenter)).toEqual([
@@ -1547,7 +1601,7 @@ describe("JevGuardPlugin runtime short-circuits", () => {
       { file: "src/.env", patch: "SECRET=1" },
     ];
 
-    await dispatch(runtime, idleEvent());
+    await dispatch(runtime, turnEvents());
 
     expect(jev.requests).toHaveLength(0);
     expect(lastResults(presenter)).toEqual([
@@ -1567,7 +1621,7 @@ describe("JevGuardPlugin observe-only containment", () => {
     jev.probability = 0.8;
     jev.probabilities.set(SCOPE_CREEP_ID, 0.9);
 
-    await expect(dispatch(runtime, idleEvent())).resolves.toBeUndefined();
+    await expect(dispatch(runtime, turnEvents())).resolves.toBeUndefined();
 
     expect(lastResults(presenter)[0]).toMatchObject({
       outcome: "FAIL",
@@ -1593,7 +1647,7 @@ describe("JevGuardPlugin observe-only containment", () => {
     loadRules(policy, scopedRule("error"));
     jev.fail = true;
 
-    await expect(dispatch(runtime, idleEvent())).resolves.toBeUndefined();
+    await expect(dispatch(runtime, turnEvents())).resolves.toBeUndefined();
 
     expect(jevCalls(jev)).toEqual(["TEST-1", BUILT_IN_BATCH_LABEL]);
     expect(lastResults(presenter)[0]).toMatchObject({
@@ -1613,7 +1667,6 @@ describe("JevGuardPlugin observe-only containment", () => {
 });
 
 const CHILD_SESSION_ID = "ses_child";
-const PROPOSER_AGENT = "jevguard-proposer";
 
 const DISABLED_CONFIG = [
   "version: 1",
@@ -1664,25 +1717,22 @@ function proposalText(values: Harness): string {
 }
 
 describe("JevGuardPlugin automatic proposals", () => {
-  test("creates one child session and prompts the hidden proposer for a rule FAIL", async () => {
+  test("creates one deny-all child with the origin model and prompts the proposer contract for a rule FAIL", async () => {
     const values = harness();
     errorFailSetup(values);
 
-    await dispatch(values.runtime, idleEvent());
+    await dispatch(values.runtime, turnEvents());
 
     expect(lastReview(values.presenter).summary.verdict).toBe("FAIL");
     expect(values.proposalFacade.created).toEqual([
-      { parentID: SESSION_ID, title: "JevGuard remediation proposal" },
+      { parentID: SESSION_ID, title: "JevGuard remediation proposal", model: ORIGIN_MODEL },
     ]);
     expect(values.proposalFacade.prompts).toHaveLength(1);
 
     const prompt = values.proposalFacade.prompts[0];
 
     expect(prompt?.sessionID).toBe(CHILD_SESSION_ID);
-    expect(prompt?.agent).toBe(PROPOSER_AGENT);
-    expect(prompt?.model).toBeNull();
-    expect(prompt?.tools).toEqual({ "*": false });
-    expect(typeof prompt?.system).toBe("string");
+    expect(prompt?.text.startsWith(`${PROPOSER_AGENT_PROMPT}\n\n`)).toBe(true);
     expect(prompt?.text).toContain("TEST-1");
     expect(prompt?.text).toContain(PATCH);
     expect(values.notifier.calls).toEqual(["proposalPreparing", "proposalReady"]);
@@ -1693,13 +1743,13 @@ describe("JevGuardPlugin automatic proposals", () => {
     const values = harness();
     errorFailSetup(values);
 
-    await dispatch(values.runtime, idleEvent());
+    await dispatch(values.runtime, turnEvents());
 
     expect(values.order).toEqual(["create", "register", "navigate", "prepare", "prompt", "notify"]);
     expect(values.navigator.calls).toEqual([CHILD_SESSION_ID]);
   });
 
-  test("uses the configured model for the proposer", async () => {
+  test("uses the configured model over the origin model for the proposer", async () => {
     const values = harness();
     loadRules(values.policy, scopedRule("error"), CUSTOM_MODEL_CONFIG);
     values.facade.diffs = [{ file: "src/a.ts", patch: PATCH }];
@@ -1707,9 +1757,9 @@ describe("JevGuardPlugin automatic proposals", () => {
     values.jev.probabilities.set(SCOPE_CREEP_ID, 0.1);
     values.jev.probabilities.set(COMPLEXITY_ID, 0.1);
 
-    await dispatch(values.runtime, idleEvent());
+    await dispatch(values.runtime, turnEvents());
 
-    expect(values.proposalFacade.prompts[0]?.model).toEqual({
+    expect(values.proposalFacade.created[0]?.model).toEqual({
       providerID: "openai",
       modelID: "gpt-5",
     });
@@ -1730,7 +1780,7 @@ describe("JevGuardPlugin automatic proposals", () => {
     values.jev.probabilities.set(SCOPE_CREEP_ID, 0.95);
     values.jev.probabilities.set(COMPLEXITY_ID, 0.1);
 
-    await dispatch(values.runtime, idleEvent());
+    await dispatch(values.runtime, turnEvents());
 
     expect(values.proposalFacade.created).toHaveLength(1);
     expect(values.proposalFacade.prompts).toHaveLength(1);
@@ -1754,7 +1804,7 @@ describe("JevGuardPlugin automatic proposals", () => {
     values.jev.probabilities.set(SCOPE_CREEP_ID, 0.95);
     values.jev.probabilities.set(COMPLEXITY_ID, 0.1);
 
-    await dispatch(values.runtime, idleEvent());
+    await dispatch(values.runtime, turnEvents());
 
     expect(values.proposalFacade.prompts).toHaveLength(1);
     expect(proposalText(values)).toContain("- check_id: SCOPE-CREEP");
@@ -1773,7 +1823,7 @@ describe("JevGuardPlugin automatic proposals", () => {
       values.jev.probabilities.set(SCOPE_CREEP_ID, 0.1);
       values.jev.probabilities.set(COMPLEXITY_ID, 0.1);
 
-      await dispatch(values.runtime, idleEvent());
+      await dispatch(values.runtime, turnEvents());
 
       expect(lastReview(values.presenter).summary.verdict).toBe(outcome);
       expect(values.proposalFacade.created).toEqual([]);
@@ -1789,7 +1839,7 @@ describe("JevGuardPlugin automatic proposals", () => {
     values.jev.probabilities.set(SCOPE_CREEP_ID, 0.1);
     values.jev.probabilities.set(COMPLEXITY_ID, 0.1);
 
-    await dispatch(values.runtime, idleEvent());
+    await dispatch(values.runtime, turnEvents());
 
     expect(lastResults(values.presenter)[0]).toMatchObject({ outcome: "WARN" });
     expect(values.proposalFacade.created).toEqual([]);
@@ -1806,7 +1856,7 @@ describe("JevGuardPlugin automatic proposals", () => {
     values.jev.probabilities.set(SCOPE_CREEP_ID, 0.1);
     values.jev.probabilities.set(COMPLEXITY_ID, 0.1);
 
-    await dispatch(values.runtime, idleEvent());
+    await dispatch(values.runtime, turnEvents());
 
     expect(lastResults(values.presenter)[0]).toMatchObject({
       ruleId: "TEST-1",
@@ -1827,7 +1877,7 @@ describe("JevGuardPlugin automatic proposals", () => {
     values.jev.probabilities.set(SCOPE_CREEP_ID, 0.1);
     values.jev.probabilities.set(COMPLEXITY_ID, 0.1);
 
-    await dispatch(values.runtime, idleEvent());
+    await dispatch(values.runtime, turnEvents());
 
     expect(lastResults(values.presenter)[0]).toMatchObject({ ruleId: "TEST-1", outcome: "FAIL" });
     expect(values.proposalFacade.created).toEqual([]);
@@ -1838,7 +1888,7 @@ describe("JevGuardPlugin automatic proposals", () => {
     loadRules(values.policy, scopedRule("error"));
     values.facade.diffs = [];
 
-    await dispatch(values.runtime, idleEvent());
+    await dispatch(values.runtime, turnEvents());
 
     expect(lastResults(values.presenter)[0]).toMatchObject({ outcome: "SKIPPED" });
     expect(values.proposalFacade.created).toEqual([]);
@@ -1852,7 +1902,7 @@ describe("JevGuardPlugin automatic proposals", () => {
     values.jev.probabilities.set(SCOPE_CREEP_ID, 0.1);
     values.jev.probabilities.set(COMPLEXITY_ID, 0.1);
 
-    await dispatch(values.runtime, idleEvent());
+    await dispatch(values.runtime, turnEvents());
 
     expect(lastReview(values.presenter).summary.verdict).toBe("FAIL");
     expect(values.proposalFacade.created).toEqual([]);
@@ -1866,7 +1916,7 @@ describe("JevGuardPlugin automatic proposals", () => {
     values.jev.probabilities.set(SCOPE_CREEP_ID, 0.1);
     values.jev.probabilities.set(COMPLEXITY_ID, 0.1);
 
-    await dispatch(values.runtime, idleEvent());
+    await dispatch(values.runtime, turnEvents());
 
     expect(lastResults(values.presenter)[0]).toMatchObject({
       outcome: "UNAVAILABLE",
@@ -1883,7 +1933,7 @@ describe("JevGuardPlugin automatic proposals", () => {
     values.jev.probabilities.set(SCOPE_CREEP_ID, 0.1);
     values.jev.probabilities.set(COMPLEXITY_ID, 0.1);
 
-    await dispatch(values.runtime, idleEvent());
+    await dispatch(values.runtime, turnEvents());
 
     expect(lastResults(values.presenter)[0]).toMatchObject({
       outcome: "UNAVAILABLE",
@@ -1896,18 +1946,18 @@ describe("JevGuardPlugin automatic proposals", () => {
     const values = harness();
     loadRules(values.policy, "not a rule document");
 
-    await dispatch(values.runtime, idleEvent());
+    await dispatch(values.runtime, turnEvents());
 
     expect(lastResults(values.presenter)[0]).toMatchObject({ outcome: "UNAVAILABLE" });
     expect(values.proposalFacade.created).toEqual([]);
   });
 
-  test("creates at most one proposal per evaluated turn across repeated idles", async () => {
+  test("creates at most one proposal per evaluated turn across repeated executions", async () => {
     const values = harness();
     errorFailSetup(values);
 
-    await dispatch(values.runtime, idleEvent());
-    await dispatch(values.runtime, idleEvent());
+    await dispatch(values.runtime, turnEvents());
+    await dispatch(values.runtime, turnEvents());
 
     expect(values.proposalFacade.created).toHaveLength(1);
     expect(values.notifier.calls).toEqual(["proposalPreparing", "proposalReady"]);
@@ -1921,11 +1971,11 @@ describe("JevGuardPlugin automatic proposals", () => {
       turnRecords(SECOND_ASSISTANT_ID, SECOND_USER_ID),
     );
 
-    await dispatch(values.runtime, idleEvent());
+    await dispatch(values.runtime, turnEvents());
 
     const callsBefore = values.facade.calls.length;
 
-    await dispatch(values.runtime, idleEvent(CHILD_SESSION_ID));
+    await dispatch(values.runtime, turnEvents(CHILD_SESSION_ID));
 
     expect(values.facade.calls.length).toBe(callsBefore);
     expect(values.presenter.reviews).toHaveLength(1);
@@ -1944,9 +1994,9 @@ describe("JevGuardPlugin automatic proposals", () => {
     values.jev.probabilities.set(SCOPE_CREEP_ID, 0.1);
     values.jev.probabilities.set(COMPLEXITY_ID, 0.1);
 
-    await dispatch(values.runtime, idleEvent(SESSION_ID));
+    await dispatch(values.runtime, turnEvents(SESSION_ID));
     values.proposalFacade.nextSessionID = "ses_child_2";
-    await dispatch(values.runtime, idleEvent(SECOND_SESSION_ID));
+    await dispatch(values.runtime, turnEvents(SECOND_SESSION_ID));
 
     expect(values.proposalFacade.created.map((entry) => entry.parentID)).toEqual([
       SESSION_ID,
@@ -1965,7 +2015,7 @@ describe("JevGuardPlugin automatic proposals", () => {
     errorFailSetup(values);
     values.proposalFacade.failCreate = true;
 
-    await expect(dispatch(values.runtime, idleEvent())).resolves.toBeUndefined();
+    await expect(dispatch(values.runtime, turnEvents())).resolves.toBeUndefined();
 
     expect(lastReview(values.presenter).summary.verdict).toBe("FAIL");
     expect(values.proposalFacade.prompts).toEqual([]);
@@ -1979,7 +2029,7 @@ describe("JevGuardPlugin automatic proposals", () => {
     errorFailSetup(values);
     values.proposalFacade.failPrompt = true;
 
-    await expect(dispatch(values.runtime, idleEvent())).resolves.toBeUndefined();
+    await expect(dispatch(values.runtime, turnEvents())).resolves.toBeUndefined();
 
     expect(lastReview(values.presenter).summary.verdict).toBe("FAIL");
     expect(values.proposalFacade.created).toHaveLength(1);
@@ -2002,13 +2052,7 @@ describe("JevGuardPlugin automatic proposals", () => {
       builtInFindings: [],
     };
 
-    await proposeForTurn(request, {
-      proposals: values.proposals,
-      proposalFacade: values.proposalFacade,
-      navigator: values.navigator,
-      notifier: values.notifier,
-      failures: values.failures,
-    });
+    await proposeForTurn(request, proposalDependencies(values));
 
     expect(values.failures.reasons).toEqual(["MODEL_SPECIFIER_INVALID"]);
     expect(values.notifier.calls).toEqual(["proposalFailed"]);
@@ -2020,7 +2064,7 @@ describe("JevGuardPlugin automatic proposals", () => {
     errorFailSetup(values);
     values.notifier.fail = true;
 
-    await expect(dispatch(values.runtime, idleEvent())).resolves.toBeUndefined();
+    await expect(dispatch(values.runtime, turnEvents())).resolves.toBeUndefined();
 
     expect(lastReview(values.presenter).summary.verdict).toBe("FAIL");
     expect(values.proposalFacade.prompts).toHaveLength(1);
@@ -2034,7 +2078,7 @@ describe("JevGuardPlugin automatic proposals", () => {
     errorFailSetup(values);
     values.navigator.fail = true;
 
-    await expect(dispatch(values.runtime, idleEvent())).resolves.toBeUndefined();
+    await expect(dispatch(values.runtime, turnEvents())).resolves.toBeUndefined();
 
     expect(lastReview(values.presenter).summary.verdict).toBe("FAIL");
     expect(values.proposalFacade.prompts).toHaveLength(1);
@@ -2047,16 +2091,8 @@ describe("JevGuardPlugin automatic proposals", () => {
     const values = harness();
     loadRules(values.policy, scopedRule("error"));
     values.facade.records = [
-      { info: { id: USER_ID, role: "user" }, parts: [{ type: "text", text: TASK_SENTINEL }] },
-      {
-        info: {
-          id: ASSISTANT_ID,
-          role: "assistant",
-          parentID: USER_ID,
-          time: { created: 1, completed: 2 },
-        },
-        parts: [],
-      },
+      { id: USER_ID, type: "user", completed: false, text: TASK_SENTINEL },
+      { id: ASSISTANT_ID, type: "assistant", completed: true },
     ];
     values.facade.diffs = [{ file: "src/a.ts", patch: `${PATCH}${DIFF_SENTINEL}` }];
     values.jev.probability = 0.8;
@@ -2064,7 +2100,7 @@ describe("JevGuardPlugin automatic proposals", () => {
     values.jev.probabilities.set(COMPLEXITY_ID, 0.1);
     values.proposalFacade.failPrompt = true;
 
-    await dispatch(values.runtime, idleEvent());
+    await dispatch(values.runtime, turnEvents());
 
     expect(proposalText(values)).toContain(TASK_SENTINEL);
     expect(proposalText(values)).toContain(DIFF_SENTINEL);
@@ -2082,57 +2118,359 @@ describe("JevGuardPlugin automatic proposals", () => {
     const values = harness();
     errorFailSetup(values);
 
-    await dispatch(values.runtime, idleEvent());
+    await dispatch(values.runtime, turnEvents());
 
     expect(values.facade.forbidden).toEqual([]);
   });
 });
 
-describe("JevGuardPlugin remediation config", () => {
-  test("registers the internal proposer subagent with disabled tools and wildcard-deny permissions", () => {
-    const config: Record<string, unknown> = {};
+function proposalDependencies(values: Harness): ProposalDependencies {
+  return values.dependencies;
+}
 
-    registerRemediationConfig(config);
+describe("JevGuardPlugin proposal lifecycle (2.2.x)", () => {
+  test("skips the proposal with a typed log and no child when no model is readable", async () => {
+    const values = harness();
+    errorFailSetup(values);
+    values.proposalFacade.originModelValue = null;
 
-    const agents = Reflect.get(config, "agent") as Record<string, Record<string, unknown>>;
-    const proposer = agents["jevguard-proposer"];
+    await dispatch(values.runtime, turnEvents());
 
-    expect(proposer?.mode).toBe("subagent");
-    expect(proposer?.hidden).toBe(true);
-    expect(proposer?.tools).toEqual({ "*": false });
-    expect(proposer?.permission).toEqual({ "*": "deny" });
-    expect(typeof proposer?.prompt).toBe("string");
+    expect(lastReview(values.presenter).summary.verdict).toBe("FAIL");
+    expect(values.proposalFacade.created).toEqual([]);
+    expect(values.failures.reasons).toEqual(["REMEDIATION_PROPOSAL_SKIPPED_NO_MODEL"]);
+    expect(values.notifier.calls).toEqual([]);
   });
 
-  test("registers no command", () => {
-    const config: Record<string, unknown> = {};
+  test("treats an origin model read failure as no readable model", async () => {
+    const values = harness();
+    errorFailSetup(values);
+    values.proposalFacade.failOrigin = true;
 
-    registerRemediationConfig(config);
+    await dispatch(values.runtime, turnEvents());
 
-    expect(Reflect.get(config, "command")).toBeUndefined();
+    expect(values.proposalFacade.created).toEqual([]);
+    expect(values.failures.reasons).toEqual(["REMEDIATION_PROPOSAL_SKIPPED_NO_MODEL"]);
   });
 
-  test("overwrites a conflicting internal agent while preserving unrelated config", () => {
-    const config: Record<string, unknown> = {
-      agent: {
-        "jevguard-proposer": {
-          mode: "primary",
-          tools: { edit: true },
-          permission: { edit: "allow" },
-        },
-        build: { mode: "primary" },
+  test("interrupts a child that outlives the time budget and reports a timeout", async () => {
+    const values = harness();
+    errorFailSetup(values);
+    values.proposalFacade.childOutcome = "none";
+
+    await dispatch(values.runtime, turnEvents());
+
+    expect(values.proposalFacade.prompts).toHaveLength(1);
+    expect(values.proposalFacade.interrupts).toEqual([CHILD_SESSION_ID]);
+    expect(values.failures.reasons).toEqual(["REMEDIATION_PROPOSAL_TIMEOUT"]);
+    expect(values.notifier.calls).toEqual(["proposalPreparing", "proposalFailed"]);
+  });
+
+  test("reports a child execution that fails as a prompt failure", async () => {
+    const values = harness();
+    errorFailSetup(values);
+    values.proposalFacade.childOutcome = "failed";
+
+    await dispatch(values.runtime, turnEvents());
+
+    expect(values.proposalFacade.interrupts).toEqual([]);
+    expect(values.failures.reasons).toEqual(["PROPOSAL_PROMPT_FAILED"]);
+    expect(values.notifier.calls).toEqual(["proposalPreparing", "proposalFailed"]);
+  });
+
+  test("never reviews or logs the proposer child's own executions", async () => {
+    const values = harness();
+    errorFailSetup(values);
+    values.proposalFacade.childOutcome = "failed";
+
+    await dispatch(values.runtime, turnEvents());
+
+    expect(values.presenter.reviews).toHaveLength(1);
+    expect(values.operational.events).toEqual([]);
+  });
+});
+
+describe("JevGuardPlugin execution lifecycle (2.2.x)", () => {
+  test.each(["interrupted", "failed"] as const)(
+    "discards an %s execution without review and logs the skip",
+    async (kind) => {
+      const { runtime, policy, presenter, jev, operational } = harness();
+
+      await dispatch(runtime, [executionEvent("started"), executionEvent(kind)]);
+
+      expect(policy.calls).toEqual([]);
+      expect(jev.requests).toHaveLength(0);
+      expect(presenter.attempts).toBe(0);
+      expect(operational.events).toEqual([{ kind: "TURN_SKIPPED", reason: kind }]);
+    },
+  );
+
+  test("presents MISSING_ATTRIBUTED_DIFF and logs MISSING_TURN_START for a succeeded without start", async () => {
+    const { runtime, presenter, operational } = harness();
+
+    await dispatch(runtime, executionEvent("succeeded"));
+
+    expect(lastResults(presenter)).toEqual([
+      reviewUnavailable(SESSION_ID, "MISSING_ATTRIBUTED_DIFF"),
+    ]);
+    expect(operational.events).toEqual([
+      { kind: "ATTRIBUTION_UNAVAILABLE", reason: "MISSING_TURN_START" },
+    ]);
+  });
+
+  test("reports BOUNDARY_RACE when the next start arrives before the previous execution is consumed", async () => {
+    const { runtime, presenter, operational } = harness();
+
+    await dispatch(runtime, [
+      executionEvent("started"),
+      executionEvent("succeeded"),
+      executionEvent("started"),
+    ]);
+
+    expect(lastResults(presenter)).toEqual([
+      reviewUnavailable(SESSION_ID, "MISSING_ATTRIBUTED_DIFF"),
+    ]);
+    expect(operational.events).toEqual([
+      { kind: "ATTRIBUTION_UNAVAILABLE", reason: "BOUNDARY_RACE" },
+    ]);
+  });
+
+  test("reports CONCURRENT_SESSIONS for overlapping top-level executions", async () => {
+    const { runtime, facade, presenter, operational, jev } = harness();
+    facade.recordsBySession.set(
+      SECOND_SESSION_ID,
+      turnRecords(SECOND_ASSISTANT_ID, SECOND_USER_ID),
+    );
+
+    await dispatch(runtime, [
+      executionEvent("started", SESSION_ID),
+      executionEvent("started", SECOND_SESSION_ID),
+      executionEvent("succeeded", SESSION_ID),
+      executionEvent("succeeded", SECOND_SESSION_ID),
+    ]);
+
+    expect(jev.requests).toHaveLength(0);
+    expect(presenter.reviews).toHaveLength(2);
+    expect(operational.events).toEqual([
+      { kind: "ATTRIBUTION_UNAVAILABLE", reason: "CONCURRENT_SESSIONS" },
+      { kind: "ATTRIBUTION_UNAVAILABLE", reason: "CONCURRENT_SESSIONS" },
+    ]);
+  });
+
+  test("folds a nested host subagent into its parent execution and stays silent for it", async () => {
+    const { runtime, facade, presenter, operational } = harness();
+    facade.parents.set("ses_sub", SESSION_ID);
+
+    await dispatch(runtime, [
+      executionEvent("started", SESSION_ID),
+      executionEvent("started", "ses_sub"),
+      executionEvent("interrupted", "ses_sub"),
+      executionEvent("succeeded", SESSION_ID),
+    ]);
+
+    expect(presenter.reviews).toHaveLength(1);
+    expect(lastResults(presenter)[0]?.outcome).toBe("PASS");
+    expect(operational.events).toEqual([]);
+  });
+
+  test("excludes dirt that predates the execution from the reviewed files", async () => {
+    const { runtime, facade, presenter } = harness();
+    facade.startDiffs = [{ file: "docs/readme.md", patch: DOCS_SENTINEL }];
+    facade.diffs = [
+      { file: "docs/readme.md", patch: DOCS_SENTINEL },
+      { file: "src/a.ts", patch: PATCH },
+    ];
+
+    await dispatch(runtime, turnEvents());
+
+    expect(lastResults(presenter)[0]).toMatchObject({ scopedPaths: ["src/a.ts"] });
+  });
+});
+
+interface FakeHostContext {
+  readonly context: Plugin.Context;
+  readonly retryHandlers: Array<(retry: { sessionID: string; decision?: unknown }) => void>;
+  readonly toolHandlers: Array<(event: unknown) => void>;
+  readonly transforms: Array<(editor: unknown) => void>;
+  readonly disposed: string[];
+  readonly push: (event: unknown) => void;
+  readonly subscribed: Array<{ types?: readonly string[]; signal?: AbortSignal }>;
+}
+
+/** Minimal 2.2.x context fake for `startPlugin`: registrations and an event stream. */
+function fakeHostContext(root: string): FakeHostContext {
+  const retryHandlers: FakeHostContext["retryHandlers"] = [];
+  const toolHandlers: FakeHostContext["toolHandlers"] = [];
+  const transforms: FakeHostContext["transforms"] = [];
+  const disposed: string[] = [];
+  const subscribed: FakeHostContext["subscribed"] = [];
+  const queue: unknown[] = [];
+  let wake: (() => void) | null = null;
+
+  const registration = (name: string) => ({
+    dispose: async () => {
+      disposed.push(name);
+    },
+  });
+
+  async function* stream(signal: AbortSignal | undefined): AsyncGenerator<unknown> {
+    while (signal?.aborted !== true) {
+      const next = queue.shift();
+
+      if (next !== undefined) {
+        yield next;
+        continue;
+      }
+
+      await new Promise<void>((resolve) => {
+        wake = resolve;
+        signal?.addEventListener("abort", () => resolve(), { once: true });
+      });
+    }
+  }
+
+  const context = {
+    location: { project: { canonical: root } },
+    session: {
+      hook: async (name: string, handler: (retry: { sessionID: string }) => void) => {
+        retryHandlers.push(handler);
+        return registration(`session.${name}`);
       },
-    };
+    },
+    tool: {
+      hook: async (name: string, handler: (event: unknown) => void) => {
+        toolHandlers.push(handler);
+        return registration(`tool.${name}`);
+      },
+    },
+    skill: {
+      transform: async (callback: (editor: unknown) => void) => {
+        transforms.push(callback);
+        return registration("skill.transform");
+      },
+    },
+    event: {
+      subscribe: (options: { types?: readonly string[]; signal?: AbortSignal }) => {
+        subscribed.push(options);
+        return stream(options.signal);
+      },
+    },
+  } as unknown as Plugin.Context;
 
-    registerRemediationConfig(config);
+  return {
+    context,
+    retryHandlers,
+    toolHandlers,
+    transforms,
+    disposed,
+    subscribed,
+    push(event) {
+      queue.push(event);
+      wake?.();
+      wake = null;
+    },
+  };
+}
 
-    const agents = Reflect.get(config, "agent") as Record<string, Record<string, unknown>>;
+async function settle(): Promise<void> {
+  for (let index = 0; index < 5; index += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+}
 
-    expect(agents["jevguard-proposer"]).toMatchObject({
-      mode: "subagent",
-      tools: { "*": false },
-      permission: { "*": "deny" },
+describe("JevGuardPlugin setup (2.2.x)", () => {
+  test("subscribes to the execution lifecycle, reviews from the stream, and cleans up", async () => {
+    const values = harness();
+    const host = fakeHostContext("/repo");
+    const { runtime, cleanup } = await startPlugin(host.context, values.dependencies, []);
+
+    expect(host.subscribed[0]?.types).toEqual([
+      "session.execution.started",
+      "session.execution.succeeded",
+      "session.execution.interrupted",
+      "session.execution.failed",
+    ]);
+
+    for (const event of turnEvents()) {
+      host.push(event);
+    }
+
+    await settle();
+    await runtime.drain();
+
+    expect(values.presenter.reviews).toHaveLength(1);
+
+    await cleanup();
+
+    expect(host.subscribed[0]?.signal?.aborted).toBe(true);
+    expect([...host.disposed].sort()).toEqual([
+      "session.retry",
+      "skill.transform",
+      "tool.execute.after",
+    ]);
+  });
+
+  test("disables retry only for registered proposer child sessions", async () => {
+    const values = harness();
+    const host = fakeHostContext("/repo");
+    const { cleanup } = await startPlugin(host.context, values.dependencies, []);
+
+    values.proposals.registerChildSession(CHILD_SESSION_ID);
+
+    const child: { sessionID: string; decision?: unknown } = { sessionID: CHILD_SESSION_ID };
+    const origin: { sessionID: string; decision?: unknown } = { sessionID: SESSION_ID };
+
+    host.retryHandlers[0]?.(child);
+    host.retryHandlers[0]?.(origin);
+
+    expect(child.decision).toEqual({ retry: false });
+    expect(origin.decision).toBeUndefined();
+
+    await cleanup();
+  });
+
+  test("a write the diff never shows makes the execution INCOMPLETE_FILE_DIFF, whatever its status", async () => {
+    const values = harness();
+    const host = fakeHostContext("/repo");
+    const { runtime, cleanup } = await startPlugin(host.context, values.dependencies, []);
+
+    host.push(executionEvent("started"));
+    await settle();
+    host.toolHandlers[0]?.({
+      tool: "write",
+      sessionID: SESSION_ID,
+      input: { filePath: "/repo/failed.ts" },
+      status: "error",
     });
-    expect(agents.build).toEqual({ mode: "primary" });
+    host.push(executionEvent("succeeded"));
+    await settle();
+    await runtime.drain();
+
+    expect(lastResults(values.presenter)).toEqual([
+      reviewUnavailable(SESSION_ID, "MISSING_ATTRIBUTED_DIFF"),
+    ]);
+    expect(values.operational.events).toEqual([
+      { kind: "ATTRIBUTION_UNAVAILABLE", reason: "INCOMPLETE_FILE_DIFF" },
+    ]);
+
+    await cleanup();
+  });
+
+  test("cleanup never throws when a registration fails to dispose", async () => {
+    const values = harness();
+    const host = fakeHostContext("/repo");
+    const failing = {
+      ...host.context,
+      skill: {
+        transform: async () => ({
+          dispose: async () => {
+            throw new Error("dispose failed");
+          },
+        }),
+      },
+    } as unknown as Plugin.Context;
+    const { cleanup } = await startPlugin(failing, values.dependencies, []);
+
+    await expect(cleanup()).resolves.toBeUndefined();
   });
 });

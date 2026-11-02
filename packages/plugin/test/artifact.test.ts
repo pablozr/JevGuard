@@ -63,6 +63,8 @@ const FORBIDDEN_DEPENDENCIES = [
   "@opencode-ai/plugin",
   "@opencode-ai/sdk",
 ];
+/** Host-provided packages: declared as peers, never bundled or listed as dependencies. */
+const EXPECTED_PEER_DEPENDENCIES = { "@opencode/plugin": "2.2.2", effect: "4.0.6" };
 const EXPECTED_REPOSITORY = {
   type: "git",
   url: "git+https://github.com/pablozr/JevGuard.git",
@@ -70,23 +72,45 @@ const EXPECTED_REPOSITORY = {
 };
 const EXPECTED_HOMEPAGE = "https://github.com/pablozr/JevGuard#readme";
 const EXPECTED_BUGS = { url: "https://github.com/pablozr/JevGuard/issues" };
-const EXPECTED_ENGINES = { bun: ">=1.1.0", opencode: ">=1.18.32 <2" };
+const EXPECTED_ENGINES = { bun: ">=1.1.0", opencode: ">=2.2.2 <2.3" };
 const EXPECTED_PUBLISH_CONFIG = { access: "public", registry: "https://registry.npmjs.org" };
 
-const LOCAL_SHIM = 'export { JevGuardPlugin } from "@pablozrrrr/jevguard";\n';
+const LOCAL_SHIM = 'export { default } from "@pablozrrrr/jevguard";\n';
 const SHIM_IMPORT_CHECK = [
   'import * as module from "./jevguard";',
   "const names = Object.keys(module).sort();",
-  "console.log(JSON.stringify({ names, type: typeof module.JevGuardPlugin }));",
+  "const plugin = module.default;",
+  "console.log(JSON.stringify({ names, id: plugin.id, setup: typeof plugin.setup }));",
   "",
 ].join("\n");
 
-const CONFIG_HOOK_CHECK = [
-  'import { JevGuardPlugin } from "./jevguard";',
-  "const hooks = await JevGuardPlugin({ client: {}, worktree: process.cwd() });",
-  "const config = {};",
-  "await hooks.config(config);",
-  "console.log(JSON.stringify(config));",
+/**
+ * Runs the installed plugin's setup against a minimal 2.2.x host context, replays the
+ * registered skill transforms on a fresh editor, and prints the registered skills.
+ */
+const SKILL_TRANSFORM_CHECK = [
+  'import plugin from "./jevguard";',
+  "const transforms = [];",
+  "const registration = { dispose: async () => undefined };",
+  "const context = {",
+  "  location: { project: { canonical: process.cwd() } },",
+  "  event: { subscribe: async function* () {} },",
+  "  tool: { hook: async () => registration },",
+  "  session: { hook: async () => registration },",
+  "  skill: { transform: async (transform) => { transforms.push(transform); return registration; } },",
+  "};",
+  "const cleanup = await plugin.setup(context);",
+  "const skills = new Map();",
+  "const editor = {",
+  "  list: () => [...skills.values()],",
+  "  get: (id) => skills.get(id),",
+  "  add: (skill) => skills.set(skill.id, skill),",
+  "  update: (id, update) => update(skills.get(id)),",
+  "  remove: (id) => skills.delete(id),",
+  "};",
+  "for (const transform of transforms) transform(editor);",
+  "await cleanup?.();",
+  "console.log(JSON.stringify(editor.list().map(({ id, path, content }) => ({ id, path, hasContent: content.length > 0 }))));",
   "",
 ].join("\n");
 
@@ -181,6 +205,7 @@ interface ArtifactManifest {
   readonly keywords?: readonly string[];
   readonly publishConfig?: Readonly<Record<string, string>>;
   readonly dependencies?: Readonly<Record<string, string>>;
+  readonly peerDependencies?: Readonly<Record<string, string>>;
   readonly scripts?: Readonly<Record<string, string>>;
 }
 
@@ -396,23 +421,30 @@ describe("local package artifact", () => {
     expect(invalid.stdout).not.toContain("Missing severity metadata");
   });
 
-  test("registers the installed skill directory on the live OpenCode config", () => {
-    const checkPath = join(pluginsDir, "config-check.ts");
+  test("registers the installed skills through the host skill transform", () => {
+    const checkPath = join(pluginsDir, "skill-check.ts");
 
-    writeFileSync(checkPath, CONFIG_HOOK_CHECK);
+    writeFileSync(checkPath, SKILL_TRANSFORM_CHECK);
 
     const output = execFileSync("bun", [checkPath], {
       cwd: pluginsDir,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
     });
-    const config = JSON.parse(output) as {
-      readonly skills?: { readonly paths?: readonly string[] };
-    };
+    const skills = JSON.parse(output) as ReadonlyArray<{
+      readonly id: string;
+      readonly path: string;
+      readonly hasContent: boolean;
+    }>;
     const installedSkills = join(opencodeDir, "node_modules", PLUGIN_PACKAGE_NAME, "skills");
-    const expected = [join(installedSkills, "jevguard-rules"), join(installedSkills, "jev-init")];
 
-    expect(config.skills?.paths?.map(toPosix)).toEqual(expected.map(toPosix));
+    expect(skills.map((skill) => skill.id)).toEqual(["jevguard-rules", "jev-init"]);
+    expect(skills.map((skill) => toPosix(skill.path))).toEqual(
+      ["jevguard-rules", "jev-init"].map((name) =>
+        toPosix(join(installedSkills, name, "SKILL.md")),
+      ),
+    );
+    expect(skills.every((skill) => skill.hasContent)).toBe(true);
   });
 
   test("publishes the exact public manifest with only runtime dependencies", () => {
@@ -435,6 +467,7 @@ describe("local package artifact", () => {
     expect(manifest.bugs).toEqual(EXPECTED_BUGS);
     expect(manifest.publishConfig).toEqual(EXPECTED_PUBLISH_CONFIG);
     expect(manifest.dependencies).toEqual(EXPECTED_RUNTIME_DEPENDENCIES);
+    expect(manifest.peerDependencies).toEqual(EXPECTED_PEER_DEPENDENCIES);
     expect(manifest.scripts).toBeUndefined();
 
     const serialized = JSON.stringify(manifest);
@@ -493,11 +526,13 @@ describe("local package artifact", () => {
     });
     const result = JSON.parse(output) as {
       readonly names: readonly string[];
-      readonly type: string;
+      readonly id: string;
+      readonly setup: string;
     };
 
-    expect(result.names).toEqual(["JevGuardPlugin"]);
-    expect(result.type).toBe("function");
+    expect(result.names).toEqual(["default"]);
+    expect(result.id).toBe("jevguard");
+    expect(result.setup).toBe("function");
   });
 
   test("runs the installed CLI through the Bun bin mapping from .opencode", () => {

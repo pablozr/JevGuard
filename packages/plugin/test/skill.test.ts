@@ -4,9 +4,12 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, describe, expect, test } from "vitest";
-import type { PluginInput } from "@opencode-ai/plugin";
-import { JevGuardPlugin } from "../src/index";
-import { appendSkillPath, createConfigHook } from "../src/skills/config-hook";
+import {
+  type BundledSkill,
+  frontmatterDescription,
+  readBundledSkills,
+  registerSkills,
+} from "../src/skills/register-skills";
 import { summarizeRules } from "../src/skills/jevguard-rules/rules-summary";
 import {
   BUNDLED_SKILL_NAMES,
@@ -226,20 +229,6 @@ function parseFrontmatter(text: string): Frontmatter {
   const description = /^description:\s*(.+)$/m.exec(body)?.[1]?.trim() ?? "";
 
   return { name, description };
-}
-
-function skillPaths(config: object): readonly string[] {
-  const skills = Reflect.get(config, "skills");
-
-  if (typeof skills !== "object" || skills === null) {
-    return [];
-  }
-
-  const paths = Reflect.get(skills, "paths");
-
-  return Array.isArray(paths)
-    ? paths.filter((entry): entry is string => typeof entry === "string")
-    : [];
 }
 
 describe("jevguard-rules summary", () => {
@@ -770,70 +759,148 @@ describe("jev-init validator CLI", () => {
   });
 });
 
-describe("jevguard-rules config hook", () => {
-  const directory = resolve("skills", "jevguard-rules");
+interface FakeSkill {
+  id: string;
+  name: string;
+  description?: string;
+  path: string;
+  content: string;
+}
 
-  test("adds a new skills.paths entry when skills is absent", () => {
-    const config: Record<string, unknown> = {};
+/** Skill editor fake: the host hands a fresh editor to every transform run. */
+class FakeSkillEditor {
+  readonly skills = new Map<string, FakeSkill>();
+  readonly operations: string[] = [];
 
-    appendSkillPath(config, directory);
+  list(): FakeSkill[] {
+    return [...this.skills.values()];
+  }
 
-    expect(skillPaths(config)).toEqual([directory]);
+  get(id: string): FakeSkill | undefined {
+    return this.skills.get(id);
+  }
+
+  add(skill: FakeSkill): void {
+    this.operations.push(`add:${skill.id}`);
+    this.skills.set(skill.id, { ...skill });
+  }
+
+  update(id: string, update: (skill: FakeSkill) => void): void {
+    const current = this.skills.get(id);
+
+    if (current === undefined) {
+      throw new Error(`unknown skill ${id}`);
+    }
+
+    this.operations.push(`update:${id}`);
+    update(current);
+  }
+
+  remove(id: string): void {
+    this.skills.delete(id);
+  }
+}
+
+type SkillTransform = (editor: FakeSkillEditor) => void;
+
+function fakeSkillContext(): {
+  readonly context: Parameters<typeof registerSkills>[0];
+  readonly transforms: SkillTransform[];
+} {
+  const transforms: SkillTransform[] = [];
+  const context = {
+    skill: {
+      transform: async (transform: SkillTransform) => {
+        transforms.push(transform);
+
+        return { dispose: async () => undefined };
+      },
+    },
+  } as unknown as Parameters<typeof registerSkills>[0];
+
+  return { context, transforms };
+}
+
+const BUNDLED: readonly BundledSkill[] = [
+  {
+    name: "jevguard-rules",
+    description: "Rules skill.",
+    path: "/skills/jevguard-rules/SKILL.md",
+    content: "---\nname: jevguard-rules\ndescription: Rules skill.\n---\nBody",
+  },
+  {
+    name: "jev-init",
+    description: undefined,
+    path: "/skills/jev-init/SKILL.md",
+    content: "Body only",
+  },
+];
+
+describe("bundled skill registration", () => {
+  test("reads the frontmatter description, or undefined without one", () => {
+    expect(frontmatterDescription("---\nname: x\ndescription: Does x.\n---\nBody")).toBe("Does x.");
+    expect(frontmatterDescription("---\r\nname: x\r\ndescription: CRLF.\r\n---\r\n")).toBe("CRLF.");
+    expect(frontmatterDescription("---\nname: x\n---\nBody")).toBeUndefined();
+    expect(frontmatterDescription("---\ndescription:\n---\n")).toBeUndefined();
+    expect(frontmatterDescription("description: outside frontmatter")).toBeUndefined();
   });
 
-  test("appends without duplicating and preserves existing paths and keys", () => {
-    const config: Record<string, unknown> = {
-      skills: { paths: ["/existing/skill"], urls: ["https://example.com/skills"] },
-      model: "openai/gpt-5.6-terra",
-    };
+  test("adds each skill to a fresh editor with its SKILL.md path and content", async () => {
+    const { context, transforms } = fakeSkillContext();
 
-    appendSkillPath(config, directory);
-    appendSkillPath(config, directory);
+    await registerSkills(context, BUNDLED);
 
-    expect(skillPaths(config)).toEqual(["/existing/skill", directory]);
-    expect(Reflect.get(Reflect.get(config, "skills") as object, "urls")).toEqual([
-      "https://example.com/skills",
+    const editor = new FakeSkillEditor();
+
+    for (const transform of transforms) {
+      transform(editor);
+    }
+
+    expect(editor.operations).toEqual(["add:jevguard-rules", "add:jev-init"]);
+    expect(editor.get("jevguard-rules")).toEqual({
+      id: "jevguard-rules",
+      name: "jevguard-rules",
+      description: "Rules skill.",
+      path: "/skills/jevguard-rules/SKILL.md",
+      content: BUNDLED[0]?.content,
+    });
+    expect(editor.get("jev-init")).not.toHaveProperty("description");
+  });
+
+  test("replaces an existing skill of the same id instead of duplicating it", async () => {
+    const { context, transforms } = fakeSkillContext();
+
+    await registerSkills(context, BUNDLED);
+
+    const editor = new FakeSkillEditor();
+
+    editor.skills.set("jevguard-rules", {
+      id: "jevguard-rules",
+      name: "jevguard-rules",
+      path: "/stale/SKILL.md",
+      content: "stale",
+    });
+
+    for (const transform of transforms) {
+      transform(editor);
+      transform(editor);
+    }
+
+    expect(editor.list()).toHaveLength(2);
+    expect(editor.operations).toEqual([
+      "update:jevguard-rules",
+      "add:jev-init",
+      "update:jevguard-rules",
+      "update:jev-init",
     ]);
-    expect(Reflect.get(config, "model")).toBe("openai/gpt-5.6-terra");
+    expect(editor.get("jevguard-rules")?.path).toBe("/skills/jevguard-rules/SKILL.md");
+    expect(editor.get("jevguard-rules")?.content).toBe(BUNDLED[0]?.content);
   });
 
-  test("leaves an unexpected skills shape untouched", () => {
-    const config: Record<string, unknown> = { skills: "not-an-object" };
+  test("omits a directory without a readable SKILL.md", async () => {
+    const missing = join(tmpdir(), "jevguard-missing-skill-dir");
 
-    appendSkillPath(config, directory);
-
-    expect(Reflect.get(config, "skills")).toBe("not-an-object");
-  });
-
-  test("leaves an unexpected paths shape untouched", () => {
-    const config: Record<string, unknown> = { skills: { paths: "not-an-array" } };
-
-    appendSkillPath(config, directory);
-
-    expect(Reflect.get(Reflect.get(config, "skills") as object, "paths")).toBe("not-an-array");
-  });
-
-  test("ignores a non-object config without throwing", () => {
-    expect(() => appendSkillPath(null, directory)).not.toThrow();
-    expect(() => appendSkillPath("config", directory)).not.toThrow();
-  });
-
-  test("does nothing when no installed skill directory is known", async () => {
-    const config: Record<string, unknown> = {};
-
-    await createConfigHook({ skillDirectories: [] })(config);
-
-    expect(skillPaths(config)).toEqual([]);
-  });
-
-  test("registers every provided skill directory in order", async () => {
-    const config: Record<string, unknown> = {};
-    const first = resolve("skills", "jevguard-rules");
-    const second = resolve("skills", "jev-init");
-
-    await createConfigHook({ skillDirectories: [first, second] })(config);
-
-    expect(skillPaths(config)).toEqual([first, second]);
+    await expect(readBundledSkills([missing])).resolves.toEqual([]);
   });
 });
 
@@ -874,27 +941,21 @@ describe("bundled skill directories", () => {
   });
 });
 
-describe("JevGuardPlugin skill registration", () => {
-  test("adds every installed skill directory to the live config", async () => {
-    const plugin = JevGuardPlugin;
-    const hooks = await plugin({
-      client: {},
-      worktree: process.cwd(),
-    } as unknown as PluginInput);
-    const config: object = {};
+describe("installed skill reading", () => {
+  test("reads both installed skills with their SKILL.md path, content, and description", async () => {
+    const moduleUrl = pathToFileURL(join(PACKAGE_DIR, "src", "plugin.ts")).href;
+    const skills = await readBundledSkills(resolveInstalledSkillDirectories(moduleUrl));
 
-    expect(typeof hooks.config).toBe("function");
+    expect(skills.map((skill) => skill.name)).toEqual(["jevguard-rules", "jev-init"]);
 
-    await hooks.config?.(config);
+    for (const skill of skills) {
+      const file = join(PACKAGE_DIR, "skills", skill.name, "SKILL.md");
+      const content = readFileSync(file, "utf8");
 
-    const expected = [
-      resolve(PACKAGE_DIR, "skills", "jevguard-rules"),
-      resolve(PACKAGE_DIR, "skills", "jev-init"),
-    ];
-
-    expect(skillPaths(config).map((path) => path.replaceAll("\\", "/"))).toEqual(
-      expected.map((path) => path.replaceAll("\\", "/")),
-    );
+      expect(skill.path).toBe(file);
+      expect(skill.content).toBe(content);
+      expect(skill.description).toBe(parseFrontmatter(content).description);
+    }
   });
 });
 

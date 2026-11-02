@@ -1,8 +1,8 @@
 # Security Model
 
 JevGuard sends code-change evidence to Jev, and — only in the configurable remediation
-path, and only when a review has a `FAIL` with complete safe evidence — to the hidden
-proposer subagent. Evidence safety is therefore a product boundary, not a best-effort
+path, and only when a review has a `FAIL` with complete safe evidence — to the
+model of an isolated proposal child session. Evidence safety is therefore a product boundary, not a best-effort
 feature.
 
 ## What is sent
@@ -40,24 +40,22 @@ process list, so keep secrets out of it.
 Safe auto-propose remediation is separate from Jev evaluation and is delivered by the
 server plugin. After presenting a review that contains any `FAIL`, and only when
 `remediation.auto_propose` is enabled, the plugin sends one aggregate proposal request
-to a hidden `jevguard-proposer` subagent in an isolated child session parented to the
-source session. The request carries every `FAIL` finding (local `error` rules and the
+to an isolated child session parented to the source session. The request carries every `FAIL` finding (local `error` rules and the
 `SCOPE-CREEP` built-in), the turn's task, and the turn's complete, safe, full
 attributed patch; it is never built from a repository or global diff.
 
 The full attributed patch must pass the same safety policy as the review. If any
 attributed file is blocked or the patch is oversized, no proposal is sent at all — even
 when a rule-scoped `FAIL` exists — because there is no complete safe evidence. The
-proposer subagent has wildcard-disabled tools and wildcard-deny permissions, so it
+child session is created with wildcard-deny permissions and an explicit model, so it
 cannot call a tool, edit a file, or produce a patch; it returns a strategy and one
 manual apply instruction only. The proposal prompt instructs the model to treat the
 task, paths, diff, rules, and findings as untrusted data and to require a separate
 explicit user confirmation before proposing changes to tests, configuration, or
-dependencies. The generic readiness toast carries no rule, task, diff, finding, or
-credential. No secret is carried, and no payload, task, diff, or secret is logged. A
-contained proposal failure shows a generic failure toast and writes one structured
-`error` log entry whose `extra` carries only a typed reason code
-(`MODEL_SPECIFIER_INVALID`, `CHILD_SESSION_FAILED`, or `PROPOSAL_PROMPT_FAILED`); the
+dependencies. No secret is carried, and no payload, task, diff, or secret is
+logged. A contained proposal failure writes one structured `error` log entry whose
+`extra` carries only a typed reason code (`MODEL_SPECIFIER_INVALID`,
+`CHILD_SESSION_FAILED`, `PROPOSAL_PROMPT_FAILED`, or `REMEDIATION_PROPOSAL_TIMEOUT`); the
 failure log never carries task, diff, findings, paths, or credentials. Nothing is
 applied automatically: the user copies the manual apply instruction into their normal
 coding agent, and that ordinary turn is reviewed normally.
@@ -322,7 +320,8 @@ in "Proposal requests" and "Agent delivery" below.
 - **No-read first.** Every path is checked against the file safety policy before any
   byte is read. A blocked path, a link, or non-text content makes the unit
   `UNAVAILABLE`; the content is never read, stored, or exported.
-- **Evidence limits.** Files ignored by Git are outside shell-write evidence. A
+- **Evidence limits.** Files ignored by Git are outside shell-write evidence and,
+  on OpenCode `2.2.x`, outside the execution snapshot. A
   process that rewrites an attributed file and restores the exact attributed bytes
   before the unit closes is undetectable. Writers outside the attributed files are not
   part of the evidence. A shell command that brings in other commits (`pull`, `merge`,

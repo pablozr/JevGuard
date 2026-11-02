@@ -1,38 +1,48 @@
 import type { Turn, TurnFile } from "@jevguard/core";
 
 /**
- * A single OpenCode message part. Attribution only reads `type:"text"` parts;
- * reasoning, tool, file, and metadata parts never contribute to the task.
+ * One OpenCode 2.2.x session context message, narrowed to what attribution reads.
+ * `type` is the host discriminator (`user`, `synthetic`, `assistant`, `idle`, ...);
+ * `text` is only read on `user`/`synthetic` inputs; `completed` is true for an
+ * assistant message with a completion time.
  */
-export interface OpenCodePart {
+export interface OpenCodeMessage {
+  readonly id: string;
   readonly type: string;
   readonly text?: string;
+  readonly metadata?: Readonly<Record<string, unknown>>;
+  readonly completed: boolean;
 }
 
-export interface OpenCodeMessageTime {
-  readonly created: number;
-  readonly completed?: number;
+/** One file of a working-tree diff against `HEAD`, as returned by `vcs.diff`. */
+export interface WorkingFileDiff {
+  readonly file: string;
+  readonly patch: string;
+  readonly more?: boolean;
 }
 
-export interface OpenCodeMessageInfo {
-  readonly id: string;
-  readonly role: "user" | "assistant";
-  readonly time?: OpenCodeMessageTime;
-  readonly parentID?: string;
-  readonly error?: unknown;
-  readonly summary?: unknown;
-}
+/** Bounded file content read from disk; `OVERSIZED` means over the per-file cap. */
+export type FileContent =
+  | { readonly kind: "TEXT"; readonly text: string }
+  | { readonly kind: "MISSING" }
+  | { readonly kind: "OVERSIZED" };
 
-export interface OpenCodeMessageRecord {
-  readonly info: OpenCodeMessageInfo;
-  readonly parts: readonly OpenCodePart[];
+/**
+ * Read port over the OpenCode 2.2.x plugin context. `snapshotWorking` reads the
+ * working-tree diff including untracked files; `readFiles` reads current contents
+ * relative to the project root; `parentSessionID` reads the session's parent, `null`
+ * for a top-level session. Every method rejects on a host failure.
+ */
+export interface OpenCodeSessionFacade {
+  listMessages(sessionID: string): Promise<readonly OpenCodeMessage[]>;
+  snapshotWorking(): Promise<readonly WorkingFileDiff[]>;
+  readFiles(paths: readonly string[]): Promise<ReadonlyMap<string, FileContent>>;
+  parentSessionID(sessionID: string): Promise<string | null>;
 }
 
 /**
- * Host file diff as returned by OpenCode V1.18.31. `patch` is present on the
- * current snapshot shape; older generated types expose `before`/`after` as full
- * file contents instead. Attribution prefers `patch` and conservatively rebuilds
- * a unified patch from `before`/`after` when it is absent.
+ * Host file diff shape accepted by `normalizeFileDiff`: a provided `patch` is used
+ * verbatim, otherwise a unified patch is rebuilt from full `before`/`after` content.
  */
 export interface OpenCodeFileDiff {
   readonly file?: string;
@@ -41,38 +51,31 @@ export interface OpenCodeFileDiff {
   readonly after?: string;
 }
 
-/**
- * Read port over the OpenCode session API. The concrete adapter unwraps the SDK
- * response and maps transport errors before returning.
- */
-export interface OpenCodeSessionFacade {
-  listMessages(input: { readonly sessionID: string }): Promise<readonly OpenCodeMessageRecord[]>;
-  fetchDiff(input: {
-    readonly sessionID: string;
-    readonly messageID: string;
-  }): Promise<readonly OpenCodeFileDiff[]>;
-}
-
-export interface AttributeTurnDependencies {
-  readonly facade: OpenCodeSessionFacade;
-  readonly deduplicator: TurnDeduplicator;
-}
-
 export type PatchNormalization =
   | { readonly status: "PATCH"; readonly file: TurnFile }
   | { readonly status: "EMPTY" }
   | { readonly status: "INCOMPLETE" };
 
+/**
+ * Why an execution could not be attributed. `MISSING_TURN_START`: no start snapshot
+ * (the plugin loaded mid-execution). `BOUNDARY_RACE`: a new execution started before
+ * this one was consumed. `CONCURRENT_SESSIONS`: another top-level session ran an
+ * execution in the same project at the same time. `INCOMPLETE_FILE_DIFF`: a cap was
+ * exceeded, the host truncated a patch, or a tool wrote a path the diff does not show.
+ */
 export type AttributionFailureReason =
   | "MESSAGE_READ_FAILURE"
-  | "MISSING_PARENT_MESSAGE"
+  | "MISSING_TASK_MESSAGE"
   | "EMPTY_TASK"
   | "DIFF_READ_FAILURE"
-  | "INCOMPLETE_FILE_DIFF";
+  | "INCOMPLETE_FILE_DIFF"
+  | "MISSING_TURN_START"
+  | "BOUNDARY_RACE"
+  | "CONCURRENT_SESSIONS";
 
 /**
- * Outcome of reacting to an idle status. `ATTRIBUTED` is the only state that
- * dispatches an evaluation; `UNAVAILABLE` is never collapsed into a verdict.
+ * Outcome of a succeeded execution. `ATTRIBUTED` is the only state that dispatches an
+ * evaluation; `UNAVAILABLE` is never collapsed into a verdict.
  */
 export type TurnAttribution =
   | { readonly status: "ATTRIBUTED"; readonly turn: Turn }
@@ -81,9 +84,8 @@ export type TurnAttribution =
   | { readonly status: "NONE" };
 
 /**
- * In-memory guard against repeated idle events for one assistant message. An
- * implementation must only mark after a turn has been attributed so a transient
- * failure can be retried.
+ * In-memory guard against reviewing one assistant message twice. An implementation
+ * must only mark after a turn has been attributed.
  */
 export interface TurnDeduplicator {
   hasProcessed(assistantMessageID: string): boolean;

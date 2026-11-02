@@ -7,7 +7,7 @@ export const BUNDLED_SKILL_NAMES = ["jevguard-rules", "jev-init"] as const;
 
 export type BundledSkillName = (typeof BUNDLED_SKILL_NAMES)[number];
 
-const SKILL_ENTRY_FILE = "SKILL.md";
+export const SKILL_ENTRY_FILE = "SKILL.md";
 const SKILL_DIRECTORY_PREFIXES = ["./skills/", "../skills/"];
 
 /**

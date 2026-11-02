@@ -1,25 +1,32 @@
 export {
-  attributeTurn,
+  attributeSnapshotDiff,
+  captureSnapshot,
   createOpenCodeSessionFacade,
-  extractTask,
-  findCompletedAssistant,
-  findDirectParentRecord,
+  createTurnTracker,
+  executionTask,
   InMemoryTurnDeduplicator,
-  isCompletedAssistantMessage,
+  locateExecution,
+  MAX_OPEN_SNAPSHOTS,
+  MAX_SNAPSHOT_FILE_BYTES,
+  MAX_SNAPSHOT_TOTAL_BYTES,
   normalizeFileDiff,
+  writtenPaths,
 } from "./attribution";
 export type {
-  AttributeTurnDependencies,
+  AttributionContext,
   AttributionFailureReason,
+  FileContent,
+  LocatedExecution,
   OpenCodeFileDiff,
-  OpenCodeMessageInfo,
-  OpenCodeMessageRecord,
-  OpenCodeMessageTime,
-  OpenCodePart,
+  OpenCodeMessage,
   OpenCodeSessionFacade,
   PatchNormalization,
   TurnAttribution,
   TurnDeduplicator,
+  TurnTracker,
+  TurnTrackerDependencies,
+  WorkingFileDiff,
+  WorkingSnapshot,
 } from "./attribution";
 export {
   addPluginEntry,
@@ -47,10 +54,11 @@ export type {
 } from "./opencode-config";
 export {
   countSummary,
+  createConsoleLogWriter,
+  createNullSessionNavigator,
+  createNullToastSink,
   createOpenCodeLogSink,
-  createOpenCodePresentationClient,
-  createOpenCodeSessionNavigator,
-  createOpenCodeToastSink,
+  createOperationalLogSink,
   createRemediationFailureLogSink,
   createRemediationNotifier,
   createReviewPresenter,
@@ -60,16 +68,17 @@ export {
   toReviewToast,
   toastVariantFor,
 } from "./presentation";
-export { createOpenCodeProposalSessionFacade } from "./remediation";
-export type { ProposalModel, ProposalPromptInput, ProposalSessionFacade } from "./remediation";
+export {
+  createOpenCodeProposalSessionFacade,
+  PROPOSER_PERMISSIONS,
+  registerProposalRetryGuard,
+} from "./remediation";
+export type { ProposalContext, ProposalModel, ProposalSessionFacade } from "./remediation";
 export type {
-  OpenCodeLogInput,
-  OpenCodeLogResult,
-  OpenCodePresentationClient,
-  OpenCodeSessionSelectInput,
-  OpenCodeSessionSelectResult,
-  OpenCodeToastInput,
-  OpenCodeToastResult,
+  OpenCodeLogRecord,
+  OpenCodeLogWriter,
+  OperationalEvent,
+  OperationalLogSink,
   PresentationDelivery,
   PresentationPorts,
   ProposalFailureReason,

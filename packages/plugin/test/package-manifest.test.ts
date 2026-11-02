@@ -15,6 +15,7 @@ interface PackageManifest {
   readonly exports?: Readonly<Record<string, string>>;
   readonly dependencies?: Readonly<Record<string, string>>;
   readonly devDependencies?: Readonly<Record<string, string>>;
+  readonly peerDependencies?: Readonly<Record<string, string>>;
   readonly scripts?: Readonly<Record<string, string>>;
 }
 
@@ -52,7 +53,7 @@ describe("plugin development manifest", () => {
     const engines = readManifest().engines;
 
     expect(engines?.bun).toBe(">=1.1.0");
-    expect(engines?.opencode).toBe(">=1.18.32 <2");
+    expect(engines?.opencode).toBe(">=2.2.2 <2.3");
   });
 
   test("keeps TypeScript entrypoints for workspace development", () => {
@@ -74,7 +75,8 @@ describe("plugin development manifest", () => {
       "@jevguard/node-infra": "workspace:*",
       "@jevguard/opencode-adapter": "workspace:*",
     });
-    expect(manifest.devDependencies).toEqual({ "@opencode-ai/plugin": "1.18.32" });
+    expect(manifest.devDependencies).toEqual({ "@opencode/plugin": "2.2.2" });
+    expect(manifest.peerDependencies).toEqual({ "@opencode/plugin": "2.2.2", effect: "4.0.6" });
   });
 
   test("declares no npm lifecycle scripts", () => {

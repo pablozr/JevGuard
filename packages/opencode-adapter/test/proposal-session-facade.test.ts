@@ -1,131 +1,147 @@
-import { createOpencodeClient, type OpencodeClient } from "@opencode-ai/sdk/client";
 import { describe, expect, test } from "vitest";
-import { createOpenCodeProposalSessionFacade } from "../src/index";
+import {
+  createOpenCodeProposalSessionFacade,
+  PROPOSER_PERMISSIONS,
+  type ProposalContext,
+  registerProposalRetryGuard,
+} from "../src/index";
 
-interface CapturedRequest {
+interface RecordedCall {
   readonly method: string;
-  readonly path: string;
-  readonly body: string;
+  readonly input: unknown;
 }
 
-interface RecordingClient {
-  readonly client: OpencodeClient;
-  readonly requests: CapturedRequest[];
+interface RetryEvent {
+  sessionID: string;
+  decision?: unknown;
 }
 
-function recordingClient(respond: (request: Request) => Promise<Response>): RecordingClient {
-  const requests: CapturedRequest[] = [];
+type RetryHandler = (retry: RetryEvent) => void;
 
-  const client = createOpencodeClient({
-    baseUrl: "http://opencode.test",
-    fetch: async (request) => {
-      const url = new URL(request.url);
-      const body = request.method === "GET" ? "" : await request.text();
+function fakeContext(options: { model?: unknown; fail?: boolean } = {}) {
+  const calls: RecordedCall[] = [];
+  const handlers: RetryHandler[] = [];
+  const record = (method: string) => async (input: unknown) => {
+    calls.push({ method, input });
 
-      requests.push({ method: request.method, path: url.pathname, body });
+    if (options.fail === true) {
+      throw new Error("host unavailable");
+    }
 
-      return respond(request);
+    switch (method) {
+      case "get":
+        return { id: "ses_1", ...(options.model === undefined ? {} : { model: options.model }) };
+      case "create":
+        return { id: "ses_child" };
+      default:
+        return undefined;
+    }
+  };
+  const context = {
+    session: {
+      get: record("get"),
+      create: record("create"),
+      prompt: record("prompt"),
+      interrupt: record("interrupt"),
+      hook: async (name: string, handler: RetryHandler) => {
+        calls.push({ method: "hook", input: name });
+        handlers.push(handler);
+
+        return { dispose: async () => undefined };
+      },
     },
-  });
+  } as unknown as ProposalContext;
 
-  return { client, requests };
+  return { context, calls, handlers };
 }
 
-function jsonResponse(body: unknown): Response {
-  return new Response(JSON.stringify(body), {
-    status: 200,
-    headers: { "content-type": "application/json" },
-  });
-}
-
-function errorResponse(status: number): Response {
-  return new Response(JSON.stringify({ name: "BadRequestError", data: { message: "bad" } }), {
-    status,
-    headers: { "content-type": "application/json" },
-  });
-}
-
-const PROMPT = {
-  sessionID: "ses_child",
-  agent: "jevguard-proposer",
-  model: { providerID: "opencode", modelID: "gpt-5.6-luna" },
-  system: "system contract",
-  tools: { "*": false },
-  text: "proposal body",
-} as const;
+const MODEL = { providerID: "anthropic", modelID: "claude-sonnet-5-5" } as const;
 
 describe("createOpenCodeProposalSessionFacade", () => {
-  test("creates a child session under the parent and returns its id", async () => {
-    const { client, requests } = recordingClient(() =>
-      Promise.resolve(jsonResponse({ id: "ses_child", parentID: "ses_1" })),
-    );
+  test("reads the origin session model as provider and model id", async () => {
+    const { context, calls } = fakeContext({
+      model: { providerID: "anthropic", id: "claude-sonnet-5-5", variant: "high" },
+    });
 
-    const sessionID = await createOpenCodeProposalSessionFacade(client).createChildSession({
+    await expect(
+      createOpenCodeProposalSessionFacade(context).originModel("ses_1"),
+    ).resolves.toEqual(MODEL);
+    expect(calls).toEqual([{ method: "get", input: { sessionID: "ses_1" } }]);
+  });
+
+  test("returns null when the origin session has no model", async () => {
+    const { context } = fakeContext();
+
+    await expect(
+      createOpenCodeProposalSessionFacade(context).originModel("ses_1"),
+    ).resolves.toBeNull();
+  });
+
+  test("creates the child with the explicit model, deny-all permissions, and no agent", async () => {
+    const { context, calls } = fakeContext();
+
+    const sessionID = await createOpenCodeProposalSessionFacade(context).createChildSession({
       parentID: "ses_1",
       title: "JevGuard remediation proposal",
+      model: MODEL,
     });
 
     expect(sessionID).toBe("ses_child");
-    expect(requests).toHaveLength(1);
-    expect(requests[0]?.method).toBe("POST");
-    expect(requests[0]?.path).toBe("/session");
-    expect(JSON.parse(requests[0]?.body ?? "{}")).toEqual({
-      parentID: "ses_1",
-      title: "JevGuard remediation proposal",
-    });
+    expect(calls).toEqual([
+      {
+        method: "create",
+        input: {
+          parentID: "ses_1",
+          title: "JevGuard remediation proposal",
+          model: { providerID: "anthropic", id: "claude-sonnet-5-5" },
+          permissions: [{ action: "*", resource: "*", effect: "deny" }],
+        },
+      },
+    ]);
+    expect(PROPOSER_PERMISSIONS).toEqual([{ action: "*", resource: "*", effect: "deny" }]);
   });
 
-  test("prompts the child session with the explicit agent, model, system, and disabled tools", async () => {
-    const { client, requests } = recordingClient(() =>
-      Promise.resolve(jsonResponse({ info: { id: "msg_1" }, parts: [] })),
-    );
+  test("prompts with text only and interrupts by session id", async () => {
+    const { context, calls } = fakeContext();
+    const facade = createOpenCodeProposalSessionFacade(context);
 
-    await createOpenCodeProposalSessionFacade(client).prompt(PROMPT);
+    await facade.prompt({ sessionID: "ses_child", text: "proposal body" });
+    await facade.interrupt("ses_child");
 
-    expect(requests).toHaveLength(1);
-    expect(requests[0]?.method).toBe("POST");
-    expect(requests[0]?.path).toBe("/session/ses_child/message");
-    expect(JSON.parse(requests[0]?.body ?? "{}")).toEqual({
-      agent: "jevguard-proposer",
-      model: { providerID: "opencode", modelID: "gpt-5.6-luna" },
-      system: "system contract",
-      tools: { "*": false },
-      parts: [{ type: "text", text: "proposal body" }],
-    });
+    expect(calls).toEqual([
+      { method: "prompt", input: { sessionID: "ses_child", text: "proposal body" } },
+      { method: "interrupt", input: { sessionID: "ses_child" } },
+    ]);
   });
 
-  test("omits the model from the prompt body when it is null so the host applies its default", async () => {
-    const { client, requests } = recordingClient(() =>
-      Promise.resolve(jsonResponse({ info: { id: "msg_1" }, parts: [] })),
-    );
-
-    await createOpenCodeProposalSessionFacade(client).prompt({ ...PROMPT, model: null });
-
-    expect(requests).toHaveLength(1);
-    expect(JSON.parse(requests[0]?.body ?? "{}")).toEqual({
-      agent: "jevguard-proposer",
-      system: "system contract",
-      tools: { "*": false },
-      parts: [{ type: "text", text: "proposal body" }],
-    });
-  });
-
-  test("rejects createChildSession when the SDK resolves with an error and no data", async () => {
-    const { client } = recordingClient(() => Promise.resolve(errorResponse(400)));
+  test("propagates host failures to the caller", async () => {
+    const { context } = fakeContext({ fail: true });
+    const facade = createOpenCodeProposalSessionFacade(context);
 
     await expect(
-      createOpenCodeProposalSessionFacade(client).createChildSession({
-        parentID: "ses_1",
-        title: "proposal",
-      }),
-    ).rejects.toBeInstanceOf(Error);
-  });
-
-  test("rejects prompt when the SDK resolves with an error and no data", async () => {
-    const { client } = recordingClient(() => Promise.resolve(errorResponse(404)));
-
-    await expect(createOpenCodeProposalSessionFacade(client).prompt(PROMPT)).rejects.toBeInstanceOf(
-      Error,
+      facade.createChildSession({ parentID: "ses_1", title: "proposal", model: MODEL }),
+    ).rejects.toThrow("host unavailable");
+    await expect(facade.prompt({ sessionID: "ses_child", text: "x" })).rejects.toThrow(
+      "host unavailable",
     );
+  });
+});
+
+describe("registerProposalRetryGuard", () => {
+  test("disables retry only for proposer child sessions", async () => {
+    const { context, calls, handlers } = fakeContext();
+
+    await registerProposalRetryGuard(context, (sessionID) => sessionID === "ses_child");
+
+    expect(calls).toEqual([{ method: "hook", input: "retry" }]);
+
+    const child: RetryEvent = { sessionID: "ses_child" };
+    const other: RetryEvent = { sessionID: "ses_1" };
+
+    handlers[0]?.(child);
+    handlers[0]?.(other);
+
+    expect(child.decision).toEqual({ retry: false });
+    expect(other.decision).toBeUndefined();
   });
 });

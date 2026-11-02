@@ -18,24 +18,15 @@ import {
 } from "@jevguard/node-infra";
 import { describe, expect, test } from "vitest";
 import {
+  createConsoleLogWriter,
+  createNullToastSink,
   createOpenCodeLogSink,
-  createOpenCodeToastSink,
   createReviewPresenter,
   displayOutcome,
   logLevelFor,
   toReviewToast,
 } from "../src/index";
-import type {
-  OpenCodeLogInput,
-  OpenCodeLogResult,
-  OpenCodePresentationClient,
-  OpenCodeSessionSelectInput,
-  OpenCodeSessionSelectResult,
-  OpenCodeToastInput,
-  OpenCodeToastResult,
-  ToastSink,
-  ToastVariant,
-} from "../src/index";
+import type { OpenCodeLogRecord, OpenCodeLogWriter, ToastSink, ToastVariant } from "../src/index";
 
 const TURN_ID = "turn-1";
 
@@ -172,49 +163,17 @@ class FakeToastSink implements ToastSink {
   }
 }
 
-class FakeOpenCodeClient implements OpenCodePresentationClient {
-  logResult: OpenCodeLogResult = {};
-  toastResult: OpenCodeToastResult = {};
-  sessionSelectResult: OpenCodeSessionSelectResult = {};
-  logError: Error | null = null;
-  toastError: Error | null = null;
-  sessionSelectError: Error | null = null;
-  readonly logCalls: OpenCodeLogInput[] = [];
-  readonly toastCalls: OpenCodeToastInput[] = [];
-  readonly sessionSelectCalls: OpenCodeSessionSelectInput[] = [];
+class FakeLogWriter implements OpenCodeLogWriter {
+  error: Error | null = null;
+  readonly calls: OpenCodeLogRecord[] = [];
 
-  readonly app = {
-    log: (input: OpenCodeLogInput): Promise<OpenCodeLogResult> => {
-      this.logCalls.push(input);
+  write(record: OpenCodeLogRecord): void {
+    this.calls.push(record);
 
-      if (this.logError !== null) {
-        return Promise.reject(this.logError);
-      }
-
-      return Promise.resolve(this.logResult);
-    },
-  };
-
-  readonly tui = {
-    showToast: (input: OpenCodeToastInput): Promise<OpenCodeToastResult> => {
-      this.toastCalls.push(input);
-
-      if (this.toastError !== null) {
-        return Promise.reject(this.toastError);
-      }
-
-      return Promise.resolve(this.toastResult);
-    },
-    selectSession: (input: OpenCodeSessionSelectInput): Promise<OpenCodeSessionSelectResult> => {
-      this.sessionSelectCalls.push(input);
-
-      if (this.sessionSelectError !== null) {
-        return Promise.reject(this.sessionSelectError);
-      }
-
-      return Promise.resolve(this.sessionSelectResult);
-    },
-  };
+    if (this.error !== null) {
+      throw this.error;
+    }
+  }
 }
 
 const mixedResults = (): RuleReviewResult[] => [
@@ -561,14 +520,14 @@ describe("review presenter", () => {
 
 describe("OpenCode sinks", () => {
   test("sends the exact aggregate extra and level for a mixed review", async () => {
-    const client = new FakeOpenCodeClient();
+    const client = new FakeLogWriter();
     const sink = createOpenCodeLogSink(client);
 
     const status = await sink.write(toReviewLogEntry(reviewOf(mixedResults())));
 
     expect(status).toBe("DELIVERED");
-    expect(client.logCalls).toHaveLength(1);
-    expect(client.logCalls[0]?.body).toEqual({
+    expect(client.calls).toHaveLength(1);
+    expect(client.calls[0]).toEqual({
       service: "jevguard",
       level: "error",
       message: `JevGuard FAIL for turn ${TURN_ID}`,
@@ -618,12 +577,12 @@ describe("OpenCode sinks", () => {
   });
 
   test("sends kind and check identity for a built-in result", async () => {
-    const client = new FakeOpenCodeClient();
+    const client = new FakeLogWriter();
     const sink = createOpenCodeLogSink(client);
 
     await sink.write(toReviewLogEntry(reviewOf([builtInResult("PASS", 0.2)])));
 
-    expect(client.logCalls[0]?.body.extra).toEqual({
+    expect(client.calls[0]?.extra).toEqual({
       turnId: TURN_ID,
       summary: {
         highestVerdict: "PASS",
@@ -644,12 +603,12 @@ describe("OpenCode sinks", () => {
   });
 
   test("sends only kind and outcome for a review-level result", async () => {
-    const client = new FakeOpenCodeClient();
+    const client = new FakeLogWriter();
     const sink = createOpenCodeLogSink(client);
 
     await sink.write(toReviewLogEntry(reviewOf([reviewUnavailableResult("INVALID_RULE")])));
 
-    expect(client.logCalls[0]?.body.extra).toEqual({
+    expect(client.calls[0]?.extra).toEqual({
       turnId: TURN_ID,
       summary: {
         highestVerdict: null,
@@ -661,59 +620,47 @@ describe("OpenCode sinks", () => {
   });
 
   test("logs UNAVAILABLE and SKIPPED at error and info levels", async () => {
-    const client = new FakeOpenCodeClient();
+    const client = new FakeLogWriter();
     const sink = createOpenCodeLogSink(client);
 
     await sink.write(toReviewLogEntry(reviewOf([unavailableResult("JEV_FAILURE")])));
     await sink.write(toReviewLogEntry(reviewOf([skippedResult("NO_SCOPE_MATCH")])));
 
-    expect(client.logCalls[0]?.body.level).toBe("error");
-    expect(client.logCalls[1]?.body.level).toBe("info");
+    expect(client.calls[0]?.level).toBe("error");
+    expect(client.calls[1]?.level).toBe("info");
   });
 
-  test("maps a log result error and a rejected log request to FAILED", async () => {
-    const errored = new FakeOpenCodeClient();
-    errored.logResult = { error: { message: "bad request" } };
-    expect(
-      await createOpenCodeLogSink(errored).write(toReviewLogEntry(reviewOf(mixedResults()))),
-    ).toBe("FAILED");
-
-    const rejected = new FakeOpenCodeClient();
-    rejected.logError = new Error("connection reset");
+  test("maps a throwing or rejecting writer to FAILED", async () => {
+    const rejected = new FakeLogWriter();
+    rejected.error = new Error("stream closed");
     expect(
       await createOpenCodeLogSink(rejected).write(toReviewLogEntry(reviewOf(mixedResults()))),
     ).toBe("FAILED");
+
+    const asyncRejected: OpenCodeLogWriter = { write: () => Promise.reject(new Error("closed")) };
+    expect(
+      await createOpenCodeLogSink(asyncRejected).write(toReviewLogEntry(reviewOf(mixedResults()))),
+    ).toBe("FAILED");
   });
 
-  test("sends a transient toast and never a session message", async () => {
-    const client = new FakeOpenCodeClient();
-    const sink = createOpenCodeToastSink(client);
+  test("prints one JSON line per record with the console writer", async () => {
+    const lines: string[] = [];
+    const sink = createOpenCodeLogSink(createConsoleLogWriter((line) => lines.push(line)));
 
-    const status = await sink.show(toReviewToast(reviewOf(mixedResults())));
+    await sink.write(toReviewLogEntry(reviewOf(mixedResults())));
 
-    expect(status).toBe("DELIVERED");
-    expect(client.toastCalls).toHaveLength(1);
-    expect(client.toastCalls[0]?.body).toEqual({
-      title: "JevGuard FAIL",
-      message: "pass 0 · warn 1 · fail 1 · skipped 1 · unavailable 1",
-      variant: "error",
-      duration: 5000,
+    expect(lines).toHaveLength(1);
+    expect(JSON.parse(lines[0] ?? "")).toMatchObject({
+      service: "jevguard",
+      level: "error",
+      message: `JevGuard FAIL for turn ${TURN_ID}`,
     });
-    expect("session" in client).toBe(false);
   });
 
-  test("maps a toast result error and a rejected toast request to FAILED", async () => {
-    const errored = new FakeOpenCodeClient();
-    errored.toastResult = { error: { message: "tui unavailable" } };
-    expect(
-      await createOpenCodeToastSink(errored).show(toReviewToast(reviewOf(mixedResults()))),
-    ).toBe("FAILED");
-
-    const rejected = new FakeOpenCodeClient();
-    rejected.toastError = new Error("connection reset");
-    expect(
-      await createOpenCodeToastSink(rejected).show(toReviewToast(reviewOf(mixedResults()))),
-    ).toBe("FAILED");
+  test("the 2.2.x toast sink is a no-op that reports DELIVERED", async () => {
+    expect(await createNullToastSink().show(toReviewToast(reviewOf(mixedResults())))).toBe(
+      "DELIVERED",
+    );
   });
 });
 

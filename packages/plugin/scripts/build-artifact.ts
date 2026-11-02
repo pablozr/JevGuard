@@ -68,6 +68,7 @@ interface SourceManifest {
   readonly homepage: string;
   readonly bugs: { readonly url: string };
   readonly engines: Readonly<Record<string, string>>;
+  readonly peerDependencies: Readonly<Record<string, string>>;
   readonly keywords: readonly string[];
 }
 
@@ -77,7 +78,8 @@ async function readSourceManifest(): Promise<SourceManifest> {
   return JSON.parse(text) as SourceManifest;
 }
 
-async function bundleEntries(): Promise<void> {
+/** Host peers (`@opencode/plugin`, `effect`) stay external: the host provides them. */
+async function bundleEntries(source: SourceManifest): Promise<void> {
   const result = await Bun.build({
     entrypoints: [
       join(SOURCE_DIR, "index.ts"),
@@ -94,7 +96,7 @@ async function bundleEntries(): Promise<void> {
     sourcemap: "none",
     minify: false,
     env: "disable",
-    external: Object.keys(RUNTIME_DEPENDENCIES),
+    external: [...Object.keys(RUNTIME_DEPENDENCIES), ...Object.keys(source.peerDependencies)],
     naming: "[dir]/[name].js",
   });
 
@@ -125,6 +127,7 @@ async function writeArtifactManifest(source: SourceManifest): Promise<void> {
     keywords: source.keywords,
     publishConfig: { access: "public", registry: "https://registry.npmjs.org" },
     dependencies: RUNTIME_DEPENDENCIES,
+    peerDependencies: source.peerDependencies,
   };
 
   await Bun.write(join(DIST_DIR, "package.json"), `${JSON.stringify(manifest, null, 2)}\n`);
@@ -151,7 +154,7 @@ async function main(): Promise<void> {
 
   const source = await readSourceManifest();
 
-  await bundleEntries();
+  await bundleEntries(source);
   await writeArtifactManifest(source);
   await copyDocs();
   await copySkills();

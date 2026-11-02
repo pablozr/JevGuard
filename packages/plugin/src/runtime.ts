@@ -1,22 +1,31 @@
 import { unavailableReview } from "@jevguard/core";
-import { attributeTurn } from "@jevguard/opencode-adapter";
-import { idleSessionID } from "./idle-event";
+import type { OperationalEvent, OperationalLogSink } from "@jevguard/opencode-adapter";
 import { presentReview } from "./present";
 import { reviewAttributedTurn } from "./review";
-import type { PluginEventInput, PluginRuntime, PluginRuntimeDependencies } from "./types";
+import { parseTurnEvent } from "./turn-event";
+import type { PluginRuntime, PluginRuntimeDependencies } from "./types";
 
 /**
- * Builds the plugin runtime for one initialization. The event hook resolves
- * immediately after scheduling: attribution and the dedupe mark stay serialized in
- * one FIFO queue, while the attributed review runs detached so policy, Jev,
+ * Builds the plugin runtime for one setup. Each lifecycle event is handled at once:
+ * snapshot capture, attribution, and discard stay serialized in one FIFO queue in
+ * event order, while the attributed review runs detached so policy, Jev,
  * presentation, and any automatic proposal never sit on the agent's critical path.
- * A session created by this plugin's own proposal is excluded before attribution, so
- * the child session's idle events can never be reviewed or propose again. `drain`
- * awaits all detached work and is the test-only handle the host never receives. There
- * is no command hook and no prompt, message mutation, or apply path.
+ *
+ * - `started` stamps the arrival generation synchronously, then captures the start
+ *   snapshot in the queue.
+ * - `succeeded` attributes the execution: an attributed turn is reviewed; an
+ *   unavailable one is presented as `MISSING_ATTRIBUTED_DIFF` and its typed reason is
+ *   logged.
+ * - `interrupted`/`failed` drop the snapshot and log `JevGuard skipped · <reason>`
+ *   (nested host subagents stay silent).
+ * - A proposer child session is never reviewed; its terminal events settle the
+ *   proposal waiting on it.
+ *
+ * There is no prompt, synthetic message, or apply path into the originating session.
  */
 export function createPluginRuntime(dependencies: PluginRuntimeDependencies): PluginRuntime {
-  let attributionTail: Promise<void> = Promise.resolve();
+  const { tracker } = dependencies;
+  let tail: Promise<void> = Promise.resolve();
   const backgroundJobs = new Set<Promise<void>>();
 
   function track(work: Promise<void>): void {
@@ -28,72 +37,93 @@ export function createPluginRuntime(dependencies: PluginRuntimeDependencies): Pl
     });
   }
 
-  function enqueueAttribution(sessionID: string): void {
-    const run = attributionTail.then(() => processIdle(sessionID));
-
-    attributionTail = run.then(ignore, ignore);
+  function enqueue(work: () => Promise<void>): void {
+    tail = tail.then(work).then(ignore, ignore);
   }
 
-  async function processIdle(sessionID: string): Promise<void> {
-    try {
-      if (dependencies.proposals.isChildSession(sessionID)) {
-        return;
-      }
-
-      const attribution = await attributeTurn(sessionID, {
-        facade: dependencies.facade,
-        deduplicator: dependencies.deduplicator,
-      });
-
-      switch (attribution.status) {
-        case "NONE":
-        case "ALREADY_PROCESSED":
-          return;
-        case "UNAVAILABLE":
-          track(
-            presentReview(
-              dependencies.presenter,
-              unavailableReview(sessionID, "MISSING_ATTRIBUTED_DIFF"),
-            ),
-          );
-          return;
-        case "ATTRIBUTED":
-          track(reviewAttributedTurn(attribution.turn, sessionID, dependencies));
-          return;
-      }
-    } catch {
-      return;
-    }
+  function log(event: OperationalEvent): void {
+    track(writeOperational(dependencies.operational, event));
   }
 
-  async function drain(): Promise<void> {
-    while (true) {
-      await attributionTail;
+  async function finish(sessionID: string): Promise<void> {
+    const attribution = await tracker.finish(sessionID);
 
-      if (backgroundJobs.size === 0) {
+    switch (attribution.status) {
+      case "NONE":
+      case "ALREADY_PROCESSED":
         return;
-      }
-
-      await Promise.all([...backgroundJobs]);
+      case "UNAVAILABLE":
+        log({ kind: "ATTRIBUTION_UNAVAILABLE", reason: attribution.reason });
+        track(
+          presentReview(
+            dependencies.presenter,
+            unavailableReview(sessionID, "MISSING_ATTRIBUTED_DIFF"),
+          ),
+        );
+        return;
+      case "ATTRIBUTED":
+        track(reviewAttributedTurn(attribution.turn, sessionID, dependencies));
+        return;
     }
   }
 
   return {
-    hooks: {
-      event: (input: PluginEventInput): Promise<void> => {
-        const sessionID = idleSessionID(input.event);
+    onEvent(event) {
+      const turn = parseTurnEvent(event);
 
-        if (sessionID === null) {
-          return Promise.resolve();
+      if (turn === null) {
+        return;
+      }
+
+      const { sessionID } = turn;
+
+      if (dependencies.proposals.isChildSession(sessionID)) {
+        if (turn.kind !== "STARTED") {
+          dependencies.childExecutions.settle(
+            sessionID,
+            turn.kind === "SUCCEEDED" ? "SUCCEEDED" : "ENDED",
+          );
         }
 
-        enqueueAttribution(sessionID);
+        return;
+      }
 
-        return Promise.resolve();
-      },
+      switch (turn.kind) {
+        case "STARTED": {
+          const generation = tracker.noteStarted(sessionID);
+
+          enqueue(() => tracker.start(sessionID, generation));
+          return;
+        }
+        case "SUCCEEDED":
+          enqueue(() => finish(sessionID));
+          return;
+        case "ENDED_OTHER":
+          enqueue(async () => {
+            if (!tracker.discard(sessionID).nested) {
+              log({ kind: "TURN_SKIPPED", reason: turn.reason });
+            }
+          });
+          return;
+      }
     },
-    drain,
+
+    async drain() {
+      while (true) {
+        await tail;
+
+        if (backgroundJobs.size === 0) {
+          return;
+        }
+
+        await Promise.all([...backgroundJobs]);
+      }
+    },
   };
+}
+
+async function writeOperational(sink: OperationalLogSink, event: OperationalEvent): Promise<void> {
+  await sink.write(event);
 }
 
 function ignore(): void {

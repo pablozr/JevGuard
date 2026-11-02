@@ -221,7 +221,7 @@ remediation:
   auto_propose: true
   propose_on:
     - FAIL
-  # model is optional; when absent the proposer inherits the host model.
+  # model is optional; when absent the proposal uses the source session's model.
   # model: provider/model
 ```
 
@@ -235,8 +235,8 @@ Validation rules:
 - `remediation.auto_propose` must be a boolean.
 - `remediation.propose_on` must be a non-empty list whose only accepted value is
   `FAIL`.
-- `remediation.model` is optional. When absent, the proposer inherits the host's
-  model. When present it must be exactly one non-empty provider and one non-empty
+- `remediation.model` is optional. When absent, the OpenCode proposal uses the
+  source session's model. When present it must be exactly one non-empty provider and one non-empty
   model separated by `/` (`provider/model`), with no whitespace and no additional
   `/`.
 - Any other key inside `remediation` is invalid.
@@ -326,10 +326,13 @@ results. The aggregate counts include every entry.
 
 ## Presentation
 
-Each turn produces exactly one transient TUI toast and one structured log entry for
-the whole review. Review runs in the background: the idle event returns as soon as the
+Each reviewed execution produces exactly one structured log entry for the whole
+review, plus one transient toast on hosts that have a toast channel (the OpenCode
+`2.2.x` server plugin has none, so there the log is the only channel). Review runs in
+the background: the `session.execution.succeeded` handler returns as soon as the
 serialized attribution step is scheduled, so policy reads, Jev requests, and
-presentation are never on the agent's critical path.
+presentation are never on the agent's critical path. An `interrupted` or `failed`
+execution is not reviewed; the plugin logs `JevGuard skipped · interrupted|failed`.
 
 - Toast: `JevGuard <OUTCOME>` where `<OUTCOME>` is the aggregate display outcome.
   The display precedence is `FAIL > UNAVAILABLE > WARN > PASS > SKIPPED`: any
@@ -359,7 +362,7 @@ generic count summary does not mean every rule was evaluated: an `UNAVAILABLE`
 result is a missing judgment, and it does not erase a known `FAIL` elsewhere in the
 turn.
 
-By default, OpenCode sees only these transient toasts and logs. The review itself
+By default, OpenCode sees only these logs (and toasts, where available). The review itself
 does not inject messages into the agent context, does not modify the source session,
 and does not block a turn. A separate, configurable workflow can turn a review that
 contains a `FAIL` into a proposal, as described below.
@@ -501,8 +504,8 @@ The review remains observe-only unless remediation is enabled, and the server pl
 delivers it inside the same plugin entrypoint. Remediation is controlled by
 `remediation.auto_propose` (default `true`) and `remediation.propose_on` (default
 `FAIL`). After presenting a review that contains any `FAIL`, the plugin sends one
-aggregate proposal request to a hidden `jevguard-proposer` subagent and shows a
-generic toast. It never edits code and never applies a change.
+aggregate proposal request to an isolated child session. It never edits code and
+never applies a change.
 
 The request aggregates every `FAIL` finding in the review — local `error`-severity
 repository rules and the `SCOPE-CREEP` built-in — together with the turn's task and its
@@ -517,26 +520,44 @@ rule-scoped `FAIL` exists — because there is no complete safe evidence to send
 task is capped at `16384` characters; a longer task records no proposal rather than
 truncating evidence.
 
-The plugin `config` hook registers the hidden `jevguard-proposer` subagent with
-wildcard-disabled tools and wildcard-deny permissions (`{"*": "deny"}`), so it cannot
-call a tool, edit a file, or produce a patch. The proposal is sent in an isolated child
-session parented to the source session. When `remediation.model` is present it selects
-the proposer model; when it is absent the proposer inherits the host's model. The child
-session is excluded from review for the plugin lifetime, so a proposal can never
-recurse or trigger a second one. The generic toast carries no rule, task, diff, finding,
-or credential.
+No agent is registered for the proposal. The plugin creates an isolated child
+session parented to the source session with wildcard-deny permissions
+(`{"*": "deny"}`), so it cannot call a tool, edit a file, or produce a patch, and
+always passes an explicit model: `remediation.model` when present, otherwise the
+source session's model. When neither is known, no proposal is created and one log
+entry records `REMEDIATION_PROPOSAL_SKIPPED_NO_MODEL`. A proposal that does not finish
+within 120 seconds is interrupted and logged as `REMEDIATION_PROPOSAL_TIMEOUT`. The
+child session is excluded from review for the plugin lifetime, so a proposal can never
+recurse or trigger a second one.
 
 A contained proposal failure — an invalid model specifier, a child-session creation
-failure, or a prompt failure — surfaces a generic error toast and one structured
-`error` log entry whose `extra` carries only a typed reason code
-(`MODEL_SPECIFIER_INVALID`, `CHILD_SESSION_FAILED`, or `PROPOSAL_PROMPT_FAILED`).
-Neither carries any task, diff, rule, finding, path, or credential.
+failure, a prompt failure, or a timeout — writes one structured `error` log entry
+whose `extra` carries only a typed reason code (`MODEL_SPECIFIER_INVALID`,
+`CHILD_SESSION_FAILED`, `PROPOSAL_PROMPT_FAILED`, or `REMEDIATION_PROPOSAL_TIMEOUT`).
+It never carries any task, diff, rule, finding, path, or credential.
 
 At most one proposal is created per evaluated turn. There is no retry, loop, or
 re-evaluation, and no automatic apply. The user reads the proposal, copies its manual
 apply instruction into their normal coding agent, and applies it there. That apply is
-an ordinary completed assistant turn, so the server plugin reviews it normally on the
-next idle, exactly like any other turn. No secret is carried, and no payload, task,
+an ordinary execution, so the server plugin reviews it normally when it succeeds,
+exactly like any other turn.
+
+### OpenCode 2.2.x scope
+
+- The plugin requires OpenCode `2.2.2` or later within `2.2.x` (`>=2.2.2 <2.3`).
+- The unit of review is one execution (`session.execution.started` to
+  `session.execution.succeeded`). Its patch is the host working-tree diff at the end
+  minus the changes already present at the start.
+- Files ignored by Git are explicitly out of scope: the working-tree diff does not
+  show them. A write tool call on a path the diff cannot show makes the execution
+  `UNAVAILABLE` (`INCOMPLETE_FILE_DIFF`) rather than reviewing a partial patch.
+- Writes from an `interrupted` or `failed` execution stay on disk and become
+  pre-existing changes of the next execution's snapshot; they are never attributed.
+- Overlapping executions are not reviewed (`CONCURRENT_SESSIONS`, `BOUNDARY_RACE`); a
+  missing start yields `MISSING_TURN_START`. Nested child sessions count as part of
+  their parent execution.
+- With `opencode run --standalone` the process can exit before the background review
+  finishes. Use the TUI, or `opencode serve` with `opencode run --server`. No secret is carried, and no payload, task,
 diff, or secret is logged.
 
 ## Claude Code

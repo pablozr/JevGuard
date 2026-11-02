@@ -1,47 +1,65 @@
-import type { OpencodeClient } from "@opencode-ai/sdk";
-import type { ProposalPromptInput, ProposalSessionFacade } from "./types";
+import type { Plugin } from "@opencode/plugin";
+import type { ProposalModel, ProposalSessionFacade } from "./types";
+
+/** The slice of the 2.2.x plugin context the proposal facade uses. */
+export interface ProposalContext {
+  readonly session: Pick<
+    Plugin.Context["session"],
+    "get" | "create" | "prompt" | "interrupt" | "hook"
+  >;
+}
+
+/** Denies every permission in the proposer child session: no tools, no edits. */
+export const PROPOSER_PERMISSIONS = [{ action: "*", resource: "*", effect: "deny" }] as const;
 
 /**
- * Concrete proposal facade over the OpenCode SDK session API. The SDK resolves
- * `{ data, error }` instead of throwing, so absent data or an error payload is
- * rejected and left for the plugin orchestration to contain. The child session is
- * created under the originating session, and the prompt carries the controlled
- * system prompt, the explicit agent, wildcard-disabled tools, and — when configured —
- * an explicit model; `null` omits the model so the host applies its own default.
+ * Concrete proposal facade over the OpenCode 2.2.x session API. `originModel` reads
+ * the originating session's model; `createChildSession` passes that model explicitly
+ * with the deny-all ruleset and no agent; `prompt` sends text only.
  */
-export function createOpenCodeProposalSessionFacade(client: OpencodeClient): ProposalSessionFacade {
+export function createOpenCodeProposalSessionFacade(
+  context: ProposalContext,
+): ProposalSessionFacade {
   return {
-    async createChildSession(input): Promise<string> {
-      const result = await client.session.create({
-        body: { parentID: input.parentID, title: input.title },
-      });
+    async originModel(sessionID): Promise<ProposalModel | null> {
+      const session = await context.session.get({ sessionID });
+      const model = session.model;
 
-      if (result.data === undefined || result.error !== undefined) {
-        throw new Error("OpenCode child session unavailable");
-      }
-
-      return result.data.id;
+      return model === undefined ? null : { providerID: model.providerID, modelID: model.id };
     },
 
-    async prompt(input: ProposalPromptInput): Promise<void> {
-      const model = input.model;
-
-      const result = await client.session.prompt({
-        path: { id: input.sessionID },
-        body: {
-          agent: input.agent,
-          ...(model === null
-            ? {}
-            : { model: { providerID: model.providerID, modelID: model.modelID } }),
-          system: input.system,
-          tools: { ...input.tools },
-          parts: [{ type: "text", text: input.text }],
-        },
+    async createChildSession(input): Promise<string> {
+      const session = await context.session.create({
+        parentID: input.parentID,
+        title: input.title,
+        model: { providerID: input.model.providerID, id: input.model.modelID },
+        permissions: PROPOSER_PERMISSIONS.map((rule) => ({ ...rule })),
       });
 
-      if (result.data === undefined || result.error !== undefined) {
-        throw new Error("OpenCode proposal prompt unavailable");
-      }
+      return session.id;
+    },
+
+    async prompt(input): Promise<void> {
+      await context.session.prompt({ sessionID: input.sessionID, text: input.text });
+    },
+
+    async interrupt(sessionID): Promise<void> {
+      await context.session.interrupt({ sessionID });
     },
   };
+}
+
+/**
+ * Stops the host from retrying a failed model call inside a proposer child session,
+ * so an unavailable model cannot retry forever. Other sessions are left untouched.
+ */
+export function registerProposalRetryGuard(
+  context: ProposalContext,
+  isChildSession: (sessionID: string) => boolean,
+): Promise<{ readonly dispose: () => Promise<void> }> {
+  return context.session.hook("retry", (retry) => {
+    if (isChildSession(retry.sessionID)) {
+      retry.decision = { retry: false };
+    }
+  });
 }

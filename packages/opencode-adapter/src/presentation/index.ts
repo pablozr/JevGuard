@@ -17,24 +17,22 @@ import type {
 export { displayOutcome } from "./display";
 export { logLevelFor, reviewLogMessage } from "./log";
 export {
+  createConsoleLogWriter,
+  createNullToastSink,
   createOpenCodeLogSink,
-  createOpenCodePresentationClient,
-  createOpenCodeToastSink,
 } from "./opencode";
 export {
-  createOpenCodeSessionNavigator,
+  createNullSessionNavigator,
+  createOperationalLogSink,
   createRemediationFailureLogSink,
   createRemediationNotifier,
 } from "./remediation";
 export { countSummary, toReviewToast, toastVariantFor } from "./toast";
 export type {
-  OpenCodeLogInput,
-  OpenCodeLogResult,
-  OpenCodePresentationClient,
-  OpenCodeSessionSelectInput,
-  OpenCodeSessionSelectResult,
-  OpenCodeToastInput,
-  OpenCodeToastResult,
+  OpenCodeLogRecord,
+  OpenCodeLogWriter,
+  OperationalEvent,
+  OperationalLogSink,
   PresentationDelivery,
   PresentationPorts,
   ProposalFailureReason,

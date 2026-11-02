@@ -1,6 +1,9 @@
 import type { DeliveryStatus } from "@jevguard/node-infra";
+import { SERVICE_NAME, writeLogRecord } from "./opencode";
 import type {
-  OpenCodePresentationClient,
+  OpenCodeLogWriter,
+  OperationalEvent,
+  OperationalLogSink,
   ProposalFailureReason,
   ProposalSessionNavigator,
   RemediationFailureLogSink,
@@ -9,11 +12,11 @@ import type {
 } from "./types";
 
 const TITLE = "JevGuard";
-const SERVICE_NAME = "jevguard";
 const PREPARING_MESSAGE = "JevGuard is preparing a remediation proposal in the child session.";
 const READY_MESSAGE = "JevGuard remediation proposal ready.";
 const FAILED_MESSAGE = "JevGuard could not prepare a remediation proposal.";
 const FAILURE_LOG_MESSAGE = "JevGuard remediation proposal failed";
+const ATTRIBUTION_LOG_MESSAGE = "JevGuard attribution unavailable";
 
 /**
  * Builds the safe, generic remediation notifier over the transient toast sink. All
@@ -49,50 +52,51 @@ async function showRemediationToast(
 }
 
 /**
- * Builds the safe failure-log sink over the OpenCode `app.log` surface. It writes one
- * error entry with a fixed message and an `extra` payload containing only the typed
- * `reason`; no task, diff, rule, finding, path, or credential is attached. Every
- * delivery failure is contained as `FAILED`.
+ * Builds the safe failure-log sink. It writes one error record with a fixed message
+ * and an `extra` payload containing only the typed `reason`; no task, diff, rule,
+ * finding, path, or credential is attached. Every delivery failure is `FAILED`.
  */
 export function createRemediationFailureLogSink(
-  client: OpenCodePresentationClient,
+  writer: OpenCodeLogWriter,
 ): RemediationFailureLogSink {
   return {
-    async write(reason: ProposalFailureReason): Promise<DeliveryStatus> {
-      try {
-        const result = await client.app.log({
-          body: {
-            service: SERVICE_NAME,
-            level: "error",
-            message: FAILURE_LOG_MESSAGE,
-            extra: { reason },
-          },
-        });
-
-        return result.error === undefined ? "DELIVERED" : "FAILED";
-      } catch {
-        return "FAILED";
-      }
+    write(reason: ProposalFailureReason): Promise<DeliveryStatus> {
+      return writeLogRecord(writer, {
+        service: SERVICE_NAME,
+        level: "error",
+        message: FAILURE_LOG_MESSAGE,
+        extra: { reason },
+      });
     },
   };
 }
 
 /**
- * Builds the safe TUI navigator over the OpenCode session-select surface. It sends
- * only the child session ID and every delivery failure is contained as `FAILED`.
+ * Builds the operational log sink: `JevGuard skipped · interrupted|failed` for an
+ * execution that is never reviewed, and one line with the typed reason for an
+ * attribution failure. Only the typed code is attached.
  */
-export function createOpenCodeSessionNavigator(
-  client: OpenCodePresentationClient,
-): ProposalSessionNavigator {
+export function createOperationalLogSink(writer: OpenCodeLogWriter): OperationalLogSink {
   return {
-    async navigate(sessionID: string): Promise<DeliveryStatus> {
-      try {
-        const result = await client.tui.selectSession({ sessionID });
+    write(event: OperationalEvent): Promise<DeliveryStatus> {
+      const skipped = event.kind === "TURN_SKIPPED";
 
-        return result.error === undefined ? "DELIVERED" : "FAILED";
-      } catch {
-        return "FAILED";
-      }
+      return writeLogRecord(writer, {
+        service: SERVICE_NAME,
+        level: skipped ? "info" : "warn",
+        message: skipped ? `JevGuard skipped · ${event.reason}` : ATTRIBUTION_LOG_MESSAGE,
+        extra: { reason: event.reason },
+      });
     },
+  };
+}
+
+/**
+ * Navigator for the 2.2.x server plugin: a no-op that reports `DELIVERED`. The server
+ * plugin context has no TUI routing; navigation returns with the `./tui` phase.
+ */
+export function createNullSessionNavigator(): ProposalSessionNavigator {
+  return {
+    navigate: async (): Promise<DeliveryStatus> => "DELIVERED",
   };
 }
