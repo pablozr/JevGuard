@@ -317,6 +317,24 @@ export function decideChainStep(input: ChainStepInput): ChainStep {
   return continuation(input, chain, failures);
 }
 
+export interface RemediateStepInput extends Omit<ChainStepInput, "mode"> {
+  /** The turn mixes a marked delivery with something else, so it cannot be judged. */
+  readonly mixed?: boolean;
+}
+
+/**
+ * The chain decision for one reviewed turn once the user opted into remediate. A turn that
+ * mixes a delivery with other input cannot judge its chain, which can then only end as
+ * unverified; otherwise this is decideChainStep.
+ */
+export function decideRemediateStep(input: RemediateStepInput): ChainStep {
+  const { mixed = false, request, ...rest } = input;
+
+  if (mixed && rest.chain !== null) return decideOrphanStep(rest.chain, rest.maxAttempts);
+
+  return decideChainStep({ ...rest, mode: "remediate", request: mixed ? null : request });
+}
+
 /**
  * A unit that has no turn of its own (skipped or unavailable) cannot judge a chain, so a
  * saved chain it belongs to can only end as unverified; nothing counts as fixed.

@@ -1,6 +1,6 @@
 import { dirname } from "node:path";
 import type { ChainState } from "@jevguard/core";
-import { parseChainState } from "@jevguard/core";
+import { expiredClosure, parseChainState } from "@jevguard/core";
 import { createNodeFileReader } from "../../capture/node-ports";
 import type { CaptureFileReader } from "../../capture/types";
 import { writeAtomic } from "../../capture/unit-state";
@@ -133,7 +133,7 @@ export function createNodeProposalStore(
         continue;
       }
 
-      if (state !== null) closures.push({ state, code: "EXPIRED" });
+      if (state !== null) closures.push(expiredClosure(state));
 
       removeQuietly(path);
     }

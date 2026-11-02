@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   AUTO_DELIVERY_MARKER,
+  CHAIN_ID_PATTERN,
   formatAgentDelivery,
   isAutoDeliveredTask,
   PROPOSAL_END,
@@ -71,5 +72,21 @@ describe("parseAutoDelivery", () => {
     const task = `prefix\n${formatAgentDelivery(INPUT)}`;
 
     expect(parseAutoDelivery(task)).toMatchObject({ attempt: 1 });
+  });
+});
+
+describe("chain id shape", () => {
+  it.each([
+    ["a long id", "a".repeat(512), true],
+    ["too long", "a".repeat(513), false],
+    ["a space", "a b", false],
+    ["a bracket", "a]b", false],
+    ["colons and dots", "claude-code:s.1:e_2", true],
+  ])("the delivery mark and CHAIN_ID_PATTERN agree on %s", (_name, chainId, valid) => {
+    const text = formatAgentDelivery({ ...INPUT, chainId });
+    const parsed = parseAutoDelivery(text);
+
+    expect(CHAIN_ID_PATTERN.test(chainId)).toBe(valid);
+    expect(parsed !== null && parsed !== "LEGACY" && parsed.chainId === chainId).toBe(valid);
   });
 });

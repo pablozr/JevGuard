@@ -7,6 +7,11 @@ export interface ChainClosure {
   readonly code: ChainStopCode;
 }
 
+/** A saved chain whose state aged out or was dropped to make room: nothing counts as fixed. */
+export function expiredClosure(state: ChainState): ChainClosure {
+  return { state, code: "EXPIRED" };
+}
+
 /** One ended chain as a host logs it: ids, counts, hashes and the typed result; never text. */
 export interface ChainEndRecord {
   readonly chainId: string;
