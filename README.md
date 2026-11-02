@@ -384,7 +384,11 @@ jevguard login
 Known limitations:
 
 - Target host is OpenCode `2.2.x` (minimum `2.2.2`). The plugin does not load on
-  `2.1.x` or `1.x`. A real-host smoke on `2.2.2` is still pending.
+  `2.1.x` or `1.x`. A real-host smoke on `2.2.2` (2026-11-02) covered observe
+  and `remediate` (FAIL review, deny-all proposer, attempt 1/2, `RESOLVED`).
+- OpenCode `2.2.2` does not install dependencies for a `file:` plugin spec. Use
+  the registry package; a local `file:` build needs its dependencies installed
+  next to it.
 - The plugin and CLI run on Bun, and the packed `jevguard` bin keeps a Bun
   shebang. Install and run the artifact with the Bun runtime.
 
