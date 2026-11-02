@@ -59,9 +59,7 @@ export function chainStepOf(
   if (handoff.resolution.status !== "TURN") {
     const active = dependencies.proposals.activeChain(handoff);
 
-    return active === null
-      ? none
-      : decideOrphanStep(active, settings.settings.maxAttempts, settings.settings.mode);
+    return active === null ? none : decideOrphanStep(active, settings.settings.maxAttempts);
   }
 
   const delivery = parseAutoDelivery(handoff.resolution.turn.task);
@@ -144,6 +142,9 @@ async function endChain(
 ): Promise<ReviewFeedChain> {
   const { state, ids } = step;
   const result = step.kind === "STOP" ? step.code : "RESOLVED";
+  // A state can hold more attempts than the configured limit (the user lowered it, or the
+  // mark was forged); the feed rejects attempt > maxAttempts, so report the larger.
+  const maxAttempts = Math.max(step.maxAttempts, state.attempts);
   const turnIds = state.turnIds.includes(handoff.turnId)
     ? state.turnIds
     : [...state.turnIds, handoff.turnId];
@@ -151,12 +152,12 @@ async function endChain(
   dependencies.proposals.removeChain(handoff, state.chainId);
   dependencies.log(step.kind === "STOP" ? `CHAIN_STOPPED:${step.code}` : "CHAIN_RESOLVED");
 
-  await recordEnd(state, step.maxAttempts, result, ids, turnIds, dependencies);
+  await recordEnd(state, maxAttempts, result, ids, turnIds, dependencies);
 
   return {
     chainId: state.chainId,
     attempt: state.attempts,
-    maxAttempts: step.maxAttempts,
+    maxAttempts,
     result,
     fixed: ids.resolvedIds.length,
   };

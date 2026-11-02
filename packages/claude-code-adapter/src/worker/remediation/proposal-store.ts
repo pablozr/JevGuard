@@ -1,12 +1,10 @@
 import { dirname } from "node:path";
 import type { ChainState } from "@jevguard/core";
-import { CHAIN_ID_PATTERN, FINDING_ID_PATTERN, isAttemptCount } from "@jevguard/core";
+import { parseChainState } from "@jevguard/core";
 import { createNodeFileReader } from "../../capture/node-ports";
 import type { CaptureFileReader } from "../../capture/types";
 import { writeAtomic } from "../../capture/unit-state";
 import {
-  DELIVERY_MAX_FINDINGS,
-  isRecord,
   type ProposalOutcomeFile,
   parseProposalOutcome,
   proposalDirectoryOf,
@@ -21,70 +19,10 @@ import type { ChainClosure, WorkerProposalStore } from "./types";
 const CHAIN_FILE_UNSAFE = /[^A-Za-z0-9._-]/g;
 const CHAIN_FILE_PREFIX = "chain-";
 const OUTCOME_SUFFIX = ".outcome.json";
-const SIGNATURE = /^[0-9a-f]{16}$/;
 
-function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((item) => typeof item === "string");
-}
-
-/**
- * A state a chain could really have saved: one signature and one turn per attempt, at
- * least one distinct origin id, and a scope for exactly the origins. Anything else cannot
- * prove its origins were judged, so it is treated as lost.
- */
-function hasCoherentShape(state: {
-  readonly originIds: readonly string[];
-  readonly signatures: readonly string[];
-  readonly turnIds: readonly string[];
-  readonly attempts: number;
-  readonly scopes: Record<string, unknown>;
-}): boolean {
-  const { originIds, signatures, turnIds, attempts, scopes } = state;
-  const scoped = Object.keys(scopes);
-
-  return (
-    originIds.length > 0 &&
-    originIds.length <= DELIVERY_MAX_FINDINGS &&
-    new Set(originIds).size === originIds.length &&
-    originIds.every((id) => FINDING_ID_PATTERN.test(id) && scoped.includes(id)) &&
-    scoped.length === originIds.length &&
-    signatures.length === attempts &&
-    signatures.every((signature) => SIGNATURE.test(signature)) &&
-    new Set(signatures).size === signatures.length &&
-    turnIds.length === attempts &&
-    new Set(turnIds).size === turnIds.length
-  );
-}
-
-function chainStateOf(text: string): ChainState | null {
-  let value: unknown;
-
-  try {
-    value = JSON.parse(text);
-  } catch {
-    return null;
-  }
-
-  if (!isRecord(value) || !isRecord(value.scopes)) return null;
-
-  const { chainId, originIds, signatures, turnIds, attempts, scopes } = value;
-
-  if (typeof chainId !== "string" || !CHAIN_ID_PATTERN.test(chainId)) return null;
-  if (!isAttemptCount(attempts)) return null;
-  if (!isStringArray(originIds) || !isStringArray(signatures) || !isStringArray(turnIds)) {
-    return null;
-  }
-  if (!Object.values(scopes).every(isStringArray)) return null;
-  if (!hasCoherentShape({ originIds, signatures, turnIds, attempts, scopes })) return null;
-
-  return {
-    chainId,
-    originIds,
-    signatures,
-    turnIds,
-    attempts,
-    scopes: scopes as ChainState["scopes"],
-  };
+interface ChainFile {
+  readonly path: string;
+  readonly state: ChainState | null;
 }
 
 /**
@@ -120,7 +58,7 @@ export function createNodeProposalStore(
     try {
       const text = files.read(path);
 
-      return text === null ? null : chainStateOf(text);
+      return text === null ? null : parseChainState(JSON.parse(text));
     } catch {
       return null;
     }
@@ -133,7 +71,7 @@ export function createNodeProposalStore(
   }
 
   /** The chain files of one session directory, parsed; an unreadable one has a `null` state. */
-  function chainsIn(sessionDirectory: string) {
+  function chainsIn(sessionDirectory: string): ChainFile[] {
     return namesIn(files, sessionDirectory)
       .filter((name) => name.startsWith(CHAIN_FILE_PREFIX) && !name.endsWith(OUTCOME_SUFFIX))
       .map((name) => {
@@ -153,8 +91,15 @@ export function createNodeProposalStore(
     }
   }
 
-  /** Ends the chain a delivery outcome names; the outcome file is spent either way. */
-  function applyOutcomes(sessionDirectory: string, closures: ChainClosure[]): void {
+  /**
+   * Ends the chain a delivery outcome names; the outcome file is spent either way. `chains`
+   * is the session's list, read once; an ended chain is taken out of it.
+   */
+  function applyOutcomes(
+    sessionDirectory: string,
+    chains: ChainFile[],
+    closures: ChainClosure[],
+  ): void {
     for (const name of namesIn(files, sessionDirectory)) {
       if (!name.endsWith(OUTCOME_SUFFIX)) continue;
 
@@ -165,23 +110,23 @@ export function createNodeProposalStore(
 
       if (outcome === null) continue;
 
-      const named = chainsIn(sessionDirectory).find(
-        (chain) => chain.state?.turnIds.at(-1) === outcome.turnId,
-      );
+      const index = chains.findIndex((chain) => chain.state?.turnIds.at(-1) === outcome.turnId);
+      const named = index === -1 ? undefined : chains[index];
 
       if (named?.state) {
         closures.push({ state: named.state, code: outcome.code });
         removeQuietly(named.path);
+        chains.splice(index, 1);
       }
     }
   }
 
   function closeExpiredChains(
-    sessionDirectory: string,
+    chains: readonly ChainFile[],
     nowMs: number,
     closures: ChainClosure[],
   ): void {
-    for (const { path, state } of chainsIn(sessionDirectory)) {
+    for (const { path, state } of chains) {
       try {
         if (!isExpired(files, path, nowMs)) continue;
       } catch {
@@ -278,8 +223,10 @@ export function createNodeProposalStore(
       for (const session of namesIn(files, directory)) {
         const sessionDirectory = `${directory}/${session}`;
 
-        applyOutcomes(sessionDirectory, closures);
-        closeExpiredChains(sessionDirectory, nowMs, closures);
+        const chains = chainsIn(sessionDirectory);
+
+        applyOutcomes(sessionDirectory, chains, closures);
+        closeExpiredChains(chains, nowMs, closures);
 
         for (const name of namesIn(files, sessionDirectory)) {
           const path = `${sessionDirectory}/${name}`;

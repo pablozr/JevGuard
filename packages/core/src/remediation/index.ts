@@ -7,6 +7,7 @@ export {
   failureSignature,
   unresolvedIds,
 } from "./chain";
+export { MAX_CHAIN_ORIGINS, parseChainState } from "./chain-state";
 export { parseModelSpecifier, resolveRemediationConfig } from "./config";
 export { formatAgentDelivery, isAutoDeliveredTask, parseAutoDelivery } from "./delivery-frame";
 export { buildProposalText, PROPOSER_AGENT_PROMPT } from "./prompt";

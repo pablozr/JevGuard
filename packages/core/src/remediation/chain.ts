@@ -324,10 +324,7 @@ export function decideChainStep(input: ChainStepInput): ChainStep {
 export function decideOrphanStep(
   state: ChainState,
   maxAttempts: number,
-  mode: RemediationMode,
-): ChainStep {
-  if (mode === "observe") return { kind: "NONE" };
-
+): Extract<ChainStep, { kind: "STOP" }> {
   return { kind: "STOP", code: "UNVERIFIED", maxAttempts, state, ids: unresolvedIds(state) };
 }
 

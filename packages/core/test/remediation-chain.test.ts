@@ -6,6 +6,7 @@ import {
   decideOrphanStep,
   failureSignature,
   isAttemptCount,
+  parseChainState,
 } from "../src";
 
 const REQUEST = {} as RemediationProposalRequest;
@@ -261,19 +262,13 @@ describe("failureSignature", () => {
 describe("decideOrphanStep", () => {
   it("ends a saved chain as UNVERIFIED with nothing counted as fixed", () => {
     const chain = stateAfterFirst([rule("rule-a", "FAIL")]);
-    const step = decideOrphanStep(chain, 2, "remediate");
+    const step = decideOrphanStep(chain, 2);
 
     expect(step).toMatchObject({
       kind: "STOP",
       code: "UNVERIFIED",
       maxAttempts: 2,
       ids: { resolvedIds: [], remainingIds: ["rule-a"] },
-    });
-  });
-
-  it("is NONE in observe", () => {
-    expect(decideOrphanStep(stateAfterFirst([rule("rule-a", "FAIL")]), 2, "observe")).toEqual({
-      kind: "NONE",
     });
   });
 });
@@ -312,5 +307,35 @@ describe("isAttemptCount", () => {
   it("accepts integers 1..3 only", () => {
     expect([1, 2, 3].every(isAttemptCount)).toBe(true);
     expect([0, 4, 2.5, "2", null].some(isAttemptCount)).toBe(false);
+  });
+});
+
+describe("parseChainState", () => {
+  const saved = {
+    chainId: "c1",
+    originIds: ["rule-a"],
+    signatures: ["0123456789abcdef"],
+    turnIds: ["t1"],
+    attempts: 1,
+    scopes: { "rule-a": ["a.ts"] },
+  };
+
+  it("reads a coherent saved state", () => {
+    expect(parseChainState(saved)).toEqual(saved);
+  });
+
+  it.each([
+    ["extra attempts without a signature", { ...saved, attempts: 2 }],
+    ["a bad signature", { ...saved, signatures: ["nope"] }],
+    ["an origin without a scope", { ...saved, scopes: {} }],
+    ["a bad chain id", { ...saved, chainId: "a b" }],
+    ["no origins", { ...saved, originIds: [], scopes: {} }],
+  ])("rejects %s", (_name, value) => {
+    expect(parseChainState(value)).toBeNull();
+  });
+
+  it("rejects what is not a record", () => {
+    expect(parseChainState(null)).toBeNull();
+    expect(parseChainState([saved])).toBeNull();
   });
 });

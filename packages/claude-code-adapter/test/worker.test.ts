@@ -1005,6 +1005,30 @@ describe("runWorker remediate chain", () => {
     expect(harness.chainEntries).toMatchObject([{ result: "UNVERIFIED" }]);
   });
 
+  test("a chain past a lowered limit ends with a maxAttempts the feed accepts", async () => {
+    const first = await firstDelivery();
+    const state = first.chains.get(CHAIN_ID);
+
+    if (state === undefined) throw new Error("expected a saved chain");
+
+    const lowered = failingHarness({
+      status: "ENABLED",
+      settings: { delivery: "agent", model: null, mode: "remediate", maxAttempts: 1 },
+    });
+
+    lowered.chains.set(CHAIN_ID, {
+      ...state,
+      attempts: 2,
+      signatures: [...state.signatures, "0123456789abcdef"],
+      turnIds: [...state.turnIds, "claude-code:s:e:1"],
+    });
+    put(lowered, markedTurn(2, 2, CHAIN_ID));
+    await lowered.run();
+
+    expect(lowered.chainEntries).toMatchObject([{ attempts: 2, maxAttempts: 2 }]);
+    expect(lowered.feedChains.at(-1)).toMatchObject({ attempt: 2, maxAttempts: 2 });
+  });
+
   test("observe mode never writes a chain, even for an agent delivery", async () => {
     const harness = failingHarness(ENABLED_AGENT);
 

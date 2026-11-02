@@ -1,4 +1,9 @@
-import { CHAIN_ID_PATTERN, FINDING_ID_PATTERN, isAttemptCount } from "@jevguard/core";
+import {
+  CHAIN_ID_PATTERN,
+  FINDING_ID_PATTERN,
+  isAttemptCount,
+  MAX_CHAIN_ORIGINS,
+} from "@jevguard/core";
 import { hasKeys, isRecord, type JsonRecord } from "./json-record";
 import type { DeliveryChain, ProposalDelivery, ProposalRequestFile } from "./types";
 
@@ -30,7 +35,7 @@ const FINDING_KEYS = ["id", "severity", "probability", "paths", "violation", "al
  * The limits of one chain request: the worker checks them before it writes and the mod
  * enforces them as it reads, so the producer can never emit what the consumer rejects.
  */
-export const DELIVERY_MAX_FINDINGS = 64;
+export const DELIVERY_MAX_FINDINGS = MAX_CHAIN_ORIGINS;
 export const DELIVERY_MAX_FINDING_PATHS = 64;
 export const DELIVERY_MAX_FINDING_PATH_LENGTH = 512;
 export const DELIVERY_MAX_FINDING_TEXT_LENGTH = 2_000;

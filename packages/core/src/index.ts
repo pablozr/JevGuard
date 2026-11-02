@@ -148,6 +148,7 @@ export {
   failureSignature,
   unresolvedIds,
 } from "./remediation/chain";
+export { MAX_CHAIN_ORIGINS, parseChainState } from "./remediation/chain-state";
 export { parseModelSpecifier, resolveRemediationConfig } from "./remediation/config";
 export type { AgentDeliveryInput, DeliveryFinding } from "./remediation/delivery-frame";
 export {
