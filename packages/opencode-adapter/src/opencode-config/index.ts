@@ -21,6 +21,6 @@ export type {
 export {
   checkOpenCodeVersion,
   OPENCODE_ENGINE_RANGE,
-  type OpenCodeVersionCheck,
+  type OpenCodeVersionVerdict,
   readInstalledOpenCodeVersion,
 } from "./version";

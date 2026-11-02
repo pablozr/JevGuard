@@ -1,13 +1,15 @@
 import { spawnSync } from "node:child_process";
 
-/** OpenCode releases the plugin supports; it matches `engines.opencode` in the package. */
-export const OPENCODE_ENGINE_RANGE = ">=2.2.2 <2.3";
+/** The supported OpenCode line: one minor release, from a minimum patch. */
+const SUPPORTED = { major: 2, minor: 2, minimumPatch: 2 } as const;
 
-const MINIMUM_PATCH = 2;
+/** OpenCode releases the plugin supports; a test pins it to `engines.opencode`. */
+export const OPENCODE_ENGINE_RANGE = `>=${SUPPORTED.major}.${SUPPORTED.minor}.${SUPPORTED.minimumPatch} <${SUPPORTED.major}.${SUPPORTED.minor + 1}`;
+
 const VERSION_PATTERN = /(\d+)\.(\d+)\.(\d+)(-[0-9A-Za-z.-]+)?/;
-const VERSION_TIMEOUT_MS = 10_000;
+const VERSION_TIMEOUT_MS = 5_000;
 
-export type OpenCodeVersionCheck =
+export type OpenCodeVersionVerdict =
   | { readonly status: "SUPPORTED" | "UNSUPPORTED"; readonly version: string }
   | { readonly status: "UNKNOWN" };
 
@@ -16,7 +18,7 @@ export type OpenCodeVersionCheck =
  * A pre-release is unsupported, as semver ranges exclude it; no readable version is
  * `UNKNOWN`.
  */
-export function checkOpenCodeVersion(output: string | null): OpenCodeVersionCheck {
+export function checkOpenCodeVersion(output: string | null): OpenCodeVersionVerdict {
   const match = output === null ? null : VERSION_PATTERN.exec(output);
 
   if (match === null) return { status: "UNKNOWN" };
@@ -24,9 +26,9 @@ export function checkOpenCodeVersion(output: string | null): OpenCodeVersionChec
   const [version, major, minor, patch, prerelease] = match;
   const supported =
     prerelease === undefined &&
-    Number(major) === 2 &&
-    Number(minor) === 2 &&
-    Number(patch) >= MINIMUM_PATCH;
+    Number(major) === SUPPORTED.major &&
+    Number(minor) === SUPPORTED.minor &&
+    Number(patch) >= SUPPORTED.minimumPatch;
 
   return { status: supported ? "SUPPORTED" : "UNSUPPORTED", version };
 }

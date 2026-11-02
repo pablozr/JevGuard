@@ -7,7 +7,11 @@ import {
   type RuleParseResults,
 } from "@jevguard/core";
 import { policyFilePaths } from "@jevguard/node-infra";
-import { checkOpenCodeVersion, type InstallInspection } from "@jevguard/opencode-adapter";
+import {
+  checkOpenCodeVersion,
+  type InstallInspection,
+  type OpenCodeVersionVerdict,
+} from "@jevguard/opencode-adapter";
 import type {
   ConfigCheck,
   ConfigCheckCode,
@@ -186,7 +190,7 @@ const VERSION_CHECKS = {
   UNSUPPORTED: { status: "FAIL", code: "VERSION_UNSUPPORTED" },
   UNKNOWN: { status: "WARN", code: "VERSION_UNKNOWN" },
 } as const satisfies Record<
-  ReturnType<typeof checkOpenCodeVersion>["status"],
+  OpenCodeVersionVerdict["status"],
   Pick<OpenCodeVersionCheck, "status" | "code">
 >;
 

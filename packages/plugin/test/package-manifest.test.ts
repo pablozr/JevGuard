@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { OPENCODE_ENGINE_RANGE } from "@jevguard/opencode-adapter";
 import { describe, expect, test } from "vitest";
 
 interface PackageManifest {
@@ -54,6 +55,8 @@ describe("plugin development manifest", () => {
 
     expect(engines?.bun).toBe(">=1.1.0");
     expect(engines?.opencode).toBe(">=2.2.2 <2.3");
+    // The doctor's version check reads the same range the manifest declares.
+    expect(engines?.opencode).toBe(OPENCODE_ENGINE_RANGE);
   });
 
   test("keeps TypeScript entrypoints for workspace development", () => {

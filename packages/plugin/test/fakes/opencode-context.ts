@@ -14,12 +14,12 @@ type HostContext = Plugin.Context;
 type HostSession = HostContext["session"];
 
 export type ContextMessage = Awaited<ReturnType<HostSession["context"]>>[number];
-export type SessionInfo = Awaited<ReturnType<HostSession["get"]>>;
-export type SessionCreateInput = NonNullable<Parameters<HostSession["create"]>[0]>;
+type SessionInfo = Awaited<ReturnType<HostSession["get"]>>;
+type SessionCreateInput = NonNullable<Parameters<HostSession["create"]>[0]>;
 export type SessionPromptInput = Parameters<HostSession["prompt"]>[0];
 export type SessionSyntheticInput = Parameters<HostSession["synthetic"]>[0];
-export type VcsDiffInput = Parameters<HostContext["vcs"]["diff"]>[0];
-export type FileDiff = Awaited<ReturnType<HostContext["vcs"]["diff"]>>["data"][number];
+type VcsDiffInput = Parameters<HostContext["vcs"]["diff"]>[0];
+type FileDiff = Awaited<ReturnType<HostContext["vcs"]["diff"]>>["data"][number];
 type ModelRef = NonNullable<SessionInfo["model"]>;
 
 /** The execution lifecycle events the plugin subscribes to, in their 2.2.x `data` shape. */
@@ -38,7 +38,7 @@ export type ExecutionEvent =
       readonly data: { readonly sessionID: string; readonly error: { readonly message: string } };
     };
 
-export type ExecutionKind = "started" | "succeeded" | "interrupted" | "failed";
+type ExecutionKind = "started" | "succeeded" | "interrupted" | "failed";
 
 export interface RetryInput {
   readonly sessionID: string;

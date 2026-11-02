@@ -57,7 +57,7 @@ export type {
   InstallOutcome,
   InstallPathContext,
   InstallTarget,
-  OpenCodeVersionCheck,
+  OpenCodeVersionVerdict,
   PluginEntryMutation,
 } from "./opencode-config";
 export {
