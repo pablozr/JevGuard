@@ -128,6 +128,12 @@ async function writeArtifactManifest(source: SourceManifest): Promise<void> {
     publishConfig: { access: "public", registry: "https://registry.npmjs.org" },
     dependencies: RUNTIME_DEPENDENCIES,
     peerDependencies: source.peerDependencies,
+    // The bundle only uses these peers for types; the host provides them. Marking them
+    // optional keeps registry installs from pulling the whole OpenCode SDK (~170 MB),
+    // which outlasts OpenCode's plugin activation window.
+    peerDependenciesMeta: Object.fromEntries(
+      Object.keys(source.peerDependencies).map((name) => [name, { optional: true }]),
+    ),
   };
 
   await Bun.write(join(DIST_DIR, "package.json"), `${JSON.stringify(manifest, null, 2)}\n`);

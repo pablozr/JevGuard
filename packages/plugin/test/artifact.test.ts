@@ -24,7 +24,7 @@ const BUILD_SENTINEL_VARIABLE = "JEVGUARD_ARTIFACT_BUILD_SENTINEL";
 const BUILD_SENTINEL_VALUE = "JEVGUARD_ARTIFACT_BUILD_SENTINEL_7f3c9d2a";
 
 const PLUGIN_PACKAGE_NAME = "@pablozrrrr/jevguard";
-const PLUGIN_VERSION = "0.3.0";
+const PLUGIN_VERSION = "0.3.1";
 const RULES_SKILL_PREFIX = "skills/jevguard-rules";
 const INIT_SKILL_PREFIX = "skills/jev-init";
 const EXPECTED_DIST_FILES = [
@@ -206,6 +206,7 @@ interface ArtifactManifest {
   readonly publishConfig?: Readonly<Record<string, string>>;
   readonly dependencies?: Readonly<Record<string, string>>;
   readonly peerDependencies?: Readonly<Record<string, string>>;
+  readonly peerDependenciesMeta?: Readonly<Record<string, { readonly optional?: boolean }>>;
   readonly scripts?: Readonly<Record<string, string>>;
 }
 
@@ -468,6 +469,12 @@ describe("local package artifact", () => {
     expect(manifest.publishConfig).toEqual(EXPECTED_PUBLISH_CONFIG);
     expect(manifest.dependencies).toEqual(EXPECTED_RUNTIME_DEPENDENCIES);
     expect(manifest.peerDependencies).toEqual(EXPECTED_PEER_DEPENDENCIES);
+    // Registry installs must not pull the host SDK: every peer is optional.
+    expect(manifest.peerDependenciesMeta).toEqual(
+      Object.fromEntries(
+        Object.keys(EXPECTED_PEER_DEPENDENCIES).map((name) => [name, { optional: true }]),
+      ),
+    );
     expect(manifest.scripts).toBeUndefined();
 
     const serialized = JSON.stringify(manifest);
