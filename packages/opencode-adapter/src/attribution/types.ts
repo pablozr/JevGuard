@@ -1,4 +1,4 @@
-import type { Turn, TurnFile } from "@jevguard/core";
+import type { AutoDelivery, Turn, TurnFile } from "@jevguard/core";
 
 /**
  * One OpenCode 2.2.x session context message, narrowed to what attribution reads.
@@ -14,12 +14,8 @@ export interface OpenCodeMessage {
   readonly completed: boolean;
 }
 
-/** The chain mark a remediation delivery carries in its metadata. */
-export interface DeliveryMark {
-  readonly chainId: string;
-  readonly attempt: number;
-  readonly maxAttempts: number;
-}
+/** The chain mark a remediation delivery carries in its metadata (the core's delivery shape). */
+export type DeliveryMark = Exclude<AutoDelivery, "LEGACY" | null>;
 
 /**
  * The delivery behind an execution: the chain mark of its synthetic inputs, or `null`

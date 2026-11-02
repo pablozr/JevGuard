@@ -1,5 +1,4 @@
 import {
-  type AutoDelivery,
   type ChainClosure,
   type ChainEndRecord,
   type ChainEndSink,
@@ -76,7 +75,9 @@ export async function remediateTurn(
       await endChain(chainEndOf(step, reviewed.turn.id), dependencies);
       return;
     case "DELIVER":
-      await deliver(step, reviewed, dependencies);
+      // The core only decides `DELIVER` from a request.
+      if (reviewed.request === null) return;
+      await deliver(step, reviewed, reviewed.request, dependencies);
       return;
   }
 }
@@ -107,12 +108,10 @@ function chainStepOf(reviewed: ReviewedTurn, setup: RemediateSetup): ChainStep {
 
   if (mixed && chain !== null) return decideOrphanStep(chain, setup.maxAttempts, "remediate");
 
-  const delivery: AutoDelivery = mark === null ? null : { ...mark };
-
   return decideChainStep({
     mode: "remediate",
     maxAttempts: setup.maxAttempts,
-    delivery,
+    delivery: mark,
     chain,
     request: mixed ? null : reviewed.request,
     results: reviewed.results,
@@ -123,17 +122,13 @@ function chainStepOf(reviewed: ReviewedTurn, setup: RemediateSetup): ChainStep {
 async function deliver(
   step: Extract<ChainStep, { kind: "DELIVER" }>,
   reviewed: ReviewedTurn,
+  request: RemediationProposalRequest,
   dependencies: RemediateDependencies,
 ): Promise<void> {
   const { chains, originPrompt } = dependencies.remediation;
   const { sessionID } = reviewed;
   const end = (code: ChainClosure["code"]) =>
     closeChains([{ state: step.state, code }], dependencies);
-
-  const { request } = reviewed;
-
-  // Unreachable: the core only decides `DELIVER` from a request.
-  if (request === null) return;
 
   if (!chains.countDelivery(sessionID)) {
     await end("SESSION_LIMIT");
@@ -142,7 +137,7 @@ async function deliver(
 
   const draft = await draftProposal(request, dependencies, "remediate");
 
-  if (draft.status === "DUPLICATE" || draft.status === "SHOWN") return;
+  if (draft.status === "DUPLICATE") return;
 
   if (draft.status === "FAILED") {
     await end("PROPOSAL_FAILED");

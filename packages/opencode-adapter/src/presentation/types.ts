@@ -1,4 +1,4 @@
-import type { TurnReview } from "@jevguard/core";
+import type { ChainStopCode, TurnReview } from "@jevguard/core";
 import type { DeliveryStatus, StructuredLogSink } from "@jevguard/node-infra";
 import type { AttributionFailureReason } from "../attribution/types";
 
@@ -94,7 +94,7 @@ export type RemediationChainEvent =
       readonly chainId: string;
       readonly attempt: number;
       readonly maxAttempts: number;
-      readonly code: string;
+      readonly code: ChainStopCode;
     }
   | {
       readonly kind: "REMEDIATION_RESOLVED";

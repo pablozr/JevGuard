@@ -42,6 +42,8 @@ export type ProposalDraft =
   | { readonly status: "FAILED" }
   | { readonly status: "DUPLICATE" };
 
+const FAILED: ProposalDraft = { status: "FAILED" };
+
 /**
  * Creates at most one automatic proposal for an evaluated turn (OpenCode 2.2.x) and
  * shows it to the user in the child session (observe).
@@ -130,9 +132,7 @@ export async function draftProposal(
   try {
     await dependencies.proposalFacade.prompt({
       sessionID,
-      text: `${PROPOSER_AGENT_PROMPT}
-
-${buildProposalText(request)}`,
+      text: `${PROPOSER_AGENT_PROMPT}\n\n${buildProposalText(request)}`,
     });
   } catch {
     // Release the waiter and its timer: the child never ran.
@@ -154,8 +154,6 @@ ${buildProposalText(request)}`,
       return FAILED;
   }
 }
-
-const FAILED: ProposalDraft = { status: "FAILED" };
 
 async function readAnswer(
   sessionID: string,
