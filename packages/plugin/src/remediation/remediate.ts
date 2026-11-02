@@ -4,10 +4,11 @@ import {
   type ChainEndSink,
   type ChainStep,
   chainEndOf,
-  decideChainStep,
   decideOrphanStep,
+  decideRemediateStep,
   deliveryFindingsOf,
   formatAgentDelivery,
+  PROPOSAL_MAX_TEXT_LENGTH,
   type RemediationProposalRequest,
   type ReviewResult,
   recordClosures,
@@ -22,9 +23,6 @@ import type {
 } from "@jevguard/opencode-adapter";
 import type { RemediationChains } from "./chains";
 import { contain, draftProposal, type ProposalDependencies } from "./propose";
-
-/** Longest proposer answer carried into a delivery; the rest is dropped. */
-export const MAX_STRATEGY_TEXT_LENGTH = 32_768;
 
 /** What `remediate` needs once the user's file opted in; absent otherwise. */
 export interface RemediateSetup {
@@ -106,16 +104,14 @@ function chainStepOf(reviewed: ReviewedTurn, setup: RemediateSetup): ChainStep {
   const { mark, mixed } = reviewed.delivery;
   const chain = mark === null ? null : setup.chains.load(mark.chainId);
 
-  if (mixed && chain !== null) return decideOrphanStep(chain, setup.maxAttempts);
-
-  return decideChainStep({
-    mode: "remediate",
+  return decideRemediateStep({
     maxAttempts: setup.maxAttempts,
     delivery: mark,
     chain,
-    request: mixed ? null : reviewed.request,
+    request: reviewed.request,
     results: reviewed.results,
     turnId: reviewed.turn.id,
+    mixed,
   });
 }
 
@@ -156,7 +152,7 @@ async function deliver(
     unit: `turn ${reviewed.turn.id}`,
     ...mark,
     findings: deliveryFindingsOf(request),
-    strategyText: draft.status === "READY" ? draft.text.slice(0, MAX_STRATEGY_TEXT_LENGTH) : "",
+    strategyText: draft.status === "READY" ? draft.text.slice(0, PROPOSAL_MAX_TEXT_LENGTH) : "",
   });
 
   try {

@@ -4,9 +4,12 @@ import {
   abandonDeliver,
   decideChainStep,
   decideOrphanStep,
+  decideRemediateStep,
   failureSignature,
   isAttemptCount,
+  MAX_AGENT_DELIVERIES_PER_SESSION,
   parseChainState,
+  withinSessionLimit,
 } from "../src";
 
 const REQUEST = {} as RemediationProposalRequest;
@@ -337,5 +340,48 @@ describe("parseChainState", () => {
   it("rejects what is not a record", () => {
     expect(parseChainState(null)).toBeNull();
     expect(parseChainState([saved])).toBeNull();
+  });
+});
+
+describe("decideRemediateStep", () => {
+  const chain = stateAfterFirst([rule("rule-a", "FAIL")]);
+  const delivery = { attempt: 1, maxAttempts: 2, chainId: chain.chainId };
+
+  it("is decideChainStep in remediate", () => {
+    const base = {
+      maxAttempts: 2,
+      delivery,
+      chain,
+      request: REQUEST,
+      results: [rule("rule-a", "PASS")],
+      turnId: "t2",
+    };
+
+    expect(decideRemediateStep(base)).toEqual(decideChainStep({ ...base, mode: "remediate" }));
+  });
+
+  it("ends a mixed turn's saved chain as UNVERIFIED and starts none without one", () => {
+    const mixed = {
+      maxAttempts: 2,
+      delivery,
+      chain,
+      request: REQUEST,
+      results: [],
+      turnId: "t2",
+      mixed: true,
+    };
+
+    expect(decideRemediateStep(mixed)).toMatchObject({ kind: "STOP", code: "UNVERIFIED" });
+    expect(decideRemediateStep({ ...mixed, chain: null, delivery: null })).toEqual({
+      kind: "NONE",
+    });
+  });
+});
+
+describe("withinSessionLimit", () => {
+  it("allows deliveries below the limit only", () => {
+    expect(withinSessionLimit(0)).toBe(true);
+    expect(withinSessionLimit(MAX_AGENT_DELIVERIES_PER_SESSION - 1)).toBe(true);
+    expect(withinSessionLimit(MAX_AGENT_DELIVERIES_PER_SESSION)).toBe(false);
   });
 });

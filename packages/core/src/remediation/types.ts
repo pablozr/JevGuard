@@ -19,8 +19,10 @@ export type RemediationMode = "observe" | "remediate";
 export const MAX_ATTEMPTS_DEFAULT = 2;
 export const MAX_ATTEMPTS_CEILING = 3;
 
+/** The unanchored shape of a chain id, for patterns that find one inside a longer text. */
+export const CHAIN_ID_SOURCE = "[A-Za-z0-9._:-]{1,512}";
 /** The shape of a chain id (the id of the turn that started it), wherever it is stored or parsed. */
-export const CHAIN_ID_PATTERN = /^[A-Za-z0-9._:-]{1,512}$/;
+export const CHAIN_ID_PATTERN = new RegExp(`^${CHAIN_ID_SOURCE}$`);
 /** The shape of a rule id or built-in check id carried by a chain. */
 export const FINDING_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 
@@ -36,6 +38,14 @@ export function isAttemptCount(value: unknown): value is number {
 
 /** Remediation messages one session may send to its agent. */
 export const MAX_AGENT_DELIVERIES_PER_SESSION = 3;
+
+/** Longest proposer answer carried into a delivery or shown as a proposal; the rest is dropped. */
+export const PROPOSAL_MAX_TEXT_LENGTH = 32_768;
+
+/** True while a session has made fewer agent deliveries than the limit allows. */
+export function withinSessionLimit(deliveredInSession: number): boolean {
+  return deliveredInSession < MAX_AGENT_DELIVERIES_PER_SESSION;
+}
 
 /** MVP proposal trigger. `WARN` and every operational outcome never trigger. */
 export type ProposalTrigger = "FAIL";

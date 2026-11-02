@@ -2,8 +2,8 @@ import type { ChainClosure, ChainOutcomeIds, ChainState, ChainStep } from "@jevg
 import {
   abandonDeliver,
   chainIdsOf,
-  decideChainStep,
   decideOrphanStep,
+  decideRemediateStep,
   parseAutoDelivery,
   recordClosures as recordChainClosures,
 } from "@jevguard/core";
@@ -68,8 +68,7 @@ export function chainStepOf(
       ? null
       : dependencies.proposals.loadChain(handoff, delivery.chainId);
 
-  return decideChainStep({
-    mode: settings.settings.mode,
+  return decideRemediateStep({
     maxAttempts: settings.settings.maxAttempts,
     delivery,
     chain,

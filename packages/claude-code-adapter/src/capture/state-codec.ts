@@ -2,6 +2,7 @@ import type { CaptureProblem, PostImage } from "../acquisition";
 import { decodeHookEvent, isHookEventParseFailure } from "../hook-event";
 import { isJsonObject } from "../hook-event/shell-diff";
 import type { JsonObject } from "../hook-event/types";
+import { hasKeys } from "../presentation/json-record";
 import type {
   GitSnapshot,
   LineCapture,
@@ -20,12 +21,6 @@ const CAPTURE_KEYS: readonly string[] = ["postImages", "gitDiff", "problems"];
 
 function onlyKeys(value: JsonObject, allowed: readonly string[]): boolean {
   return Object.keys(value).every((key) => allowed.includes(key));
-}
-
-function hasKeys(value: JsonObject, keys: readonly string[]): boolean {
-  return (
-    Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key))
-  );
 }
 
 function isDigest(value: unknown): value is string {

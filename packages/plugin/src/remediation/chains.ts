@@ -1,7 +1,8 @@
 import {
   type ChainClosure,
   type ChainState,
-  MAX_AGENT_DELIVERIES_PER_SESSION,
+  expiredClosure,
+  withinSessionLimit,
 } from "@jevguard/core";
 
 /** Chains kept in memory at once; the oldest one is dropped (and ends as `EXPIRED`) past it. */
@@ -23,7 +24,13 @@ export interface RemediationChains {
   countDelivery(sessionID: string): boolean;
 }
 
-export function createRemediationChains(maxChains: number = MAX_ACTIVE_CHAINS): RemediationChains {
+/** Sessions whose delivery count is kept at once. */
+export const MAX_COUNTED_SESSIONS = 1024;
+
+export function createRemediationChains(
+  maxChains: number = MAX_ACTIVE_CHAINS,
+  maxSessions: number = MAX_COUNTED_SESSIONS,
+): RemediationChains {
   const chains = new Map<string, { readonly sessionID: string; readonly state: ChainState }>();
   const deliveries = new Map<string, number>();
 
@@ -45,7 +52,7 @@ export function createRemediationChains(maxChains: number = MAX_ACTIVE_CHAINS): 
         if (chains.size <= maxChains) break;
 
         chains.delete(chainId);
-        dropped.push({ state: entry.state, code: "EXPIRED" });
+        dropped.push(expiredClosure(entry.state));
       }
 
       return dropped;
@@ -68,9 +75,18 @@ export function createRemediationChains(maxChains: number = MAX_ACTIVE_CHAINS): 
     countDelivery(sessionID) {
       const count = deliveries.get(sessionID) ?? 0;
 
-      if (count >= MAX_AGENT_DELIVERIES_PER_SESSION) return false;
+      if (!withinSessionLimit(count)) return false;
 
+      deliveries.delete(sessionID);
       deliveries.set(sessionID, count + 1);
+
+      // The session counts are kept for the process's life; past the cap the least recently
+      // counted session is forgotten (its limit starts over) so the map cannot grow forever.
+      for (const known of deliveries.keys()) {
+        if (deliveries.size <= maxSessions) break;
+
+        deliveries.delete(known);
+      }
 
       return true;
     },

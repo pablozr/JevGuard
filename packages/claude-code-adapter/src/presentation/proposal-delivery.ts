@@ -5,17 +5,23 @@ import {
   isAutoDeliveredTask,
   MAX_AGENT_DELIVERIES_PER_SESSION,
   PROPOSAL_END,
+  PROPOSAL_MAX_TEXT_LENGTH,
   PROPOSAL_START,
+  withinSessionLimit,
 } from "@jevguard/core";
 import { unitLabelOf } from "./describe-review";
 import type { ProposalDelivery, ProposalFailureCode, ProposalView } from "./types";
 
-export { AUTO_DELIVERY_MARKER, isAutoDeliveredTask, MAX_AGENT_DELIVERIES_PER_SESSION };
+export {
+  AUTO_DELIVERY_MARKER,
+  isAutoDeliveredTask,
+  MAX_AGENT_DELIVERIES_PER_SESSION,
+  PROPOSAL_MAX_TEXT_LENGTH,
+};
 
 export const PROPOSAL_MAX_TOKENS = 4096;
 export const PROPOSAL_TIMEOUT_MS = 180_000;
 export const PROPOSAL_LOG_CHUNK = 1900;
-export const PROPOSAL_MAX_TEXT_LENGTH = 32_768;
 
 const CONTROL_CHARACTERS = /(?![\n\t])\p{Cc}/gu;
 const TRUNCATION_MARKER = "\n[truncated]";
@@ -27,9 +33,7 @@ export function decideDelivery(
   requested: ProposalDelivery,
   deliveredInSession: number,
 ): ProposalDelivery {
-  return requested === "agent" && deliveredInSession < MAX_AGENT_DELIVERIES_PER_SESSION
-    ? "agent"
-    : "user";
+  return requested === "agent" && withinSessionLimit(deliveredInSession) ? "agent" : "user";
 }
 
 /** The "Manual apply" section of a proposal, or `null` when it is absent or empty. */

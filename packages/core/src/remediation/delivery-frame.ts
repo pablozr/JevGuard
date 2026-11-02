@@ -1,4 +1,5 @@
 import type { AutoDelivery } from "./chain";
+import { CHAIN_ID_SOURCE } from "./types";
 
 /** First words of every automatic delivery; a later turn's task is searched for it. */
 export const AUTO_DELIVERY_MARKER = "[JevGuard remediation proposal · automatic delivery";
@@ -15,8 +16,9 @@ const STOP_CLAUSE =
   "If you believe a finding is wrong, say so and stop instead of forcing a change.";
 const CONTROL_CHARACTERS = /(?![\n\t])\p{Cc}/gu;
 const FINDING_TEXT_MAX = 1000;
-const MARK =
-  /\[JevGuard remediation proposal · automatic delivery(?: · [^\n\]·]*? · attempt ([1-9][0-9]*)\/([1-9][0-9]*) · chain ([A-Za-z0-9._:-]{1,512}))?\]/;
+const MARK = new RegExp(
+  `\\[JevGuard remediation proposal · automatic delivery(?: · [^\\n\\]·]*? · attempt ([1-9][0-9]*)/([1-9][0-9]*) · chain (${CHAIN_ID_SOURCE}))?\\]`,
+);
 
 /** One finding as the agent sees it: ids, severity, probability, paths and the rule's own text. */
 export interface DeliveryFinding {
