@@ -29,6 +29,9 @@ import type {
   RemediationChainLog,
 } from "@jevguard/node-infra";
 import {
+  createOpenCodeOriginPromptFacade,
+  createOpenCodeProposalSessionFacade,
+  createOpenCodeSessionFacade,
   createTurnTracker,
   type DeliveryMark,
   InMemoryTurnDeduplicator,
@@ -48,8 +51,9 @@ import {
   type ReviewPresenter,
   type WorkingFileDiff,
 } from "@jevguard/opencode-adapter";
+import { fileURLToPath } from "node:url";
 import type { Plugin } from "@opencode/plugin";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import plugin from "../src/index";
 import { createPluginDependencies, startPlugin } from "../src/plugin";
 import { createRemediationChains, MAX_ACTIVE_CHAINS } from "../src/remediation/chains";
@@ -57,6 +61,18 @@ import { createChildExecutionWatcher } from "../src/remediation/child-executions
 import { type ProposalDependencies, proposeForTurn } from "../src/remediation/propose";
 import { createPluginRuntime } from "../src/runtime";
 import type { PluginRuntime, PluginRuntimeDependencies } from "../src/types";
+import {
+  assistantMessage,
+  type ContextMessage,
+  createFakeOpenCodeContext,
+  type FakeOpenCodeContext,
+  fileDiff,
+  executionEvent as hostEvent,
+  idleMessage,
+  type RetryInput,
+  syntheticMessage,
+  userMessage,
+} from "./fakes/opencode-context";
 
 const SESSION_ID = "ses_1";
 const SECOND_SESSION_ID = "ses_2";
@@ -2345,114 +2361,29 @@ describe("JevGuardPlugin execution lifecycle (2.2.x)", () => {
   });
 });
 
-interface FakeHostContext {
-  readonly context: Plugin.Context;
-  readonly retryHandlers: Array<(retry: { sessionID: string; decision?: unknown }) => void>;
-  readonly toolHandlers: Array<(event: unknown) => void>;
-  readonly transforms: Array<(editor: unknown) => void>;
-  readonly disposed: string[];
-  readonly push: (event: unknown) => void;
-  readonly subscribed: Array<{ types?: readonly string[]; signal?: AbortSignal }>;
-}
-
-/** Minimal 2.2.x context fake for `startPlugin`: registrations and an event stream. */
-function fakeHostContext(root: string): FakeHostContext {
-  const retryHandlers: FakeHostContext["retryHandlers"] = [];
-  const toolHandlers: FakeHostContext["toolHandlers"] = [];
-  const transforms: FakeHostContext["transforms"] = [];
-  const disposed: string[] = [];
-  const subscribed: FakeHostContext["subscribed"] = [];
-  const queue: unknown[] = [];
-  let wake: (() => void) | null = null;
-
-  const registration = (name: string) => ({
-    dispose: async () => {
-      disposed.push(name);
-    },
-  });
-
-  async function* stream(signal: AbortSignal | undefined): AsyncGenerator<unknown> {
-    while (signal?.aborted !== true) {
-      const next = queue.shift();
-
-      if (next !== undefined) {
-        yield next;
-        continue;
-      }
-
-      await new Promise<void>((resolve) => {
-        wake = resolve;
-        signal?.addEventListener("abort", () => resolve(), { once: true });
-      });
-    }
-  }
-
-  const context = {
-    location: { project: { canonical: root } },
-    session: {
-      hook: async (name: string, handler: (retry: { sessionID: string }) => void) => {
-        retryHandlers.push(handler);
-        return registration(`session.${name}`);
-      },
-    },
-    tool: {
-      hook: async (name: string, handler: (event: unknown) => void) => {
-        toolHandlers.push(handler);
-        return registration(`tool.${name}`);
-      },
-    },
-    skill: {
-      transform: async (callback: (editor: unknown) => void) => {
-        transforms.push(callback);
-        return registration("skill.transform");
-      },
-    },
-    event: {
-      subscribe: (options: { types?: readonly string[]; signal?: AbortSignal }) => {
-        subscribed.push(options);
-        return stream(options.signal);
-      },
-    },
-  } as unknown as Plugin.Context;
-
-  return {
-    context,
-    retryHandlers,
-    toolHandlers,
-    transforms,
-    disposed,
-    subscribed,
-    push(event) {
-      queue.push(event);
-      wake?.();
-      wake = null;
-    },
-  };
-}
-
 async function settle(): Promise<void> {
   for (let index = 0; index < 5; index += 1) {
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
 }
 
+const JEV_INIT_SKILL = fileURLToPath(new URL("../skills/jev-init", import.meta.url));
+
 describe("JevGuardPlugin setup (2.2.x)", () => {
   test("subscribes to the execution lifecycle, reviews from the stream, and cleans up", async () => {
     const values = harness();
-    const host = fakeHostContext("/repo");
+    const host = createFakeOpenCodeContext();
     const { runtime, cleanup } = await startPlugin(host.context, values.dependencies, []);
 
-    expect(host.subscribed[0]?.types).toEqual([
+    expect(host.subscriptions[0]?.types).toEqual([
       "session.execution.started",
       "session.execution.succeeded",
       "session.execution.interrupted",
       "session.execution.failed",
     ]);
 
-    for (const event of turnEvents()) {
-      host.push(event);
-    }
-
+    host.emit(hostEvent("started", SESSION_ID));
+    host.emit(hostEvent("succeeded", SESSION_ID));
     await settle();
     await runtime.drain();
 
@@ -2460,7 +2391,7 @@ describe("JevGuardPlugin setup (2.2.x)", () => {
 
     await cleanup();
 
-    expect(host.subscribed[0]?.signal?.aborted).toBe(true);
+    expect(host.subscriptions[0]?.signal?.aborted).toBe(true);
     expect([...host.disposed].sort()).toEqual([
       "session.retry",
       "skill.transform",
@@ -2470,16 +2401,16 @@ describe("JevGuardPlugin setup (2.2.x)", () => {
 
   test("disables retry only for registered proposer child sessions", async () => {
     const values = harness();
-    const host = fakeHostContext("/repo");
+    const host = createFakeOpenCodeContext();
     const { cleanup } = await startPlugin(host.context, values.dependencies, []);
 
     values.proposals.registerChildSession(CHILD_SESSION_ID);
 
-    const child: { sessionID: string; decision?: unknown } = { sessionID: CHILD_SESSION_ID };
-    const origin: { sessionID: string; decision?: unknown } = { sessionID: SESSION_ID };
+    const child: RetryInput = { sessionID: CHILD_SESSION_ID };
+    const origin: RetryInput = { sessionID: SESSION_ID };
 
-    host.retryHandlers[0]?.(child);
-    host.retryHandlers[0]?.(origin);
+    await host.fireRetry(child);
+    await host.fireRetry(origin);
 
     expect(child.decision).toEqual({ retry: false });
     expect(origin.decision).toBeUndefined();
@@ -2489,18 +2420,18 @@ describe("JevGuardPlugin setup (2.2.x)", () => {
 
   test("a write the diff never shows makes the execution INCOMPLETE_FILE_DIFF, whatever its status", async () => {
     const values = harness();
-    const host = fakeHostContext("/repo");
+    const host = createFakeOpenCodeContext();
     const { runtime, cleanup } = await startPlugin(host.context, values.dependencies, []);
 
-    host.push(executionEvent("started"));
+    host.emit(hostEvent("started", SESSION_ID));
     await settle();
-    host.toolHandlers[0]?.({
+    await host.fireToolAfter({
       tool: "write",
       sessionID: SESSION_ID,
       input: { filePath: "/repo/failed.ts" },
       status: "error",
     });
-    host.push(executionEvent("succeeded"));
+    host.emit(hostEvent("succeeded", SESSION_ID));
     await settle();
     await runtime.drain();
 
@@ -2514,9 +2445,25 @@ describe("JevGuardPlugin setup (2.2.x)", () => {
     await cleanup();
   });
 
+  test("registers the bundled skills through the skill transform, idempotently", async () => {
+    const values = harness();
+    const host = createFakeOpenCodeContext();
+    const { cleanup } = await startPlugin(host.context, values.dependencies, [JEV_INIT_SKILL]);
+
+    host.runSkillTransforms();
+
+    const editor = host.runSkillTransforms();
+
+    expect(editor.list().map((skill) => skill.id)).toEqual(["jev-init"]);
+    expect(editor.get("jev-init")?.content).toContain("jev-init");
+    expect(host.runAgentTransforms().list()).toEqual([]);
+
+    await cleanup();
+  });
+
   test("cleanup never throws when a registration fails to dispose", async () => {
     const values = harness();
-    const host = fakeHostContext("/repo");
+    const host = createFakeOpenCodeContext();
     const failing = {
       ...host.context,
       skill: {
@@ -2786,7 +2733,7 @@ describe("JevGuardPlugin remediation chains store", () => {
 
 describe("JevGuardPlugin remediation opt-in", () => {
   test("turns remediate on only from an ENABLED remediate user file", () => {
-    const host = fakeHostContext("/repo");
+    const host = createFakeOpenCodeContext();
     const enabled = createPluginDependencies(host.context, () => ({
       status: "ENABLED",
       settings: { delivery: "agent", model: null, mode: "remediate", maxAttempts: 3 },
@@ -2805,5 +2752,250 @@ describe("JevGuardPlugin remediation opt-in", () => {
     expect(observe.remediation).toBeNull();
     expect(disabled.remediation).toBeNull();
     expect(invalid.remediation).toBeNull();
+  });
+});
+
+const PROPOSER_CHILD_ID = "ses_child_1";
+const ORIGIN_HOST_MODEL = { providerID: ORIGIN_MODEL.providerID, id: ORIGIN_MODEL.modelID };
+
+interface ContextRun {
+  readonly values: Harness;
+  readonly host: FakeOpenCodeContext;
+  readonly runtime: PluginRuntime;
+  readonly cleanup: () => Promise<void>;
+}
+
+/**
+ * The plugin end to end over the fake 2.2.x context: the real session, proposal and
+ * origin facades read and write through `host`; policy, Jev, presenter and logs stay
+ * the harness fakes. The origin session runs `ORIGIN_MODEL` and edits `src/a.ts`.
+ */
+async function startOnContext(
+  options: { readonly remediate?: { readonly maxAttempts: number } } = {},
+): Promise<ContextRun> {
+  const values = harness(options);
+  const host = createFakeOpenCodeContext({ root: "/repo" });
+  const remediation = values.dependencies.remediation;
+
+  errorFailSetup(values);
+  host.setSession(SESSION_ID, { model: ORIGIN_HOST_MODEL });
+  host.setMessages(SESSION_ID, originTurn());
+  host.scriptDiffs([], [fileDiff("src/a.ts", PATCH)]);
+  host.setChildAnswer(PROPOSER_ANSWER);
+
+  const { runtime, cleanup } = await startPlugin(
+    host.context,
+    {
+      ...values.dependencies,
+      tracker: createTurnTracker({
+        facade: createOpenCodeSessionFacade(host.context, "/repo"),
+        deduplicator: new InMemoryTurnDeduplicator(),
+      }),
+      proposalFacade: createOpenCodeProposalSessionFacade(host.context),
+      remediation:
+        remediation === null
+          ? null
+          : { ...remediation, originPrompt: createOpenCodeOriginPromptFacade(host.context) },
+    },
+    [],
+  );
+
+  return { values, host, runtime, cleanup };
+}
+
+function originTurn(): ContextMessage[] {
+  return [userMessage(USER_ID, "Implement the thing."), assistantMessage(ASSISTANT_ID)];
+}
+
+/** One execution of the origin session through the event stream, then the drain. */
+async function hostTurn(run: ContextRun, sessionID: string = SESSION_ID): Promise<void> {
+  run.host.emit(hostEvent("started", sessionID));
+  run.host.emit(hostEvent("succeeded", sessionID));
+  await settle();
+  await run.runtime.drain();
+}
+
+/** The synthetic message the host stores for the first queued delivery. */
+function storedDelivery(run: ContextRun): ContextMessage {
+  const call = run.host.calls.synthetic[0];
+
+  if (call === undefined) {
+    throw new Error("expected a synthetic delivery");
+  }
+
+  return syntheticMessage("msg_delivery", call.text, call.metadata);
+}
+
+describe("JevGuardPlugin over the fake 2.2.x context", () => {
+  test("observe: a FAIL prompts a deny-all child on the origin model and sends nothing", async () => {
+    const run = await startOnContext();
+
+    await hostTurn(run);
+
+    expect(lastReview(run.values.presenter).summary.verdict).toBe("FAIL");
+    expect(run.host.calls.diff).toEqual([
+      { mode: "working", untracked: "files" },
+      { mode: "working", untracked: "files" },
+    ]);
+    expect(run.host.calls.create).toEqual([
+      {
+        parentID: SESSION_ID,
+        title: "JevGuard remediation proposal",
+        model: ORIGIN_HOST_MODEL,
+        permissions: [{ action: "*", resource: "*", effect: "deny" }],
+      },
+    ]);
+    expect(run.host.calls.prompt.map((prompt) => prompt.sessionID)).toEqual([PROPOSER_CHILD_ID]);
+    expect(run.host.calls.prompt[0]?.text).toContain("TEST-1");
+    expect(run.values.notifier.calls).toEqual(["proposalPreparing", "proposalReady"]);
+    expect(run.host.calls.synthetic).toEqual([]);
+
+    const child: RetryInput = { sessionID: PROPOSER_CHILD_ID };
+
+    await run.host.fireRetry(child);
+
+    expect(child.decision).toEqual({ retry: false });
+
+    await run.cleanup();
+  });
+
+  test("reviews several queued inputs as one execution", async () => {
+    const run = await startOnContext();
+
+    run.host.setMessages(SESSION_ID, [
+      userMessage(USER_ID, "Implement the thing."),
+      userMessage(SECOND_USER_ID, "Also keep it small."),
+      assistantMessage(ASSISTANT_ID),
+    ]);
+    await hostTurn(run);
+
+    expect(run.values.presenter.reviews).toHaveLength(1);
+    expect(lastReview(run.values.presenter).turnId).toBe(ASSISTANT_ID);
+
+    await run.cleanup();
+  });
+
+  test("never reviews a turn without an edit", async () => {
+    const run = await startOnContext();
+
+    run.host.scriptDiffs([]);
+    await hostTurn(run);
+
+    expect(run.values.jev.requests).toEqual([]);
+    expect(run.host.calls.create).toEqual([]);
+
+    await run.cleanup();
+  });
+
+  test.each(["interrupted", "failed"] as const)(
+    "never reviews an execution that ends %s",
+    async (kind) => {
+      const run = await startOnContext();
+
+      run.host.emit(hostEvent("started", SESSION_ID));
+      run.host.emit(hostEvent(kind, SESSION_ID));
+      await settle();
+      await run.runtime.drain();
+
+      expect(run.values.presenter.reviews).toEqual([]);
+      expect(run.host.calls.diff).toHaveLength(1);
+      expect(run.host.calls.create).toEqual([]);
+
+      await run.cleanup();
+    },
+  );
+
+  test("remediate: queues one visible synthetic, attempt 1/2, then RESOLVED on the corrected turn", async () => {
+    const run = await startOnContext(REMEDIATE);
+
+    await hostTurn(run);
+
+    expect(run.host.calls.synthetic).toHaveLength(1);
+    expect(run.host.calls.synthetic[0]).toMatchObject({
+      sessionID: SESSION_ID,
+      description: "JevGuard remediation",
+      delivery: "queue",
+      metadata: { jevguard: { chainId: ASSISTANT_ID, attempt: 1, maxAttempts: 2 } },
+    });
+    expect(run.host.calls.synthetic[0]?.text).toContain(`attempt 1/2 · chain ${ASSISTANT_ID}`);
+    expect(run.host.calls.synthetic[0]?.text).toContain(PROPOSER_ANSWER);
+
+    run.host.setMessages(SESSION_ID, [
+      ...originTurn(),
+      idleMessage("msg_idle"),
+      storedDelivery(run),
+      assistantMessage(SECOND_ASSISTANT_ID),
+    ]);
+    run.host.scriptDiffs([], [fileDiff("src/a.ts", PATCH)]);
+    run.values.jev.probability = 0.1;
+    await hostTurn(run);
+
+    expect(run.host.calls.synthetic).toHaveLength(1);
+    expect(chainResults(run.values)).toEqual(["RESOLVED"]);
+    expect(run.values.chainLog.entries[0]).toMatchObject({
+      chainId: ASSISTANT_ID,
+      turnIds: [ASSISTANT_ID, SECOND_ASSISTANT_ID],
+    });
+
+    await run.cleanup();
+  });
+
+  test("remediate: a user input queued with the delivery leaves the chain UNVERIFIED", async () => {
+    const run = await startOnContext(REMEDIATE);
+
+    await hostTurn(run);
+    run.host.setMessages(SESSION_ID, [
+      ...originTurn(),
+      idleMessage("msg_idle"),
+      storedDelivery(run),
+      userMessage(SECOND_USER_ID, "Also rename it."),
+      assistantMessage(SECOND_ASSISTANT_ID),
+    ]);
+    run.host.scriptDiffs([], [fileDiff("src/a.ts", PATCH)]);
+    await hostTurn(run);
+
+    expect(run.host.calls.synthetic).toHaveLength(1);
+    expect(chainResults(run.values)).toEqual(["UNVERIFIED"]);
+
+    await run.cleanup();
+  });
+
+  test("remediate: a rejected synthetic ends the chain as DELIVERY_FAILED", async () => {
+    const run = await startOnContext(REMEDIATE);
+
+    run.host.setSyntheticBehavior("reject");
+    await hostTurn(run);
+
+    expect(chainResults(run.values)).toEqual(["DELIVERY_FAILED"]);
+
+    await run.cleanup();
+  });
+
+  test("onEvent and the event loop never wait for a pending synthetic delivery", async () => {
+    const run = await startOnContext(REMEDIATE);
+
+    run.host.setSyntheticBehavior("hold");
+    run.host.emit(hostEvent("started", SESSION_ID));
+    run.host.emit(hostEvent("succeeded", SESSION_ID));
+    await vi.waitFor(() => expect(run.host.calls.synthetic).toHaveLength(1));
+
+    // The delivery is still pending; another session's execution is reviewed meanwhile.
+    run.host.setMessages(SECOND_SESSION_ID, [
+      userMessage(SECOND_USER_ID, "Implement the other thing."),
+      assistantMessage(SECOND_ASSISTANT_ID),
+    ]);
+    run.host.scriptDiffs([], [fileDiff("src/b.ts", PATCH)]);
+    run.host.emit(hostEvent("started", SECOND_SESSION_ID));
+    run.host.emit(hostEvent("succeeded", SECOND_SESSION_ID));
+    await vi.waitFor(() => expect(run.values.presenter.reviews).toHaveLength(2));
+
+    expect(operationalKinds(run.values)).not.toContain("REMEDIATION_SENT");
+
+    run.host.releaseSynthetic();
+    await run.runtime.drain();
+
+    expect(operationalKinds(run.values)).toContain("REMEDIATION_SENT");
+
+    await run.cleanup();
   });
 });
