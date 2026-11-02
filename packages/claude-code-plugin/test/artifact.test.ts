@@ -183,6 +183,12 @@ describe("claude code artifact", () => {
     }
   });
 
+  test("no hook can block or inject: hooks.json has no decision or block output", () => {
+    const text = readFileSync(join(DIST_DIR, "hooks", "hooks.json"), "utf8");
+
+    expect(text).not.toMatch(/"decision"|"block"|additionalContext|continue/i);
+  });
+
   test("plugin.json names the plugin and carries no credential configuration", () => {
     const text = readFileSync(join(DIST_DIR, ".claude-plugin", "plugin.json"), "utf8");
     const manifest = JSON.parse(text) as { name?: string };

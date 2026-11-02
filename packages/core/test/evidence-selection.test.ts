@@ -1,11 +1,11 @@
 import { describe, expect, test } from "vitest";
+import type { EvidencePolicy, ParsedRule, RuleScope, Turn, TurnFile } from "../src/index";
 import {
   DEFAULT_EVIDENCE_POLICY,
   matchesRuleScope,
   selectRuleEvidence,
   selectTurnEvidence,
 } from "../src/index";
-import type { EvidencePolicy, ParsedRule, RuleScope, Turn, TurnFile } from "../src/index";
 
 function file(path: string, patch: string): TurnFile {
   return { path, patch };

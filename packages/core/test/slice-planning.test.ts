@@ -1,11 +1,4 @@
 import { describe, expect, test } from "vitest";
-import {
-  DEFAULT_EVIDENCE_POLICY,
-  MAX_EXTRA_RULE_CALLS_PER_TURN,
-  MAX_SLICES_PER_RULE,
-  planRuleEvidence,
-  planTurnRuleSlices,
-} from "../src/index";
 import type {
   EvidencePolicy,
   EvidenceSlice,
@@ -13,6 +6,13 @@ import type {
   RuleEvidencePlan,
   Turn,
   TurnFile,
+} from "../src/index";
+import {
+  DEFAULT_EVIDENCE_POLICY,
+  MAX_EXTRA_RULE_CALLS_PER_TURN,
+  MAX_SLICES_PER_RULE,
+  planRuleEvidence,
+  planTurnRuleSlices,
 } from "../src/index";
 
 function file(path: string, patch: string): TurnFile {

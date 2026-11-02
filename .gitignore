@@ -27,6 +27,9 @@ yarn-error.log*
 /docs/tasks/
 /PLUGIN-FLOW.md
 
+# Local OpenCode dogfood install
+/.opencode/
+
 # Editor and operating-system files
 .DS_Store
 Thumbs.db

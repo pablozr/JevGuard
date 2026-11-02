@@ -1,10 +1,4 @@
 import { describe, expect, test } from "vitest";
-import {
-  DEFAULT_EVIDENCE_POLICY,
-  DEFAULT_GATE_CONFIG,
-  evaluateRules,
-  parseRules,
-} from "../src/index";
 import type {
   GateConfigResult,
   JevEvaluationPort,
@@ -16,6 +10,12 @@ import type {
   RuleCandidateResult,
   Turn,
   TurnFile,
+} from "../src/index";
+import {
+  DEFAULT_EVIDENCE_POLICY,
+  DEFAULT_GATE_CONFIG,
+  evaluateRules,
+  parseRules,
 } from "../src/index";
 
 class SequencedJevPort implements JevEvaluationPort {

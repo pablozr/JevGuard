@@ -35,3 +35,17 @@ export function proposalRequestFileOf(
 
   return `${directory}/${sessionId}/${name}.json`;
 }
+
+/**
+ * Where the mod reports that the chain request of one unit ended without reaching the
+ * agent; it sits next to the request, and `null` under the same conditions.
+ */
+export function proposalOutcomeFileOf(
+  environment: FeedEnvironment,
+  sessionId: string,
+  turnId: string,
+): string | null {
+  const request = proposalRequestFileOf(environment, sessionId, turnId);
+
+  return request === null ? null : request.replace(/\.json$/, ".outcome.json");
+}

@@ -1,5 +1,5 @@
-import type { RuleCandidateResult, RuleParseResult } from "./types";
 import { collectRuleBlocks, parseRuleBlock, ruleParseFailure } from "./blocks";
+import type { RuleCandidateResult, RuleParseResult } from "./types";
 
 /**
  * Parses one `.jev/rules.md` document into a validated rule, or reports a

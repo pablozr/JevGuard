@@ -1,8 +1,8 @@
 import { aggregateReview } from "@jevguard/core";
 import { describe, expect, test } from "vitest";
 import {
-  agentDeliveryText,
   AUTO_DELIVERY_MARKER,
+  agentDeliveryText,
   baselineWatch,
   CLAUDE_MODEL_PATTERN,
   chunkText,
@@ -305,5 +305,107 @@ describe("feed proposal flag", () => {
     const tick = tickWatch(watch, [flagged], "sess1", NOW);
 
     expect(tick.proposals).toEqual([]);
+  });
+});
+
+const CHAIN = {
+  chainId: TURN_ID,
+  attempt: 1,
+  maxAttempts: 2,
+  findings: [
+    {
+      id: "no-eval",
+      severity: "error",
+      probability: 0.93,
+      paths: ["src/a.ts"],
+      violation: "Calls eval.",
+      allowed: null,
+    },
+  ],
+};
+
+describe("remediation chain in a request file", () => {
+  test("a valid chain on an agent delivery is kept", () => {
+    expect(parsed(requestFile({ delivery: "agent", chain: CHAIN }))).toMatchObject({
+      delivery: "agent",
+      chain: CHAIN,
+    });
+    expect(parsed(requestFile({ delivery: "agent" }))).not.toHaveProperty("chain");
+  });
+
+  test("a malformed chain rejects the whole request", () => {
+    const bad: Record<string, unknown>[] = [
+      { ...CHAIN, attempt: 0 },
+      { ...CHAIN, attempt: 4, maxAttempts: 4 },
+      { ...CHAIN, attempt: 3, maxAttempts: 2 },
+      { ...CHAIN, attempt: 1.5 },
+      { ...CHAIN, chainId: "bad id" },
+      { ...CHAIN, findings: [] },
+      { ...CHAIN, extra: 1 },
+      { ...CHAIN, findings: [{ ...CHAIN.findings[0], severity: "fatal" }] },
+      { ...CHAIN, findings: [{ ...CHAIN.findings[0], probability: 2 }] },
+      { ...CHAIN, findings: [{ ...CHAIN.findings[0], extra: true }] },
+      { ...CHAIN, findings: [{ ...CHAIN.findings[0], violation: "x".repeat(2001) }] },
+    ];
+
+    for (const chain of bad) {
+      expect(parsed(requestFile({ delivery: "agent", chain }))).toBeNull();
+    }
+    expect(parsed(requestFile({ delivery: "agent", chain: null }))).toBeNull();
+  });
+
+  test("a chain on a user delivery is rejected", () => {
+    expect(parsed(requestFile({ delivery: "user", chain: CHAIN }))).toBeNull();
+  });
+});
+
+describe("remediation chain in the feed", () => {
+  const FEED_CHAIN = { chainId: TURN_ID, attempt: 1, maxAttempts: 2, result: "RESOLVED", fixed: 2 };
+  const feedLine = (chain: unknown) => JSON.stringify({ ...toFeedRecorded(REVIEW, [], AT), chain });
+
+  test("a chain serializes only when present and round-trips", () => {
+    expect(JSON.stringify(toFeedRecorded(REVIEW, [], AT))).not.toContain("chain");
+    expect(parseReviewFeed(feedLine(FEED_CHAIN))[0]).toMatchObject({ chain: FEED_CHAIN });
+    expect(
+      parseReviewFeed(JSON.stringify(toFeedRecorded(REVIEW, [], AT, false, FEED_CHAIN)))[0],
+    ).toMatchObject({ chain: FEED_CHAIN });
+  });
+
+  test("a malformed chain drops the line", () => {
+    const bad: unknown[] = [
+      null,
+      { ...FEED_CHAIN, attempt: 9 },
+      { ...FEED_CHAIN, result: "not a code" },
+      { ...FEED_CHAIN, fixed: -1 },
+      { ...FEED_CHAIN, extra: 1 },
+      { chainId: TURN_ID },
+    ];
+
+    for (const chain of bad) expect(parseReviewFeed(feedLine(chain))).toEqual([]);
+  });
+
+  test("a tick announces an ended chain once and stays quiet while it is delivering", () => {
+    const stopped = toFeedRecorded(REVIEW, [], AT, false, {
+      ...FEED_CHAIN,
+      result: "REPEATED_FAILURE",
+      fixed: 0,
+    });
+    const delivering = {
+      ...toFeedRecorded(REVIEW, [], AT, true, { ...FEED_CHAIN, result: "DELIVERING" }),
+      turnId: `claude-code:sess1:${EPOCH}:4`,
+    };
+    const tick = tickWatch(
+      { ...emptyWatch(), armedAtMs: NOW },
+      [stopped, delivering],
+      "sess1",
+      NOW,
+    );
+
+    expect(tick.chains).toEqual([
+      {
+        turnId: TURN_ID,
+        text: "JevGuard remediation stopped · unit 3 · attempt 1/2 · REPEATED_FAILURE",
+      },
+    ]);
   });
 });

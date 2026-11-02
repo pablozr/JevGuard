@@ -2,8 +2,8 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
-import { createNodePolicyFileSystem, createPolicyFileLoader } from "../src/index";
 import type { PolicyFileSystem } from "../src/index";
+import { createNodePolicyFileSystem, createPolicyFileLoader } from "../src/index";
 
 const ROOT = join("C:", "repo");
 

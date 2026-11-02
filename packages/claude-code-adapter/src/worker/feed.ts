@@ -34,10 +34,13 @@ export function createNodeReviewFeed(
     started(handoff) {
       append(handoff, toFeedStarted(handoff.turnId, now().toISOString()));
     },
-    recorded(handoff, review, proposal) {
+    recorded(handoff, review, proposal, chain, remediationConfig) {
       const causes = handoff.resolution.status === "UNAVAILABLE" ? handoff.resolution.causes : [];
 
-      return append(handoff, toFeedRecorded(review, causes, now().toISOString(), proposal));
+      return append(
+        handoff,
+        toFeedRecorded(review, causes, now().toISOString(), proposal, chain, remediationConfig),
+      );
     },
     sweep() {
       const directory = reviewFeedDirectoryOf(feedEnvironment);

@@ -6,8 +6,8 @@ import type {
   JevRuleRequest,
 } from "@jevguard/core";
 import { describe, expect, test } from "vitest";
-import { buildTypeSafeClientConfig, createJevTransport } from "../src/index";
 import type { TypeSafeSystemOneClient, TypeSafeSystemOneRequest } from "../src/index";
+import { buildTypeSafeClientConfig, createJevTransport } from "../src/index";
 
 const API_KEY = "resolved-test-key";
 const TASK = "Add a health endpoint";

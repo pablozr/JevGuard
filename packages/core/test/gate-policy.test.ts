@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { DEFAULT_GATE_CONFIG, evaluateGate, resolveGateConfig } from "../src/index";
 import type { GateConfig } from "../src/index";
+import { DEFAULT_GATE_CONFIG, evaluateGate, resolveGateConfig } from "../src/index";
 
 const customConfig: GateConfig = {
   version: 1,

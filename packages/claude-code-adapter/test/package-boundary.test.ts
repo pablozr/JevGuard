@@ -78,10 +78,9 @@ describe("claude-code-adapter package boundary", () => {
     expect(offenders).toEqual([]);
   });
 
-  test("presentation imports core and acquisition as types only and no I/O sibling", () => {
+  test("presentation imports acquisition as types only, core as pure values and no I/O sibling", () => {
     const files = filesOf(["presentation"]);
-    const valueImport =
-      /\bimport\s+(?!type\b)[^;]*?from\s+["'](?:@jevguard\/core|\.\.\/acquisition)["']/;
+    const valueImport = /\bimport\s+(?!type\b)[^;]*?from\s+["']\.\.\/acquisition["']/;
 
     expect(files.length).toBeGreaterThan(0);
     expect(files.filter((file) => valueImport.test(readFileSync(file, "utf8")))).toEqual([]);

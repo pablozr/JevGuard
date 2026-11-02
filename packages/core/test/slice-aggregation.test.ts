@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { DEFAULT_EVIDENCE_POLICY, DEFAULT_GATE_CONFIG, evaluateRules } from "../src/index";
+import { assembleSlicedRuleResult } from "../src/evaluation/assemble-rule";
 import type {
   EvidencePolicy,
   GateConfigResult,
@@ -14,7 +14,7 @@ import type {
   Turn,
   TurnFile,
 } from "../src/index";
-import { assembleSlicedRuleResult } from "../src/evaluation/assemble-rule";
+import { DEFAULT_EVIDENCE_POLICY, DEFAULT_GATE_CONFIG, evaluateRules } from "../src/index";
 
 const validConfig: GateConfigResult = { status: "VALID", config: DEFAULT_GATE_CONFIG };
 

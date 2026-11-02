@@ -1,4 +1,5 @@
 import type {
+  ChainState,
   JevEvaluationPort,
   JevEvaluationResult,
   JevRequest,
@@ -6,13 +7,19 @@ import type {
   JevRuleRequest,
   PolicyLoader,
 } from "@jevguard/core";
-import type { ReviewHistoryFileSystem, ReviewHistoryRecord } from "@jevguard/node-infra";
+import { formatAgentDelivery } from "@jevguard/core";
+import type {
+  RemediationChainEntry,
+  ReviewHistoryFileSystem,
+  ReviewHistoryRecord,
+} from "@jevguard/node-infra";
 import { createLocalReviewHistory } from "@jevguard/node-infra";
 import { describe, expect, test } from "vitest";
 import type { ClaudeReviewHandoff } from "../src/hook";
 import {
   AUTO_DELIVERY_MARKER,
   type ProposalRequestFile,
+  type ReviewFeedChain,
   toFeedRecorded,
   toFeedStarted,
 } from "../src/presentation";
@@ -219,6 +226,9 @@ class Harness {
   readonly proposalWrites: ProposalRequestFile[] = [];
   readonly proposalRemovals: string[] = [];
   readonly feedProposalFlags: boolean[] = [];
+  readonly feedChains: (ReviewFeedChain | undefined)[] = [];
+  readonly chains = new Map<string, ChainState>();
+  readonly chainEntries: RemediationChainEntry[] = [];
   proposalWriteResult: "WRITTEN" | "FAILED" = "WRITTEN";
   proposalSweeps = 0;
   parsedConfig: unknown = null;
@@ -253,8 +263,25 @@ class Harness {
         remove: (value) => {
           this.proposalRemovals.push(value.turnId);
         },
+        loadChain: (_handoff, chainId) => this.chains.get(chainId) ?? null,
+        saveChain: (_handoff, state) => {
+          this.chains.set(state.chainId, state);
+
+          return true;
+        },
+        removeChain: (_handoff, chainId) => {
+          this.chains.delete(chainId);
+        },
         sweep: () => {
           this.proposalSweeps += 1;
+
+          return [];
+        },
+        activeChain: () => [...this.chains.values()].at(-1) ?? null,
+      },
+      chainLog: {
+        record: async (entry) => {
+          this.chainEntries.push(entry);
         },
       },
       jevFor: () => {
@@ -280,15 +307,16 @@ class Harness {
           this.feedEvents.push(`started:${value.turnId}`);
           this.feedLines.push(JSON.stringify(toFeedStarted(value.turnId, NOW.toISOString())));
         },
-        recorded: (value, review, proposal) => {
+        recorded: (value, review, proposal, chain) => {
           if (this.feedFailure) throw new Error("EIO");
 
           this.feedProposalFlags.push(proposal);
+          this.feedChains.push(chain);
           this.feedEvents.push(
             `recorded:${value.turnId}:history=${this.historyFiles.records().length}`,
           );
           this.feedLines.push(
-            JSON.stringify(toFeedRecorded(review, [], NOW.toISOString(), proposal)),
+            JSON.stringify(toFeedRecorded(review, [], NOW.toISOString(), proposal, chain)),
           );
 
           return true;
@@ -667,12 +695,12 @@ describe("runWorker", () => {
 
 const ENABLED_USER: ClaudeRemediationSettingsResult = {
   status: "ENABLED",
-  settings: { delivery: "user", model: "sonnet" },
+  settings: { delivery: "user", model: "sonnet", mode: "observe", maxAttempts: 2 },
 };
 
 const ENABLED_AGENT: ClaudeRemediationSettingsResult = {
   status: "ENABLED",
-  settings: { delivery: "agent", model: null },
+  settings: { delivery: "agent", model: null, mode: "observe", maxAttempts: 2 },
 };
 
 function failingHarness(remediation: ClaudeRemediationSettingsResult): Harness {
@@ -870,6 +898,164 @@ describe("runWorker remediation", () => {
     await harness.run();
 
     const visible = JSON.stringify([harness.logs, harness.feedLines]);
+
+    for (const marker of [PROMPT_MARKER, PATCH_MARKER, PATH_MARKER, "/project-0"]) {
+      expect(visible).not.toContain(marker);
+    }
+  });
+});
+
+const ENABLED_REMEDIATE: ClaudeRemediationSettingsResult = {
+  status: "ENABLED",
+  settings: { delivery: "agent", model: null, mode: "remediate", maxAttempts: 2 },
+};
+
+function markedTurn(ordinal: number, attempt: number, chainId: string) {
+  const resolution = turnResolution(ordinal);
+
+  if (resolution.status !== "TURN") throw new Error("expected a TURN");
+
+  const task = formatAgentDelivery({
+    unit: `turn ${ordinal}`,
+    attempt,
+    maxAttempts: 2,
+    chainId,
+    findings: [],
+    strategyText: "fix it",
+  });
+
+  return handoff(ordinal, { status: "TURN", turn: { ...resolution.turn, task } });
+}
+
+describe("runWorker remediate chain", () => {
+  const CHAIN_ID = "claude-code:s:e:0";
+
+  async function firstDelivery(): Promise<Harness> {
+    const harness = failingHarness(ENABLED_REMEDIATE);
+
+    put(harness, handoff(0, turnResolution(0)));
+    await harness.run();
+
+    return harness;
+  }
+
+  test("a human turn with an error FAIL starts a chain with an agent request", async () => {
+    const harness = await firstDelivery();
+    const [file] = harness.proposalWrites;
+
+    expect(file).toMatchObject({
+      delivery: "agent",
+      chain: { chainId: CHAIN_ID, attempt: 1, maxAttempts: 2 },
+    });
+    expect(file?.chain?.findings.length).toBeGreaterThan(0);
+    expect(harness.feedChains).toEqual([
+      { chainId: CHAIN_ID, attempt: 1, maxAttempts: 2, result: "DELIVERING", fixed: 0 },
+    ]);
+    expect(harness.chains.get(CHAIN_ID)).toMatchObject({ attempts: 1, turnIds: [CHAIN_ID] });
+    expect(harness.logs).toContain("CHAIN_DELIVERING");
+    expect(harness.chainEntries).toEqual([]);
+  });
+
+  test("a corrected turn resolves the chain: log line, feed result, no new request", async () => {
+    const harness = await firstDelivery();
+    const [first] = harness.proposalWrites;
+
+    harness.jev.probability = 0.1;
+    put(harness, markedTurn(1, 1, CHAIN_ID));
+    await harness.run();
+
+    expect(harness.proposalWrites).toHaveLength(1);
+    expect(harness.chainEntries).toMatchObject([
+      {
+        host: "claude-code",
+        chainId: CHAIN_ID,
+        attempts: 1,
+        maxAttempts: 2,
+        result: "RESOLVED",
+        remainingIds: [],
+        resolvedIds: expect.arrayContaining([first?.chain?.findings[0]?.id]),
+        turnIds: [CHAIN_ID, "claude-code:s:e:1"],
+      },
+    ]);
+    expect(harness.feedChains.at(-1)).toMatchObject({ result: "RESOLVED", fixed: 2 });
+    expect(harness.chains.size).toBe(0);
+    expect(harness.logs).toContain("CHAIN_RESOLVED");
+  });
+
+  test("the same failure again stops the chain without another request", async () => {
+    const harness = await firstDelivery();
+
+    put(harness, markedTurn(1, 1, CHAIN_ID));
+    await harness.run();
+
+    expect(harness.proposalWrites).toHaveLength(1);
+    expect(harness.chainEntries).toMatchObject([{ result: "REPEATED_FAILURE" }]);
+    expect(harness.feedChains.at(-1)).toMatchObject({ result: "REPEATED_FAILURE", fixed: 0 });
+    expect(harness.logs).toContain("CHAIN_STOPPED:REPEATED_FAILURE");
+    expect(harness.chains.size).toBe(0);
+  });
+
+  test("a mark whose chain state is gone stops as UNVERIFIED", async () => {
+    const harness = failingHarness(ENABLED_REMEDIATE);
+
+    put(harness, markedTurn(1, 1, CHAIN_ID));
+    await harness.run();
+
+    expect(harness.proposalWrites).toEqual([]);
+    expect(harness.chainEntries).toMatchObject([{ result: "UNVERIFIED" }]);
+  });
+
+  test("observe mode never writes a chain, even for an agent delivery", async () => {
+    const harness = failingHarness(ENABLED_AGENT);
+
+    put(harness, handoff(0, turnResolution(0)));
+    await harness.run();
+
+    expect(harness.proposalWrites[0]).not.toHaveProperty("chain");
+    expect(harness.feedChains).toEqual([undefined]);
+    expect(harness.chains.size).toBe(0);
+    expect(harness.chainEntries).toEqual([]);
+  });
+
+  test("auto_propose false in the repo vetoes the chain; the repo cannot turn it on", async () => {
+    const harness = failingHarness(ENABLED_REMEDIATE);
+
+    withProjectConfig(harness, { auto_propose: false });
+    put(harness, handoff(0, turnResolution(0)));
+    await harness.run();
+
+    expect(harness.proposalWrites).toEqual([]);
+    expect(harness.feedChains).toEqual([undefined]);
+    expect(harness.chains.size).toBe(0);
+
+    const disabled = failingHarness({ status: "DISABLED" });
+
+    withProjectConfig(disabled, { auto_propose: true, mode: "remediate" });
+    put(disabled, handoff(0, turnResolution(0)));
+    await disabled.run();
+
+    expect(disabled.proposalWrites).toEqual([]);
+    expect(disabled.chains.size).toBe(0);
+  });
+
+  test("a chain whose feed record was not written drops its state", async () => {
+    const harness = failingHarness(ENABLED_REMEDIATE);
+
+    harness.feedFailure = true;
+    put(harness, handoff(0, turnResolution(0)));
+    await harness.run();
+
+    expect(harness.proposalRemovals).toEqual([CHAIN_ID]);
+    expect(harness.chains.size).toBe(0);
+  });
+
+  test("the chain log and feed carry no task, patch or path", async () => {
+    const harness = await firstDelivery();
+
+    put(harness, markedTurn(1, 1, CHAIN_ID));
+    await harness.run();
+
+    const visible = JSON.stringify([harness.logs, harness.feedLines, harness.chainEntries]);
 
     for (const marker of [PROMPT_MARKER, PATCH_MARKER, PATH_MARKER, "/project-0"]) {
       expect(visible).not.toContain(marker);

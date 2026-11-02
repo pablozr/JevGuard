@@ -5,7 +5,10 @@ import {
   userConfigFileOf,
 } from "../src/worker";
 
-const ENABLED_USER = { status: "ENABLED", settings: { delivery: "user", model: null } };
+const ENABLED_USER = {
+  status: "ENABLED",
+  settings: { delivery: "user", model: null, mode: "observe", maxAttempts: 2 },
+};
 const INVALID = { status: "INVALID", reason: "USER_CONFIG_INVALID" };
 
 describe("resolveClaudeRemediationSettings", () => {
@@ -40,7 +43,12 @@ describe("resolveClaudeRemediationSettings", () => {
       }),
     ).toEqual({
       status: "ENABLED",
-      settings: { delivery: "agent", model: "claude-opus-5-5[1m]" },
+      settings: {
+        delivery: "agent",
+        model: "claude-opus-5-5[1m]",
+        mode: "observe",
+        maxAttempts: 2,
+      },
     });
   });
 
@@ -62,6 +70,50 @@ describe("resolveClaudeRemediationSettings", () => {
     ];
 
     for (const value of cases) expect(resolveClaudeRemediationSettings(value)).toEqual(INVALID);
+  });
+});
+
+describe("resolveClaudeRemediationSettings mode and max_attempts", () => {
+  const remediate = { enabled: true, delivery: "agent", mode: "remediate" };
+
+  function resolved(section: Record<string, unknown>) {
+    return resolveClaudeRemediationSettings({ remediation: section });
+  }
+
+  test("remediate with the agent delivery defaults to two attempts", () => {
+    expect(resolved(remediate)).toEqual({
+      status: "ENABLED",
+      settings: { delivery: "agent", model: null, mode: "remediate", maxAttempts: 2 },
+    });
+  });
+
+  test("accepts max_attempts 1 to 3 with remediate", () => {
+    for (const maxAttempts of [1, 2, 3]) {
+      expect(resolved({ ...remediate, max_attempts: maxAttempts })).toMatchObject({
+        settings: { mode: "remediate", maxAttempts },
+      });
+    }
+  });
+
+  test("rejects max_attempts that is out of range, fractional or not a number", () => {
+    for (const bad of [0, 4, 2.5, "2", null, -1]) {
+      expect(resolved({ ...remediate, max_attempts: bad })).toEqual(INVALID);
+    }
+  });
+
+  test("rejects max_attempts without remediate, even in observe", () => {
+    expect(resolved({ enabled: true, max_attempts: 2 })).toEqual(INVALID);
+    expect(resolved({ enabled: true, mode: "observe", max_attempts: 2 })).toEqual(INVALID);
+  });
+
+  test("rejects remediate with the user delivery, explicit or default", () => {
+    expect(resolved({ enabled: true, mode: "remediate" })).toEqual(INVALID);
+    expect(resolved({ enabled: true, mode: "remediate", delivery: "user" })).toEqual(INVALID);
+  });
+
+  test("rejects an unknown mode and defaults to observe", () => {
+    expect(resolved({ enabled: true, mode: "auto" })).toEqual(INVALID);
+    expect(resolved({ enabled: true })).toMatchObject({ settings: { mode: "observe" } });
   });
 });
 

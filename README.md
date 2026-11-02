@@ -34,6 +34,9 @@ coding agent.
 > agent context or block a task. When remediation is enabled and a review has any
 > `FAIL`, the plugin asks for a proposal in an isolated, deny-all child session; the
 > proposal never edits code. See [OpenCode 2.2.x limitations](#opencode-22x-limitations).
+> On Claude Code, a user who opts in with `mode: remediate` in their own
+> `claude-code.yaml` gets a bounded chain of at most 3 visible correction messages to
+> the agent; see [Remediation proposals](docs/configuration.md#remediation-proposals).
 
 ## Why JevGuard
 

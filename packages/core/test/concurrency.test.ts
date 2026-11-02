@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { createFifoJevPort } from "../src/index";
+import { evaluateWithPort } from "../src/evaluation/evaluate-with-port";
 import type {
   JevBuiltInBatchRequest,
   JevEvaluationPort,
@@ -8,7 +8,7 @@ import type {
   JevRuleEvaluationResult,
   JevRuleRequest,
 } from "../src/index";
-import { evaluateWithPort } from "../src/evaluation/evaluate-with-port";
+import { createFifoJevPort } from "../src/index";
 
 function request(id: string): JevRuleRequest {
   return {

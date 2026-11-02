@@ -13,6 +13,30 @@ export const PROPOSER_AGENT_NAME = "jevguard-proposer";
  */
 export const REMEDIATION_MAX_TASK_LENGTH = 16_384;
 
+/** `observe` never messages the agent; `remediate` is the user's opt-in to a bounded fix chain. */
+export type RemediationMode = "observe" | "remediate";
+
+export const MAX_ATTEMPTS_DEFAULT = 2;
+export const MAX_ATTEMPTS_CEILING = 3;
+
+/** The shape of a chain id (the id of the turn that started it), wherever it is stored or parsed. */
+export const CHAIN_ID_PATTERN = /^[A-Za-z0-9._:-]{1,512}$/;
+/** The shape of a rule id or built-in check id carried by a chain. */
+export const FINDING_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+
+/** True for an attempt count a chain can reach: an integer in 1..MAX_ATTEMPTS_CEILING. */
+export function isAttemptCount(value: unknown): value is number {
+  return (
+    typeof value === "number" &&
+    Number.isInteger(value) &&
+    value >= 1 &&
+    value <= MAX_ATTEMPTS_CEILING
+  );
+}
+
+/** Remediation messages one session may send to its agent. */
+export const MAX_AGENT_DELIVERIES_PER_SESSION = 3;
+
 /** MVP proposal trigger. `WARN` and every operational outcome never trigger. */
 export type ProposalTrigger = "FAIL";
 

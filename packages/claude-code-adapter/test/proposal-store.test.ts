@@ -76,7 +76,7 @@ function storeFor(variables: Record<string, string>) {
 function encoded(delivery: "user" | "agent" = "user", model: string | null = "sonnet") {
   return encodeProposalRequestFile({
     request: request(),
-    settings: { delivery, model },
+    settings: { delivery, model, mode: "observe", maxAttempts: 2 },
     turnId: TURN_ID,
     now: NOW,
   });
@@ -109,7 +109,7 @@ describe("encodeProposalRequestFile", () => {
   test("downgrades an agent delivery whose task is an automatic delivery", () => {
     const automatic = encodeProposalRequestFile({
       request: request({ task: `${AUTO_DELIVERY_MARKER} · unit 1]` }),
-      settings: { delivery: "agent", model: null },
+      settings: { delivery: "agent", model: null, mode: "observe", maxAttempts: 2 },
       turnId: TURN_ID,
       now: NOW,
     });

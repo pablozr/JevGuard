@@ -7,8 +7,8 @@ import { aggregateReview } from "../review/aggregate";
 import type { TurnReview } from "../review/types";
 import type { RuleCandidateFailure } from "../rules/types";
 import { assembleSlicedRuleResult, overBudgetMetadata } from "./assemble-rule";
-import { buildJevRequest } from "./build-request";
 import { buildReviewContext } from "./build-context";
+import { buildJevRequest } from "./build-request";
 import { evaluateRuleBatchWithPort } from "./evaluate-with-port";
 import type { EvaluateRuleDependencies, EvaluateRulesInput } from "./types";
 

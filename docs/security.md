@@ -301,6 +301,17 @@ Remediation is off by default. Only the user can turn it on, in their own
 `claude-code.yaml` (never in the repository); it is strategy-only and works as described
 in "Proposal requests" and "Agent delivery" below.
 
+- **Named exception: `mode: remediate`.** The "never injects into the agent" rule has one
+  exception, and only when the user set `mode: remediate` (with `delivery: agent`) in
+  their own `claude-code.yaml`; the repository cannot enable it, only veto it with
+  `remediation.auto_propose: false`. Hooks still emit nothing: the message is submitted
+  by the in-session module through `$.prompt.submit`, visible in the transcript and never
+  as the user. The frame holds the attempt number, the failing rule ids and severities,
+  the scoped paths, the rule's own violation and allowed text and the strategy; it never
+  holds the task, the diff, other findings or secrets. The chain is bounded by 1 to 3
+  attempts, 3 agent deliveries per session, a repeated-failure check and a stop on any
+  new or unverifiable finding. See "`mode: remediate`" in
+  [configuration](configuration.md#remediation-proposals).
 - **Supply chain.** The marketplace catalog pins one exact version of the npm package
   `@pablozrrrr/jevguard-claude-code`; Claude Code downloads that version, and the native
   keyring comes from the package's `npm-shrinkwrap.json`, which pins every tarball by

@@ -1,5 +1,4 @@
 import { describe, expect, test } from "vitest";
-import { aggregateReviewHistory } from "../src/index";
 import type {
   FeedbackRecord,
   ReportRecord,
@@ -10,6 +9,7 @@ import type {
   SkippedReason,
   UnavailableReason,
 } from "../src/index";
+import { aggregateReviewHistory } from "../src/index";
 
 function emptySummary(): ReportRecord["summary"] {
   return {

@@ -1,7 +1,16 @@
 import type { TurnReview } from "@jevguard/core";
+import { MAX_ATTEMPTS_CEILING } from "@jevguard/core";
 import { toReviewLogEntry } from "@jevguard/node-infra";
 import type { ClaudeReviewHandoff } from "../capture/types";
+import type { ReviewFeedChain } from "../presentation";
 import { parseHandoff } from "./parse-handoff";
+import {
+  chainStepOf,
+  deliveryOf,
+  recordClosures,
+  settleChain,
+  withinChainLimits,
+} from "./remediation/chain-step";
 import { prepareProposal } from "./remediation/prepare-proposal";
 import type { ClaudeRemediationSettingsResult } from "./remediation/types";
 import { reviewHandoff } from "./review-handoff";
@@ -139,10 +148,14 @@ function recordedSafely(
   handoff: ClaudeReviewHandoff,
   review: TurnReview,
   proposal: boolean,
+  chain: ReviewFeedChain | undefined,
+  settings: ClaudeRemediationSettingsResult,
   dependencies: WorkerDependencies,
 ): boolean {
+  const remediationConfig = settings.status === "INVALID" ? settings.reason : undefined;
+
   try {
-    return dependencies.feed.recorded(handoff, review, proposal);
+    return dependencies.feed.recorded(handoff, review, proposal, chain, remediationConfig);
   } catch {
     return false;
   }
@@ -154,7 +167,13 @@ function remediationSettingsOf(
   handoff: ClaudeReviewHandoff,
   dependencies: WorkerDependencies,
 ): ClaudeRemediationSettingsResult {
-  if (handoff.resolution.status !== "TURN") return REMEDIATION_OFF;
+  // A unit with no turn is read only when a saved chain may need to end because of it.
+  if (
+    handoff.resolution.status !== "TURN" &&
+    dependencies.proposals.activeChain(handoff) === null
+  ) {
+    return REMEDIATION_OFF;
+  }
 
   const settings = dependencies.remediationFor(handoff.projectRoot);
 
@@ -183,9 +202,11 @@ async function processClaim(
   presentSafely(() => dependencies.feed.started(handoff));
 
   const settings = remediationSettingsOf(handoff, dependencies);
-  const reviewed = await reviewHandoff(handoff, dependencies, {
-    proposals: settings.status === "ENABLED",
-  });
+  const reviewed = withinChainLimits(
+    await reviewHandoff(handoff, dependencies, { proposals: settings.status === "ENABLED" }),
+    settings,
+    dependencies,
+  );
   const { review, deadlineExceeded } = reviewed;
 
   if (deadlineExceeded) dependencies.log("REVIEW_DEADLINE_EXCEEDED");
@@ -193,10 +214,19 @@ async function processClaim(
   logCauses(handoff, dependencies);
   await dependencies.history.append(toReviewLogEntry(review));
 
-  const proposed = prepareProposal(handoff, reviewed, settings, dependencies);
-  const recorded = recordedSafely(handoff, review, proposed, dependencies);
+  const step = chainStepOf(handoff, reviewed, settings, dependencies);
+  const ended = step.kind === "STOP" || step.kind === "RESOLVED";
+  const written =
+    !ended && prepareProposal(handoff, reviewed, settings, dependencies, deliveryOf(step));
+  const { chain, proposed } = await settleChain(step, handoff, reviewed, written, dependencies);
+  const recorded = recordedSafely(handoff, review, proposed, chain, settings, dependencies);
 
-  if (proposed && !recorded) presentSafely(() => dependencies.proposals.remove(handoff));
+  if (proposed && !recorded) {
+    presentSafely(() => dependencies.proposals.remove(handoff));
+    if (step.kind === "DELIVER") {
+      presentSafely(() => dependencies.proposals.removeChain(handoff, step.chainId));
+    }
+  }
 
   dependencies.log(aggregateOutcome(review));
   removeOrDefer(path, dependencies, leftovers);
@@ -231,6 +261,15 @@ function retryLeftovers(dependencies: WorkerDependencies, leftovers: readonly st
   }
 }
 
+/** Records the chains the store dropped outside a review; a failure never stops the drain. */
+async function closeSweptChains(dependencies: WorkerDependencies): Promise<void> {
+  try {
+    const closures = dependencies.proposals.sweep();
+
+    await recordClosures(closures, MAX_ATTEMPTS_CEILING, dependencies);
+  } catch {}
+}
+
 /**
  * Drains every pending handoff once, oldest unit first. A handoff is claimed by an
  * atomic rename and deleted after it is recorded, so concurrent workers record each
@@ -248,7 +287,7 @@ export async function runWorker(dependencies: WorkerDependencies): Promise<void>
   try {
     dropAbandonedClaims(dependencies, leftovers);
     presentSafely(() => dependencies.feed.sweep());
-    presentSafely(() => dependencies.proposals.sweep());
+    await closeSweptChains(dependencies);
 
     let claimedAny = true;
 

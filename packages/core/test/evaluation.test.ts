@@ -1,5 +1,4 @@
 import { describe, expect, test } from "vitest";
-import { DEFAULT_EVIDENCE_POLICY, DEFAULT_GATE_CONFIG, evaluateRule } from "../src/index";
 import type {
   EvaluateRuleInput,
   JevEvaluationPort,
@@ -11,6 +10,7 @@ import type {
   Turn,
   TurnFile,
 } from "../src/index";
+import { DEFAULT_EVIDENCE_POLICY, DEFAULT_GATE_CONFIG, evaluateRule } from "../src/index";
 
 const LOGIN_PATCH = "diff --git a/src/auth/login.ts b/src/auth/login.ts\n+const limit = 5;";
 const ALLOWED = "Validation, HTTP mapping, and delegation to services.";

@@ -2,8 +2,8 @@ export { createNodeReviewFeed } from "./feed";
 export { createNodeWorkerFileSystem, createTimerDeadline } from "./node-ports";
 export { parseHandoff } from "./parse-handoff";
 export { createProcessWorkerDependencies } from "./process-dependencies";
-export { encodeProposalRequestFile } from "./remediation/request-file";
 export { createNodeProposalStore } from "./remediation/proposal-store";
+export { encodeProposalRequestFile } from "./remediation/request-file";
 export {
   loadClaudeRemediationSettings,
   resolveClaudeRemediationSettings,

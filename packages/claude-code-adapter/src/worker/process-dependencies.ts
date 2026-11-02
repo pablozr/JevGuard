@@ -8,6 +8,7 @@ import {
   createPolicyFileLoader,
   createProcessEnvironment,
   createProcessReviewHistoryContext,
+  createRemediationChainLog,
   createTypeSafeJevTransport,
   parsePolicyConfig,
 } from "@jevguard/node-infra";
@@ -52,6 +53,11 @@ export function createProcessWorkerDependencies(stateDirectory: string): WorkerD
     parseConfig: parsePolicyConfig,
     remediationFor: createUserRemediationSettings(environment),
     proposals: createNodeProposalStore(environment, now, files),
+    chainLog: createRemediationChainLog({
+      context: createProcessReviewHistoryContext(),
+      fileSystem: createNodeReviewHistoryFileSystem(),
+      now,
+    }),
     jevFor,
     deadline: createTimerDeadline(),
     log: (code) => appendWorkerLog(stateDirectory, { timestamp: now().toISOString(), code }),

@@ -1,13 +1,15 @@
 import type {
+  ChainStopCode,
   JevEvaluationPort,
   PolicyConfigParser,
   PolicyLoader,
   RemediationProposalRequest,
   TurnReview,
 } from "@jevguard/core";
-import type { ReviewLogEntry } from "@jevguard/node-infra";
+import type { RemediationChainLog, ReviewLogEntry } from "@jevguard/node-infra";
 import type { ClaudeAcquisitionReason } from "../acquisition";
 import type { ClaudeReviewHandoff } from "../capture/types";
+import type { ReviewFeedChain } from "../presentation";
 import type {
   ClaudeRemediationInvalidReason,
   ClaudeRemediationSettingsResult,
@@ -58,7 +60,12 @@ export type WorkerLogCode =
   | "REMEDIATION_PROJECT_MODEL_IGNORED"
   | "PROPOSAL_DELIVERY_DOWNGRADED"
   | `PROPOSAL_REQUEST_WRITTEN:${"USER" | "AGENT"}`
-  | "PROPOSAL_REQUEST_WRITE_FAILED";
+  | "PROPOSAL_REQUEST_WRITE_FAILED"
+  | "PROPOSAL_REQUEST_TOO_LARGE"
+  | "CHAIN_DELIVERING"
+  | "CHAIN_STATE_SAVE_FAILED"
+  | "CHAIN_RESOLVED"
+  | `CHAIN_STOPPED:${ChainStopCode}`;
 
 export interface WorkerLogEntry {
   readonly timestamp: string;
@@ -69,7 +76,13 @@ export interface WorkerLogEntry {
 export interface WorkerReviewFeed {
   started(handoff: ClaudeReviewHandoff): void;
   /** `true` when the record was written; `false` when the feed could not take it. */
-  recorded(handoff: ClaudeReviewHandoff, review: TurnReview, proposal: boolean): boolean;
+  recorded(
+    handoff: ClaudeReviewHandoff,
+    review: TurnReview,
+    proposal: boolean,
+    chain?: ReviewFeedChain,
+    remediationConfig?: string,
+  ): boolean;
   sweep(): void;
 }
 
@@ -89,6 +102,8 @@ export interface WorkerDependencies {
   /** The user's opt-in for remediation in one project; read only for a unit that can be reviewed. */
   readonly remediationFor: (projectRoot: string) => ClaudeRemediationSettingsResult;
   readonly proposals: WorkerProposalStore;
+  /** Local record of ended remediation chains; never rejects. */
+  readonly chainLog: RemediationChainLog;
   /** Builds a fresh Jev port per handoff, so one stuck review never holds another's slots. */
   readonly jevFor: () => JevEvaluationPort;
   readonly deadline: ReviewDeadline;
