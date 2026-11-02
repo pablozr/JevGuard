@@ -9,6 +9,7 @@ export {
 } from "./chain";
 export type { ChainClosure, ChainEndRecord, ChainEndSink } from "./closures";
 export { chainEndOf, recordClosures } from "./closures";
+export { MAX_CHAIN_ORIGINS, parseChainState } from "./chain-state";
 export { parseModelSpecifier, resolveRemediationConfig } from "./config";
 export { deliveryFindingsOf } from "./delivery-findings";
 export { formatAgentDelivery, isAutoDeliveredTask, parseAutoDelivery } from "./delivery-frame";

@@ -150,6 +150,7 @@ export {
 } from "./remediation/chain";
 export type { ChainClosure, ChainEndRecord, ChainEndSink } from "./remediation/closures";
 export { chainEndOf, recordClosures } from "./remediation/closures";
+export { MAX_CHAIN_ORIGINS, parseChainState } from "./remediation/chain-state";
 export { parseModelSpecifier, resolveRemediationConfig } from "./remediation/config";
 export { deliveryFindingsOf } from "./remediation/delivery-findings";
 export type { AgentDeliveryInput, DeliveryFinding } from "./remediation/delivery-frame";

@@ -95,7 +95,7 @@ export async function endOrphanChain(
 
   if (active === null) return;
 
-  const step = decideOrphanStep(active, maxAttempts, "remediate");
+  const step = decideOrphanStep(active, maxAttempts);
 
   if (step.kind === "STOP") {
     await closeChains([{ state: step.state, code: step.code }], dependencies);
@@ -106,7 +106,7 @@ function chainStepOf(reviewed: ReviewedTurn, setup: RemediateSetup): ChainStep {
   const { mark, mixed } = reviewed.delivery;
   const chain = mark === null ? null : setup.chains.load(mark.chainId);
 
-  if (mixed && chain !== null) return decideOrphanStep(chain, setup.maxAttempts, "remediate");
+  if (mixed && chain !== null) return decideOrphanStep(chain, setup.maxAttempts);
 
   return decideChainStep({
     mode: "remediate",
