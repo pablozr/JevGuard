@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Configure Git identity for tests that create commits
+        run: |
+          git config --global user.name "ci"
+          git config --global user.email "ci@example.com"
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm format:check
+
+      - run: pnpm lint
+
+      - run: pnpm typecheck
+
+      - run: pnpm test
+
+      - name: Build the OpenCode artifact
+        run: pnpm artifact:build
+
+      - name: Build the Claude Code artifact
+        run: pnpm claude-artifact:build
