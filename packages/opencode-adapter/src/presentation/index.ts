@@ -27,17 +27,17 @@ export {
   createRemediationFailureLogSink,
   createRemediationNotifier,
 } from "./remediation";
-export { countSummary, toReviewToast, toastVariantFor } from "./toast";
+export { countSummary, toastVariantFor, toReviewToast } from "./toast";
 export type {
   OpenCodeLogRecord,
   OpenCodeLogWriter,
   OperationalEvent,
-  RemediationChainEvent,
   OperationalLogSink,
   PresentationDelivery,
   PresentationPorts,
   ProposalFailureReason,
   ProposalSessionNavigator,
+  RemediationDeliveryEvent,
   RemediationFailureLogSink,
   RemediationNotifier,
   ReviewPresenter,

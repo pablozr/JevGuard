@@ -7,7 +7,8 @@ import {
 
 const ENABLED_USER = {
   status: "ENABLED",
-  settings: { delivery: "user", model: null, mode: "observe", maxAttempts: 2 },
+  settings: { delivery: "user", model: null },
+  warnings: [],
 };
 const INVALID = { status: "INVALID", reason: "USER_CONFIG_INVALID" };
 
@@ -43,12 +44,8 @@ describe("resolveClaudeRemediationSettings", () => {
       }),
     ).toEqual({
       status: "ENABLED",
-      settings: {
-        delivery: "agent",
-        model: "claude-opus-5-5[1m]",
-        mode: "observe",
-        maxAttempts: 2,
-      },
+      settings: { delivery: "agent", model: "claude-opus-5-5[1m]" },
+      warnings: [],
     });
   });
 
@@ -73,26 +70,29 @@ describe("resolveClaudeRemediationSettings", () => {
   });
 });
 
-describe("resolveClaudeRemediationSettings mode and max_attempts", () => {
+describe("resolveClaudeRemediationSettings legacy keys", () => {
   const remediate = { enabled: true, delivery: "agent", mode: "remediate" };
 
   function resolved(section: Record<string, unknown>) {
     return resolveClaudeRemediationSettings({ remediation: section });
   }
 
-  test("remediate with the agent delivery defaults to two attempts", () => {
-    expect(resolved(remediate)).toEqual({
+  test("remediate and max_attempts are accepted with a warning and change nothing", () => {
+    expect(resolved({ ...remediate, max_attempts: 3 })).toEqual({
       status: "ENABLED",
-      settings: { delivery: "agent", model: null, mode: "remediate", maxAttempts: 2 },
+      settings: { delivery: "agent", model: null },
+      warnings: ["LEGACY_MODE", "LEGACY_MAX_ATTEMPTS"],
+    });
+    expect(resolved(remediate)).toMatchObject({ warnings: ["LEGACY_MODE"] });
+    expect(resolved({ enabled: true, mode: "observe" })).toMatchObject({
+      warnings: ["LEGACY_MODE"],
     });
   });
 
-  test("accepts max_attempts 1 to 3 with remediate", () => {
-    for (const maxAttempts of [1, 2, 3]) {
-      expect(resolved({ ...remediate, max_attempts: maxAttempts })).toMatchObject({
-        settings: { mode: "remediate", maxAttempts },
-      });
-    }
+  test("a disabled section carries no warnings", () => {
+    expect(resolved({ enabled: false, delivery: "agent", mode: "remediate" })).toEqual({
+      status: "DISABLED",
+    });
   });
 
   test("rejects max_attempts that is out of range, fractional or not a number", () => {
@@ -111,9 +111,8 @@ describe("resolveClaudeRemediationSettings mode and max_attempts", () => {
     expect(resolved({ enabled: true, mode: "remediate", delivery: "user" })).toEqual(INVALID);
   });
 
-  test("rejects an unknown mode and defaults to observe", () => {
+  test("rejects an unknown mode", () => {
     expect(resolved({ enabled: true, mode: "auto" })).toEqual(INVALID);
-    expect(resolved({ enabled: true })).toMatchObject({ settings: { mode: "observe" } });
   });
 });
 

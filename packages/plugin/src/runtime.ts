@@ -1,7 +1,7 @@
 import { unavailableReview } from "@jevguard/core";
 import type { OperationalEvent, OperationalLogSink } from "@jevguard/opencode-adapter";
 import { presentReview } from "./present";
-import { endOrphanChain } from "./remediation/remediate";
+import { createSessionIdleWaiter } from "./remediation/idle-waiter";
 import { reviewAttributedTurn } from "./review";
 import { parseTurnEvent } from "./turn-event";
 import type { PluginRuntime, PluginRuntimeDependencies } from "./types";
@@ -21,20 +21,17 @@ import type { PluginRuntime, PluginRuntimeDependencies } from "./types";
  *   (nested host subagents stay silent).
  * - A proposer child session is never reviewed; its terminal events settle the
  *   proposal waiting on it.
- * - In `remediate`, the sessions with an execution in progress are tracked so nothing is
- *   queued into a busy session, and an execution with no reviewable turn ends its
- *   session's chain as unverified.
+ * - The sessions with an execution in progress are tracked so a delivery waits for idle
+ *   instead of landing in a busy session.
  *
- * Only `remediate` sends anything into the originating session (one queued synthetic
- * message per attempt); nothing is ever applied.
+ * Only `delivery: agent` sends anything into the originating session (at most one queued
+ * synthetic message per reviewed unit); nothing is ever applied.
  */
 export function createPluginRuntime(dependencies: PluginRuntimeDependencies): PluginRuntime {
   const { tracker } = dependencies;
   const openExecutions = new Set<string>();
-  const reviewDependencies = {
-    ...dependencies,
-    isBusy: (sessionID: string) => openExecutions.has(sessionID),
-  };
+  const idle = createSessionIdleWaiter((sessionID) => openExecutions.has(sessionID));
+  const reviewDependencies = { ...dependencies, idle };
   let tail: Promise<void> = Promise.resolve();
   const backgroundJobs = new Set<Promise<void>>();
 
@@ -55,14 +52,6 @@ export function createPluginRuntime(dependencies: PluginRuntimeDependencies): Pl
     track(writeOperational(dependencies.operational, event));
   }
 
-  function endOrphan(sessionID: string): void {
-    const { remediation } = dependencies;
-
-    if (remediation !== null) {
-      track(endOrphanChain(sessionID, { remediation, operational: dependencies.operational }));
-    }
-  }
-
   async function finish(sessionID: string): Promise<void> {
     const attribution = await tracker.finish(sessionID);
 
@@ -72,7 +61,6 @@ export function createPluginRuntime(dependencies: PluginRuntimeDependencies): Pl
         return;
       case "UNAVAILABLE":
         log({ kind: "ATTRIBUTION_UNAVAILABLE", reason: attribution.reason });
-        endOrphan(sessionID);
         track(
           presentReview(
             dependencies.presenter,
@@ -125,14 +113,15 @@ export function createPluginRuntime(dependencies: PluginRuntimeDependencies): Pl
         }
         case "SUCCEEDED":
           openExecutions.delete(sessionID);
+          idle.notifyIdle(sessionID);
           enqueue(() => finish(sessionID));
           return;
         case "ENDED_OTHER":
           openExecutions.delete(sessionID);
+          idle.notifyIdle(sessionID);
           enqueue(async () => {
             if (!tracker.discard(sessionID).nested) {
               log({ kind: "TURN_SKIPPED", reason: turn.reason });
-              endOrphan(sessionID);
             }
           });
           return;

@@ -1,4 +1,5 @@
 import type { TurnFile } from "../domain/types";
+import { HUNK_HEADER } from "./hunk-header";
 import type {
   DiffExtendedHeaders,
   DiffFormat,
@@ -19,7 +20,6 @@ const DEV_NULL = "/dev/null";
 const OLD_PREFIX = "a/";
 const NEW_PREFIX = "b/";
 const NO_NEWLINE_MARKER = "\\ ";
-const HUNK_HEADER = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(?: .*)?$/;
 const COMBINED_HEADERS = ["diff --cc ", "diff --combined "] as const;
 const RENAME_FROM_HEADERS = ["rename from ", "copy from "] as const;
 const RENAME_TO_HEADERS = ["rename to ", "copy to "] as const;

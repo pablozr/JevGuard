@@ -2,14 +2,19 @@ import { describe, expect, test } from "vitest";
 import {
   buildProposalRequest,
   buildProposalText,
+  collectDeliveryFindings,
+  DELIVERY_MAX_FINDINGS,
+  deliveryFindingsOf,
   createRemediationProposalStore,
   DEFAULT_EVIDENCE_POLICY,
   DEFAULT_REMEDIATION_CONFIG,
+  formatAgentDelivery,
   type ParsedRule,
   PROPOSER_AGENT_PROMPT,
   parseModelSpecifier,
   REMEDIATION_MAX_TASK_LENGTH,
   type RemediationConfig,
+  type RuleReviewResult,
   type ReviewResult,
   type RuleParseResults,
   resolveRemediationConfig,
@@ -184,6 +189,7 @@ describe("buildProposalRequest", () => {
           },
           probability: 0.8,
           scopedPaths: ["src/a.ts"],
+          locations: [{ path: "src/a.ts", hunk: null }],
         },
       ],
       builtInFindings: [
@@ -192,6 +198,7 @@ describe("buildProposalRequest", () => {
           severity: "error",
           probability: 0.95,
           scopedPaths: ["src/a.ts"],
+          locations: [{ path: "src/a.ts", hunk: null }],
         },
       ],
     });
@@ -345,6 +352,179 @@ describe("buildProposalRequest", () => {
         config: ENABLED,
       }),
     ).toBeNull();
+  });
+});
+
+const HUNKS_PATCH = [
+  "--- a/src/a.ts",
+  "+++ b/src/a.ts",
+  "@@ -1 +1 @@",
+  "-old",
+  "+new",
+  "@@ -40,3 +52,4 @@",
+  "-old2",
+  "+new2",
+  "@@ -90,2 +120 @@",
+  "-old3",
+  "+new3",
+  "",
+].join("\n");
+
+function slicedFail(): RuleReviewResult {
+  return {
+    ...ruleFail(0.9),
+    evidence: {
+      mode: "SLICED",
+      plannedSliceCount: 3,
+      evaluatedSliceCount: 3,
+      failedSliceCount: 0,
+      notEvaluatedSliceCount: 0,
+      slices: [0, 1, 2].map((ordinal) => ({
+        index: ordinal,
+        path: "src/a.ts",
+        kind: "HUNK" as const,
+        hunkOrdinal: ordinal,
+      })),
+      sliceJudgments: [
+        { index: 0, probability: 0.1, outcome: "PASS" },
+        { index: 1, probability: 0.9, outcome: "FAIL" },
+        { index: 2, probability: 0.95, outcome: "FAIL" },
+      ],
+      failingSliceIndex: null,
+      failureReason: null,
+    },
+  } as RuleReviewResult;
+}
+
+describe("finding locations", () => {
+  test("a sliced FAIL names only the failing hunks with their post-image range", () => {
+    const request = buildProposalRequest({
+      turn: turn({ files: [{ path: "src/a.ts", patch: HUNKS_PATCH }] }),
+      sessionID: "ses_1",
+      rules: parsedRules(parsedRule()),
+      results: [slicedFail()],
+      config: ENABLED,
+    });
+
+    expect(request?.ruleFindings[0]?.locations).toEqual([
+      { path: "src/a.ts", hunk: { ordinal: 1, newStart: 52, newLines: 4 } },
+      { path: "src/a.ts", hunk: { ordinal: 2, newStart: 120, newLines: 1 } },
+    ]);
+  });
+
+  test("whole evidence falls back to the scoped paths", () => {
+    const request = buildProposalRequest({
+      turn: turn(),
+      sessionID: "ses_1",
+      rules: parsedRules(parsedRule()),
+      results: [ruleFail()],
+      config: ENABLED,
+    });
+
+    expect(request?.ruleFindings[0]?.locations).toEqual([{ path: "src/a.ts", hunk: null }]);
+  });
+});
+
+describe("deliveryFindingsOf", () => {
+  test("describes rule and SCOPE-CREEP findings with their own criteria", () => {
+    const request = buildProposalRequest({
+      turn: turn(),
+      sessionID: "ses_1",
+      rules: parsedRules(parsedRule()),
+      results: [ruleFail(), builtInFail()],
+      config: ENABLED,
+    });
+
+    const findings = deliveryFindingsOf(request as NonNullable<typeof request>);
+
+    expect(findings.map((finding) => [finding.id, finding.kind])).toEqual([
+      ["TEST-1", "RULE"],
+      ["SCOPE-CREEP", "BUILT_IN"],
+    ]);
+    expect(findings[0]?.description).toBe("Module description.");
+    expect(findings[1]?.description).toContain("scope creep");
+    expect(findings[1]?.violation).not.toBe("");
+  });
+});
+
+describe("collectDeliveryFindings", () => {
+  const bigFile = {
+    path: "src/big.ts",
+    patch: [
+      "--- a/src/big.ts",
+      "+++ b/src/big.ts",
+      "@@ -1 +1 @@",
+      "-a",
+      `+${"x".repeat(DEFAULT_EVIDENCE_POLICY.maxDiffLength)}`,
+      "",
+    ].join("\n"),
+  };
+
+  test("locates the failing hunk of a turn above the diff limit that has no proposal request", () => {
+    const oversized = turn({ files: [{ path: "src/a.ts", patch: HUNKS_PATCH }, bigFile] });
+    const input = {
+      turn: oversized,
+      rules: parsedRules(parsedRule()),
+      results: [slicedFail()],
+    };
+
+    expect(buildProposalRequest({ ...input, sessionID: "ses_1", config: ENABLED })).toBeNull();
+    expect(collectDeliveryFindings(input)).toEqual({
+      findings: [
+        expect.objectContaining({
+          id: "TEST-1",
+          locations: [
+            { path: "src/a.ts", hunk: { ordinal: 1, newStart: 52, newLines: 4 } },
+            { path: "src/a.ts", hunk: { ordinal: 2, newStart: 120, newLines: 1 } },
+          ],
+        }),
+      ],
+      omitted: 0,
+    });
+  });
+
+  test("never names a path the evidence policy blocks", () => {
+    const blocked = { path: ".env", patch: PATCH.replaceAll("src/a.ts", ".env") };
+    const result = { ...ruleFail(), scopedPaths: ["src/a.ts", ".env"] };
+    const collected = collectDeliveryFindings({
+      turn: turn({ files: [{ path: "src/a.ts", patch: PATCH }, blocked] }),
+      rules: parsedRules(parsedRule()),
+      results: [result],
+    });
+
+    expect(collected.findings[0]?.locations).toEqual([{ path: "src/a.ts", hunk: null }]);
+  });
+
+  test("keeps 32 findings, cuts long text and counts the rest", () => {
+    const ids = Array.from({ length: DELIVERY_MAX_FINDINGS + 1 }, (_, index) => `R-${index}`);
+    const collected = collectDeliveryFindings({
+      turn: turn(),
+      rules: parsedRules(
+        ...ids.map((id, index) =>
+          parsedRule({ id, description: index === 0 ? "d".repeat(3000) : "short" }),
+        ),
+      ),
+      results: ids.map((id) => ({ ...ruleFail(), ruleId: id })),
+    });
+
+    expect(collected.findings).toHaveLength(DELIVERY_MAX_FINDINGS);
+    expect(collected.omitted).toBe(1);
+    expect(collected.findings[0]?.description).toHaveLength(1000);
+
+    const frame = formatAgentDelivery({
+      unit: "turn 1",
+      findings: collected.findings,
+      omitted: collected.omitted,
+      strategyText: null,
+    });
+
+    expect(frame).toContain("+1 more findings not listed");
+  });
+
+  test("returns nothing when no finding failed", () => {
+    expect(
+      collectDeliveryFindings({ turn: turn(), rules: parsedRules(parsedRule()), results: [] }),
+    ).toEqual({ findings: [], omitted: 0 });
   });
 });
 

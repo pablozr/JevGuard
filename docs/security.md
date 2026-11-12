@@ -60,6 +60,16 @@ failure log never carries task, diff, findings, paths, or credentials. Nothing i
 applied automatically: the user copies the manual apply instruction into their normal
 coding agent, and that ordinary turn is reviewed normally.
 
+The only exception on OpenCode is `delivery: agent`, and only when the user's own
+`opencode.yaml` sets it (never the repository, which can only veto it with
+`remediation.auto_propose: false`). The plugin then queues at most one visible message
+into the source session per reviewed unit, carrying the same bounded frame as on Claude
+Code (the failing findings with their rule text and locations, and the strategy; never the
+task, the diff or secrets). It is sent only after the execution succeeded and never while
+the session is busy, at most 3 per session, and the execution it causes never triggers
+another. See
+[configuration](configuration.md#opencode-delivery-agent-one-delivery-per-unit).
+
 ## Evidence must be complete
 
 JevGuard never truncates a relevant diff. The scoped diff for a rule's applicable
@@ -301,16 +311,15 @@ Remediation is off by default. Only the user can turn it on, in their own
 `claude-code.yaml` (never in the repository); it is strategy-only and works as described
 in "Proposal requests" and "Agent delivery" below.
 
-- **Named exception: `mode: remediate`.** The "never injects into the agent" rule has one
-  exception, and only when the user set `mode: remediate` (with `delivery: agent`) in
-  their own `claude-code.yaml`; the repository cannot enable it, only veto it with
+- **Named exception: `delivery: agent`.** The "never injects into the agent" rule has one
+  exception, and only when the user set `delivery: agent` in their own
+  `claude-code.yaml`; the repository cannot enable it, only veto it with
   `remediation.auto_propose: false`. Hooks still emit nothing: the message is submitted
   by the in-session module through `$.prompt.submit`, visible in the transcript and never
-  as the user. The frame holds the attempt number, the failing rule ids and severities,
-  the scoped paths, the rule's own violation and allowed text and the strategy; it never
-  holds the task, the diff, other findings or secrets. The chain is bounded by 1 to 3
-  attempts, 3 agent deliveries per session, a repeated-failure check and a stop on any
-  new or unverifiable finding. See "`mode: remediate`" in
+  as the user. The frame holds every failing finding (rule id, description, severity,
+  probability, scoped paths with hunks, the rule's own violation and allowed text) and the
+  strategy; it never holds the task, the diff or secrets. It is bounded to one delivery
+  per unit and 3 agent deliveries per session. See "Remediation proposals" in
   [configuration](configuration.md#remediation-proposals).
 - **Supply chain.** The marketplace catalog pins one exact version of the npm package
   `@pablozrrrr/jevguard-claude-code`; Claude Code downloads that version, and the native
@@ -409,11 +418,16 @@ in "Proposal requests" and "Agent delivery" below.
 - **Agent delivery (opt-in exception).** With `delivery: agent` the mod submits the
   proposal to the agent with `$.prompt.submit`, never as the user. The agent receives a
   framed message that says it was sent by the plugin and was not typed by the user,
-  followed by the strategy-only proposal text (no tools, no code, no diff). The message is
+  followed by the failing findings and the strategy-only proposal text (no tools, no code,
+  no diff); if the proposer failed or there is no proposer request (oversized diff or a
+  blocked path), only the findings. At most 32 findings are listed, with paths cut to 512
+  characters and texts to 1000; the rest appear as `+N more findings not listed`. A
+  location never names a path the evidence policy blocks. The message is cut to the
+  16384-character task limit (strategy first, with a `[truncated]` marker). The message is
   visible in the transcript. It opens with a fixed marker: the worker detects the marker
-  in the next unit's task and downgrades that unit to the user panel, so at most one
+  in the next unit's task and flags that unit as `fromDelivery`, so the module shows it in the user panel and at most one
   automatic delivery follows a unit the user started, and at most 3 happen per session
-  (a fixed limit). The count is kept per session in the plugin state, so it survives a
+  (a fixed limit; only a message the host accepted counts). The count is kept per session in the plugin state, so it survives a
   reload of the module and a `/resume`; only the last 32 sessions are remembered. The
   model's text is stripped of control characters (tabs and newlines stay), capped at
   32768 characters, and placed between `--- proposal start ---` and

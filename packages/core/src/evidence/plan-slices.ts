@@ -1,10 +1,9 @@
 import type { ParsedRule, Turn, TurnFile } from "../domain/types";
 import { DEFAULT_EVIDENCE_POLICY } from "./defaults";
+import { HUNK_MARKER } from "./hunk-header";
 import { checkFilePath } from "./safety";
 import { assembleDiff, hasNoAttributedPatch, selectApplicableFiles } from "./select-evidence";
 import type { EvidencePolicy, EvidenceSlice, RuleEvidencePlan } from "./types";
-
-const HUNK_MARKER = /^@@ [^\n]*@@/gm;
 
 /**
  * Plans one rule's evidence deterministically with no host or network call. Scope and

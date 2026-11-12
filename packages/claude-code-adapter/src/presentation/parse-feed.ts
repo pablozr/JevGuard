@@ -1,23 +1,13 @@
 import type { OperationalStatus, ReviewCounts, SemanticVerdict } from "@jevguard/core";
-import { CHAIN_ID_PATTERN, FINDING_ID_PATTERN, isAttemptCount } from "@jevguard/core";
-import { hasKeys, isRecord, type JsonRecord } from "./json-record";
+import { FINDING_ID_PATTERN } from "@jevguard/core";
+import { isCount, isRecord, type JsonRecord } from "./json-record";
 import { TURN_ID_PREFIX } from "./turn-id";
-import type {
-  ReviewFeedChain,
-  ReviewFeedLane,
-  ReviewFeedLine,
-  ReviewFeedRecorded,
-  ReviewFeedResult,
-} from "./types";
+import type { ReviewFeedLane, ReviewFeedLine, ReviewFeedRecorded, ReviewFeedResult } from "./types";
 
 const MAX_TURN_ID_LENGTH = 512;
 const MAX_RESULTS = 200;
 const MAX_CAUSES = 32;
 const TYPED_CODE = /^[A-Z][A-Z_]{0,63}$/;
-
-function isCount(value: unknown): value is number {
-  return typeof value === "number" && Number.isInteger(value) && value >= 0;
-}
 
 function isTypedCode(value: unknown): value is string {
   return typeof value === "string" && TYPED_CODE.test(value);
@@ -117,23 +107,6 @@ function resultsOf(value: unknown): readonly ReviewFeedResult[] | null {
   return listOf(value, MAX_RESULTS, resultOf);
 }
 
-const CHAIN_KEYS = ["chainId", "attempt", "maxAttempts", "result", "fixed"];
-
-function chainOf(value: unknown): ReviewFeedChain | null {
-  if (!isRecord(value)) return null;
-
-  if (!hasKeys(value, CHAIN_KEYS)) return null;
-
-  const { chainId, attempt, maxAttempts, result, fixed } = value;
-
-  if (typeof chainId !== "string" || !CHAIN_ID_PATTERN.test(chainId)) return null;
-  if (!isAttemptCount(attempt) || !isAttemptCount(maxAttempts) || attempt > maxAttempts)
-    return null;
-  if (!isTypedCode(result) || !isCount(fixed)) return null;
-
-  return { chainId, attempt, maxAttempts, result, fixed };
-}
-
 function recordedOf(record: JsonRecord, turnId: string, at: string): ReviewFeedRecorded | null {
   const counts = countsOf(record.counts);
   const causes = causesOf(record.causes);
@@ -142,9 +115,6 @@ function recordedOf(record: JsonRecord, turnId: string, at: string): ReviewFeedR
   if (counts === null || causes === null || results === null) return null;
   if (record.proposal !== undefined && record.proposal !== true) return null;
 
-  const chain = record.chain === undefined ? undefined : chainOf(record.chain);
-
-  if (chain === null) return null;
   if (record.remediationConfig !== undefined && !isTypedCode(record.remediationConfig)) return null;
 
   return {
@@ -156,7 +126,6 @@ function recordedOf(record: JsonRecord, turnId: string, at: string): ReviewFeedR
     causes,
     results,
     ...(record.proposal === true ? { proposal: true as const } : {}),
-    ...(chain === undefined ? {} : { chain }),
     ...(record.remediationConfig === undefined
       ? {}
       : { remediationConfig: record.remediationConfig }),

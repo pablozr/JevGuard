@@ -2,8 +2,11 @@ import type { JevEvaluationPort, Turn, TurnReview } from "@jevguard/core";
 import {
   aggregateReview,
   buildProposalRequest,
+  collectDeliveryFindings,
   DEFAULT_EVIDENCE_POLICY,
   evaluateBuiltIns,
+  isAutoDeliveredTask,
+  proposesOnFail,
   reviewTurn,
   unavailableReview,
 } from "@jevguard/core";
@@ -16,7 +19,13 @@ import type {
 } from "./types";
 
 function withoutProposal(review: TurnReview): ResolvedReview {
-  return { review, proposal: null, projectModelIgnored: false };
+  return {
+    review,
+    proposal: null,
+    findings: { findings: [], omitted: 0 },
+    fromDelivery: false,
+    projectModelIgnored: false,
+  };
 }
 
 export const DEFAULT_REVIEW_DEADLINE_MS = 120_000;
@@ -64,29 +73,41 @@ async function reviewResolution(
     jev: dependencies.jevFor(),
   });
 
-  if (!options.proposals || outcome.remediation.status !== "VALID") {
+  if (
+    !options.proposals ||
+    outcome.remediation.status !== "VALID" ||
+    !proposesOnFail(outcome.remediation.config)
+  ) {
     return withoutProposal(outcome.review);
   }
 
   const { config } = outcome.remediation;
+  const { turn } = resolution;
   const proposal = buildProposalRequest({
-    turn: resolution.turn,
+    turn,
     sessionID: handoff.sessionId,
     rules: outcome.rules,
     results: outcome.review.results,
     config,
   });
+  const findings = collectDeliveryFindings({
+    turn,
+    rules: outcome.rules,
+    results: outcome.review.results,
+  });
 
   return {
     review: outcome.review,
     proposal,
+    findings,
+    fromDelivery: isAutoDeliveredTask(turn.task),
     projectModelIgnored: proposal !== null && config.model !== null,
   };
 }
 
 /**
- * Reviews one handoff. When proposals are enabled, a complete, safe review with a `FAIL`
- * also yields the core's proposal request. Every failure, including a spent deadline,
+ * Reviews one handoff. When proposals are enabled, a review with a `FAIL` also yields its
+ * bounded delivery findings, and a complete, safe one the core's proposal request. Every failure, including a spent deadline,
  * degrades to a review-level `UNAVAILABLE/JEV_FAILURE` with no proposal, so the unit is
  * still recorded.
  */

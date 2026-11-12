@@ -522,7 +522,8 @@ The full attributed patch must pass the safety policy. If any attributed file is
 blocked or the patch is oversized, the plugin records no proposal at all — even when a
 rule-scoped `FAIL` exists — because there is no complete safe evidence to send. The
 task is capped at `16384` characters; a longer task records no proposal rather than
-truncating evidence.
+truncating evidence. With `delivery: agent` such a unit is still delivered, as findings
+only (see below).
 
 No agent is registered for the proposal. The plugin creates an isolated child
 session parented to the source session with wildcard-deny permissions
@@ -546,18 +547,16 @@ apply instruction into their normal coding agent, and applies it there. That app
 an ordinary execution, so the server plugin reviews it normally when it succeeds,
 exactly like any other turn.
 
-### OpenCode `mode: remediate` (bounded chain)
+### OpenCode `delivery: agent` (one delivery per unit)
 
 By default OpenCode only observes: the proposal stays in its child session. You can opt
-into a bounded correction chain in your own file, never in the repository:
+into one visible delivery to the agent in your own file, never in the repository:
 
 ```yaml
 # <XDG_CONFIG_HOME | USERPROFILE | HOME/.config>/jevguard/opencode.yaml
 remediation:
   enabled: true      # default false
-  delivery: agent    # user | agent; remediate requires agent
-  mode: remediate    # observe | remediate; default observe
-  max_attempts: 2    # 1 to 3; default 2; only with mode: remediate
+  delivery: agent    # user | agent; default user
 ```
 
 The file has no `model` key (the proposer uses `remediation.model` from `.jev/config.yaml`
@@ -566,34 +565,30 @@ tree, and validated exactly like Claude Code's `claude-code.yaml`; a refused fil
 remediation off and logs one `warn` line, `JevGuard remediation is off · your
 opencode.yaml is not valid (<reason>)`, with `USER_CONFIG_INVALID`,
 `USER_CONFIG_IN_PROJECT` or `USER_CONFIG_UNREADABLE`. The repository's `.jev/config.yaml`
-can only veto it with `remediation.auto_propose: false`.
+can only veto it with `remediation.auto_propose: false`. The legacy keys `mode` and
+`max_attempts` are still accepted, change nothing and log one warning code each
+(`REMEDIATION_LEGACY_MODE`, `REMEDIATION_LEGACY_MAX_ATTEMPTS`).
 
-With `mode: remediate`, a reviewed execution with a `FAIL` of an `error` rule or a
-built-in check, with complete safe evidence, runs the proposer in its deny-all child
-session in the background (it is not opened), then queues one visible synthetic message
-into the originating session (description `JevGuard remediation`). It is sent only after
-the execution succeeded and only while the session is idle; it never steers a running
-execution and never hides the agent's reply. The message is marked `attempt n/m` and
-lists the failing findings, the strategy (capped at 32768 characters; empty when no model
-is readable) and the same constraints as on Claude Code. Its chain mark travels in the
-message metadata (`jevguard`), never in its text, so a pasted copy of a message is read as
-your own turn.
+With `delivery: agent`, every reviewed execution with a `FAIL` of an `error` rule or a
+built-in check gets one delivery. When the evidence is complete and safe, the proposer runs
+in its deny-all child session in the background (it is not opened). The plugin then queues
+at most one visible synthetic message into the originating session (description
+`JevGuard remediation`). It carries the failing findings (id, description, severity,
+probability, location with its hunk) and the strategy. Up to 32 findings are listed
+(paths cut to 512 characters, texts to 1000) and the rest appear as
+`+N more findings not listed`; the strategy is capped at 32768 characters and cut with a
+`[truncated]` marker, and the whole message never exceeds 16384 characters. When the
+proposer failed, or the diff is oversized or holds a blocked path so there is no proposer
+request, the message carries the findings alone and says so. A location never names a
+path the evidence policy blocks. It is sent only after the execution succeeded and only while
+the session is idle, waiting up to 120 seconds for it; it never steers a running
+execution and never hides the agent's reply. If the session stays busy or the host
+refuses the message, nothing is sent and the proposal stays in the child session.
 
-The agent's next execution is reviewed normally and the chain resolves, continues or
-stops under the same rules and codes as on Claude Code (`LIMIT`, `REPEATED_FAILURE`,
-`REGRESSION_INTRODUCED`, `UNVERIFIED`, `SESSION_LIMIT`, `DELIVERY_FAILED`), plus:
-
-| Code | Meaning on OpenCode |
-| --- | --- |
-| `UNVERIFIED` | Also: you sent a message into the correction execution, the session was busy when the message was ready, or the next execution was interrupted, failed or not attributable. |
-| `PROPOSAL_FAILED` | The proposer failed or timed out; nothing was sent. |
-| `DELIVERY_FAILED` | The host refused the synthetic message. |
-| `EXPIRED` | More than 64 chains were open at once; the oldest one was dropped. |
-
-At most 3 messages are sent per session for the plugin's lifetime. Chains live in memory
-only: a restart ends them, and the next correction execution then stops as `UNVERIFIED`.
-Every ended chain logs one line and appends one record to the same
-`remediation-chains.jsonl` file (`host: opencode`).
+The execution the message causes is reviewed normally. If it fails, it gets its own
+proposal in the child session but never another automatic delivery, so there is no loop.
+At most 3 messages are sent per session for the plugin's lifetime, and a message that did
+not reach the agent does not count.
 
 ### OpenCode 2.2.x scope
 
@@ -772,8 +767,6 @@ remediation:
   enabled: true      # default false
   delivery: user     # user | agent
   model: sonnet      # optional; Claude alias or id; default: the session's model
-  mode: observe      # observe | remediate; default observe
-  max_attempts: 2    # 1 to 3; default 2; only with mode: remediate
 ```
 
 The file is read by the worker. `XDG_CONFIG_HOME` is used only when it is an absolute
@@ -797,55 +790,32 @@ code and never applies anything; there is no retry. The result is shown as follo
   and its text are not sent to the model. Where the terminal is narrower than 144 columns
   the panel cannot be placed without your action, so the proposal is also written to the
   transcript as faint lines of at most 1900 characters.
-- **`delivery: agent` (explicit opt-in).** The module also submits the proposal to the
-  agent as a visible message from the plugin (never as if you typed it), which starts a
-  turn once the session is idle. At most one such message follows a unit you started, at
-  most 3 are sent per session (the count survives a reload and a `/resume`), and the
-  turn they cause is reviewed normally but never triggers another. The fourth delivery in
-  a session is shown in the panel instead, with a line saying the limit was reached. The
-  panel opens as a record of what was sent. The proposal text is shown without control
-  characters and capped at 32768 characters.
+- **`delivery: agent` (explicit opt-in).** The module also submits one visible message
+  from the plugin to the agent (never as if you typed it), which starts a turn once the
+  session is idle. The message lists every failing finding (id, description, severity,
+  probability, location with its hunk) and the strategy, followed by a constraint not to
+  touch tests, configuration, dependencies or `.jev/`. If the model call fails, the
+  findings are delivered alone and a failure line says why; a unit with no proposer
+  request (oversized diff or a blocked path) skips the model call and is delivered the
+  same way, with no failure line. Up to 32 findings are listed (paths cut to 512
+  characters, texts to 1000) and the rest appear as `+N more findings not listed`; the
+  message never exceeds 16384 characters, so the strategy is cut with a `[truncated]`
+  marker first. At most one such message
+  follows a unit you started, at most 3 are sent per session (the count survives a reload
+  and a `/resume`, and only a message the host accepted counts), and the turn they cause
+  is reviewed normally but never triggers another. The fourth delivery in a session is
+  shown in the panel instead, with a line saying the limit was reached. If the host
+  refuses the message, the panel shows the proposal and a `DELIVERY_FAILED` line. The
+  proposal text is shown without control characters and capped at 32768 characters. A
+  request for another session than the one running is never submitted; the module says
+  `remediation not sent · other session`.
 
-#### `mode: remediate` (bounded chain)
+The legacy keys `mode` and `max_attempts` are still accepted, change nothing and make
+the worker log `REMEDIATION_LEGACY_MODE` or `REMEDIATION_LEGACY_MAX_ATTEMPTS`; the repository's
+`.jev/config.yaml` can only veto remediation with `remediation.auto_propose: false` and
+cannot set `delivery`.
 
-`mode: remediate` requires `delivery: agent`; with `delivery: user` (explicit or by
-default) the whole file is invalid and the worker log holds `REMEDIATION_USER_CONFIG_INVALID`.
-`max_attempts` is an integer from 1 to 3 (default 2) and is accepted only with
-`mode: remediate`. Only your own `claude-code.yaml` can turn this on: the repository's
-`.jev/config.yaml` can only veto it with `remediation.auto_propose: false`, and it
-cannot set `mode`, `max_attempts` or `delivery`.
 
-When a turn you started has a `FAIL` of an `error` rule or a built-in check, with complete
-safe evidence, the module sends the agent a visible message marked
-`attempt n/m` that lists the failing rule ids, severities, scoped paths, the rule's
-violation and allowed text, the strategy and a constraint not to touch tests,
-configuration, dependencies or `.jev/`. The agent's next turn is reviewed normally. The
-chain then:
-
-- **resolves** when every finding of the chain passes in a turn that judged it
-  (`RESOLVED`: a line and a toast say how many were fixed and in how many attempts);
-- **delivers attempt 2 or 3** only when the failure set changed, nothing new failed and
-  the attempt limit was not reached;
-- **stops** with a visible line and toast carrying one closed code and writes no
-  further request:
-
-| Code | Meaning |
-| --- | --- |
-| `LIMIT` | `max_attempts` was reached with findings still failing. |
-| `REPEATED_FAILURE` | The same findings over the same paths failed again. |
-| `REGRESSION_INTRODUCED` | A finding outside the chain failed. |
-| `UNVERIFIED` | A finding of the chain was not judged, its scope shrank, evidence was incomplete or the chain state was lost. |
-| `SESSION_LIMIT` | The session already sent 3 agent deliveries; the proposal is shown in the panel. |
-| `DELIVERY_FAILED` | The message could not be submitted; the proposal is shown in the panel. |
-
-Warnings, `UNAVAILABLE` and `SKIPPED` never start a chain, and a message from a previous
-version (without an attempt) never continues one. Each ended chain appends one line to
-`<XDG_DATA_HOME or ~/.local/share>/jevguard/remediation-chains.jsonl` (ids, attempt
-counts, failure-set hashes, resolved and remaining ids and the result; never a task,
-patch, rule text or path), bounded to 1 MiB and 500 lines. The per-chain state sits
-beside the private proposal requests and expires with them. `SESSION_LIMIT` and
-`DELIVERY_FAILED` are known only to the module, so they are shown but not written to that
-file.
 
 A failure shows a generic toast and one transcript line with a closed code
 (`REQUEST_UNREADABLE`, `REQUEST_INVALID`, `MODEL_REFUSED`, `MODEL_API_ERROR`,

@@ -10,9 +10,9 @@ export { hasKeys, isRecord, type JsonRecord } from "./json-record";
 export { parseReviewFeed } from "./parse-feed";
 export {
   AUTO_DELIVERY_MARKER,
+  agentDeliveredLine,
   agentDeliveryText,
   chunkText,
-  decideDelivery,
   extractManualApply,
   isAutoDeliveredTask,
   MAX_AGENT_DELIVERIES_PER_SESSION,
@@ -23,37 +23,24 @@ export {
   proposalFailedToast,
   proposalFailureLine,
   proposalLimitLine,
+  proposalOtherSessionLine,
   proposalReadyToast,
-  proposalSentLine,
   remediationConfigLine,
-  remediationResolvedLine,
-  remediationSentLine,
-  remediationStoppedLine,
   toProposalView,
 } from "./proposal-delivery";
 export {
   CLAUDE_MODEL_PATTERN,
-  DELIVERY_MAX_FINDING_PATH_LENGTH,
-  DELIVERY_MAX_FINDING_PATHS,
-  DELIVERY_MAX_FINDING_TEXT_LENGTH,
-  DELIVERY_MAX_FINDINGS,
-  fitsDeliveryLimits,
   PROPOSAL_MAX_PROMPT_LENGTH,
   PROPOSAL_MAX_SYSTEM_LENGTH,
   PROPOSAL_REQUEST_TTL_MS,
   parseProposalRequestFile,
 } from "./proposal-file";
-export type { ProposalOutcomeCode, ProposalOutcomeFile } from "./proposal-outcome";
-export { encodeProposalOutcome, outcomeOfFailure, parseProposalOutcome } from "./proposal-outcome";
 export {
   proposalDirectoryOf,
-  proposalOutcomeFileOf,
   proposalRequestFileOf,
 } from "./proposal-path";
 export { sessionTurnPrefixOf, TURN_ID_PREFIX } from "./turn-id";
 export type {
-  ChainNotice,
-  DeliveryChain,
   FeedEnvironment,
   FeedWatch,
   ProposalDelivery,
@@ -61,7 +48,6 @@ export type {
   ProposalRequestFile,
   ProposalView,
   ReviewDisplay,
-  ReviewFeedChain,
   ReviewFeedLane,
   ReviewFeedLine,
   ReviewFeedRecorded,

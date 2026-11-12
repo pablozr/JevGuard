@@ -1,51 +1,19 @@
 import type { RuleSeverity } from "../domain/types";
 
 /**
- * Name of the internal OpenCode subagent that drafts a remediation proposal. It is
- * registered by the plugin `config` hook as a tool-denied subagent, so it cannot
- * execute a tool, edit a file, or produce a patch.
- */
-export const PROPOSER_AGENT_NAME = "jevguard-proposer";
-
-/**
  * Upper bound on the task text carried in an automatic proposal request. A longer
  * task rejects the request instead of truncating the evidence the proposer receives.
  */
 export const REMEDIATION_MAX_TASK_LENGTH = 16_384;
 
-/** `observe` never messages the agent; `remediate` is the user's opt-in to a bounded fix chain. */
-export type RemediationMode = "observe" | "remediate";
-
-export const MAX_ATTEMPTS_DEFAULT = 2;
-export const MAX_ATTEMPTS_CEILING = 3;
-
-/** The unanchored shape of a chain id, for patterns that find one inside a longer text. */
-export const CHAIN_ID_SOURCE = "[A-Za-z0-9._:-]{1,512}";
-/** The shape of a chain id (the id of the turn that started it), wherever it is stored or parsed. */
-export const CHAIN_ID_PATTERN = new RegExp(`^${CHAIN_ID_SOURCE}$`);
-/** The shape of a rule id or built-in check id carried by a chain. */
+/** The shape of a rule id or built-in check id carried by a delivery. */
 export const FINDING_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
-
-/** True for an attempt count a chain can reach: an integer in 1..MAX_ATTEMPTS_CEILING. */
-export function isAttemptCount(value: unknown): value is number {
-  return (
-    typeof value === "number" &&
-    Number.isInteger(value) &&
-    value >= 1 &&
-    value <= MAX_ATTEMPTS_CEILING
-  );
-}
 
 /** Remediation messages one session may send to its agent. */
 export const MAX_AGENT_DELIVERIES_PER_SESSION = 3;
 
 /** Longest proposer answer carried into a delivery or shown as a proposal; the rest is dropped. */
 export const PROPOSAL_MAX_TEXT_LENGTH = 32_768;
-
-/** True while a session has made fewer agent deliveries than the limit allows. */
-export function withinSessionLimit(deliveredInSession: number): boolean {
-  return deliveredInSession < MAX_AGENT_DELIVERIES_PER_SESSION;
-}
 
 /** MVP proposal trigger. `WARN` and every operational outcome never trigger. */
 export type ProposalTrigger = "FAIL";
@@ -80,6 +48,35 @@ export interface RemediationRuleSnapshot {
   readonly allowed: string;
 }
 
+/** Most locations one finding carries into a request or delivery. */
+export const MAX_FINDING_LOCATIONS = 64;
+
+/** Most findings one delivery lists; the rest are only counted. */
+export const DELIVERY_MAX_FINDINGS = 32;
+
+/** Longest path a delivery finding location carries. */
+export const DELIVERY_MAX_FINDING_PATH_LENGTH = 512;
+
+/** Longest text (description, violation, allowed, location, id) a delivery finding line carries. */
+export const DELIVERY_MAX_FINDING_TEXT_LENGTH = 1_000;
+
+/** Where a finding failed: a file, plus the unified-diff hunk when the evidence was sliced by hunk. */
+export interface FindingLocation {
+  readonly path: string;
+  readonly hunk: {
+    readonly ordinal: number;
+    readonly newStart: number;
+    readonly newLines: number;
+  } | null;
+}
+
+/**
+ * What a host does with a unit that has a `FAIL`: `DELIVER` sends the agent one
+ * message, `PANEL` only shows the proposal to the user, and `SESSION_LIMIT` means the
+ * session already received the most deliveries it may.
+ */
+export type AgentDeliveryDecision = "DELIVER" | "PANEL" | "SESSION_LIMIT";
+
 /** One local `error` rule finding that reached `FAIL` in the evaluated turn. */
 export interface RemediationRuleFinding {
   readonly ruleId: string;
@@ -87,6 +84,7 @@ export interface RemediationRuleFinding {
   readonly rule: RemediationRuleSnapshot;
   readonly probability: number;
   readonly scopedPaths: readonly string[];
+  readonly locations: readonly FindingLocation[];
 }
 
 /** One built-in check finding that reached `FAIL` in the evaluated turn. */
@@ -95,6 +93,7 @@ export interface RemediationBuiltInFinding {
   readonly severity: RuleSeverity;
   readonly probability: number;
   readonly scopedPaths: readonly string[];
+  readonly locations: readonly FindingLocation[];
 }
 
 /**
@@ -123,4 +122,40 @@ export interface RemediationProposalStore {
   claim(evaluationId: string): boolean;
   registerChildSession(sessionID: string): void;
   isChildSession(sessionID: string): boolean;
+}
+
+/** One finding as the agent sees it: ids, the rule's own text, severity, probability and where it failed. */
+export interface DeliveryFinding {
+  readonly id: string;
+  readonly kind: "RULE" | "BUILT_IN";
+  readonly description: string;
+  readonly severity: string;
+  readonly probability: number;
+  readonly violation: string;
+  readonly allowed: string;
+  readonly locations: readonly FindingLocation[];
+}
+
+/**
+ * Every `FAIL` finding of a unit as a delivery shows it, bounded: at most
+ * `DELIVERY_MAX_FINDINGS` findings with bounded text, and how many were left out.
+ */
+export interface DeliveryFindings {
+  readonly findings: readonly DeliveryFinding[];
+  readonly omitted: number;
+}
+
+/** The framed message of one remediation delivery; `strategyText` is `null` when there is no proposal. */
+export interface AgentDeliveryInput {
+  readonly unit: string;
+  readonly findings: readonly DeliveryFinding[];
+  readonly omitted: number;
+  readonly strategyText: string | null;
+}
+
+/** What a host knows when it decides whether to message the agent about a unit with a `FAIL`. */
+export interface AgentDeliveryDecisionInput {
+  readonly agentOptIn: boolean;
+  readonly fromDelivery: boolean;
+  readonly deliveredInSession: number;
 }

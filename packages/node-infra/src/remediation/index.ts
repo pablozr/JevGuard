@@ -8,6 +8,7 @@ export {
   realPathOfNearest,
 } from "./containment";
 export type {
+  LegacyRemediationKey,
   ProjectProbe,
   RemediationDelivery,
   RemediationUserSettings,

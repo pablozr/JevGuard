@@ -1,20 +1,20 @@
 import type { JevEvaluationPort, PolicyLoader } from "@jevguard/core";
 import type { OperationalLogSink, ReviewPresenter, TurnTracker } from "@jevguard/opencode-adapter";
 import type { ProposalDependencies } from "./remediation/propose";
-import type { RemediateSetup } from "./remediation/remediate";
+import type { RemediateSetup, SessionIdleWaiter } from "./remediation/types";
 
 export interface ReviewDependencies extends ProposalDependencies {
   readonly policy: PolicyLoader;
   readonly presenter: ReviewPresenter;
   readonly jev: JevEvaluationPort;
   readonly operational: OperationalLogSink;
-  /** Present only when the user's file opted into `remediate`; otherwise reviews observe. */
+  /** Present only when the user's file opted into `delivery: agent`; otherwise reviews observe. */
   readonly remediation: RemediateSetup | null;
-  /** `true` while the session runs another execution. */
-  readonly isBusy: (sessionID: string) => boolean;
+  /** Resolves when the session has no execution in progress. */
+  readonly idle: SessionIdleWaiter;
 }
 
-export interface PluginRuntimeDependencies extends Omit<ReviewDependencies, "isBusy"> {
+export interface PluginRuntimeDependencies extends Omit<ReviewDependencies, "idle"> {
   readonly tracker: TurnTracker;
 }
 

@@ -1,8 +1,6 @@
 import { describeReview, unitLabelOf } from "./describe-review";
-import { remediationResolvedLine, remediationStoppedLine } from "./proposal-delivery";
 import { sessionTurnPrefixOf } from "./turn-id";
 import type {
-  ChainNotice,
   FeedWatch,
   ReviewDisplay,
   ReviewFeedLine,
@@ -85,20 +83,6 @@ export function armWatch(watch: FeedWatch, nowMs: number): FeedWatch {
   return { ...watch, armedAtMs: nowMs };
 }
 
-function chainNoticeOf(line: ReviewFeedRecorded): ChainNotice | null {
-  const { chain } = line;
-
-  if (chain === undefined || chain.result === "DELIVERING") return null;
-
-  const unit = unitLabelOf(line.turnId);
-  const text =
-    chain.result === "RESOLVED"
-      ? remediationResolvedLine(unit, chain.fixed, chain.attempt)
-      : remediationStoppedLine(unit, chain.attempt, chain.maxAttempts, chain.result);
-
-  return { turnId: line.turnId, text };
-}
-
 function watchStatusOf(
   pending: readonly ReviewFeedStarted[],
   displays: readonly ReviewDisplay[],
@@ -150,7 +134,6 @@ export function tickWatch(
     },
     displays,
     proposals: fresh.filter((line) => line.proposal === true).map((line) => line.turnId),
-    chains: fresh.flatMap((line) => chainNoticeOf(line) ?? []),
     configIssues: [...new Set(fresh.flatMap((line) => line.remediationConfig ?? []))],
     status: watchStatusOf(pending, displays, stale),
     stop,

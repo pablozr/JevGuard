@@ -1,7 +1,12 @@
 import type { Plugin } from "@opencode/plugin";
 import { DELIVERY_METADATA_KEY } from "../attribution/execution";
-import type { DeliveryMark } from "../attribution/types";
-import type { OriginSessionPromptFacade, ProposalModel, ProposalSessionFacade } from "./types";
+import type {
+  DeliveryMark,
+  DeliveryOutcome,
+  OriginSessionPromptFacade,
+  ProposalModel,
+  ProposalSessionFacade,
+} from "./types";
 
 /** The slice of the 2.2.x plugin context the proposal facade uses. */
 export interface ProposalContext {
@@ -83,26 +88,30 @@ function lastAssistantText(messages: readonly ContextMessage[]): string | null {
 /**
  * Concrete origin delivery over the OpenCode 2.2.x session API: one visible synthetic
  * message, queued (never steering a running execution), whose metadata carries the
- * chain mark under `jevguard`. It never asks the host to skip the reply.
+ * delivery mark under `jevguard`. It never asks the host to skip the reply.
  */
 export function createOpenCodeOriginPromptFacade(
   context: OriginPromptContext,
 ): OriginSessionPromptFacade {
   return {
-    async promptVisible(sessionID: string, text: string, mark: DeliveryMark): Promise<void> {
-      await context.session.synthetic({
-        sessionID,
-        text,
-        description: DELIVERY_DESCRIPTION,
-        metadata: {
-          [DELIVERY_METADATA_KEY]: {
-            chainId: mark.chainId,
-            attempt: mark.attempt,
-            maxAttempts: mark.maxAttempts,
-          },
-        },
-        delivery: "queue",
-      });
+    async promptVisible(
+      sessionID: string,
+      text: string,
+      mark: DeliveryMark,
+    ): Promise<DeliveryOutcome> {
+      try {
+        await context.session.synthetic({
+          sessionID,
+          text,
+          description: DELIVERY_DESCRIPTION,
+          metadata: { [DELIVERY_METADATA_KEY]: { v: mark.v, unitId: mark.unitId } },
+          delivery: "queue",
+        });
+
+        return "SENT";
+      } catch {
+        return "FAILED";
+      }
     },
   };
 }

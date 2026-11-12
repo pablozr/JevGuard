@@ -1,223 +1,95 @@
-import {
-  type ChainClosure,
-  type ChainEndRecord,
-  type ChainEndSink,
-  type ChainStep,
-  chainEndOf,
-  decideOrphanStep,
-  decideRemediateStep,
-  deliveryFindingsOf,
-  formatAgentDelivery,
-  PROPOSAL_MAX_TEXT_LENGTH,
-  type RemediationProposalRequest,
-  type ReviewResult,
-  recordClosures,
-  type Turn,
-} from "@jevguard/core";
-import type { RemediationChainLog } from "@jevguard/node-infra";
-import type {
-  OperationalEvent,
-  OperationalLogSink,
-  OriginSessionPromptFacade,
-  TurnDelivery,
-} from "@jevguard/opencode-adapter";
-import type { RemediationChains } from "./chains";
-import { contain, draftProposal, type ProposalDependencies } from "./propose";
+import { decideAgentDelivery, formatAgentDelivery } from "@jevguard/core";
+import type { OperationalEvent } from "@jevguard/opencode-adapter";
+import { contain, proposeForTurn, proposeStrategy } from "./propose";
+import type { RemediateDependencies, ReviewedTurn } from "./types";
 
-/** What `remediate` needs once the user's file opted in; absent otherwise. */
-export interface RemediateSetup {
-  readonly originPrompt: OriginSessionPromptFacade;
-  readonly maxAttempts: number;
-  readonly chains: RemediationChains;
-  readonly chainLog: RemediationChainLog;
-}
-
-export interface RemediateDependencies extends ProposalDependencies {
-  readonly remediation: RemediateSetup;
-  readonly operational: OperationalLogSink;
-  /** `true` while the session runs another execution, so nothing may be queued into it. */
-  readonly isBusy: (sessionID: string) => boolean;
-}
-
-/** One reviewed turn, as the chain decision needs it. */
-export interface ReviewedTurn {
-  readonly turn: Turn;
-  readonly sessionID: string;
-  readonly delivery: TurnDelivery;
-  readonly request: RemediationProposalRequest | null;
-  readonly results: readonly ReviewResult[];
-}
+/** How long a delivery waits for the origin session to go idle before it gives up. */
+export const DELIVERY_IDLE_WAIT_MS = 120_000;
 
 /**
- * Runs the core's chain decision for one reviewed turn in `remediate` and acts on it.
+ * Handles one reviewed turn with a finding after the user opted into `delivery: agent`:
+ * at most one visible message to the agent, built from every finding plus the proposer
+ * strategy, or from the findings alone when the proposer failed or no proposal could be
+ * requested (oversized or blocked evidence).
  *
- * - The chain mark is read only from the synthetic message's metadata; a turn that mixes a
- *   marked delivery with a user message cannot be judged, so its chain ends as unverified.
- * - `DELIVER` runs the proposer in the background and queues one visible synthetic message
- *   into the originating session, never while that session runs another execution. The
- *   session limit, a failed proposer, a busy session and a rejected message each end the
- *   chain with a typed code; no model leaves the strategy empty.
- * - `STOP` and `RESOLVED` log one line and one chain record.
+ * - A turn that came from a delivery, or a session at its limit, only gets the proposal in
+ *   a child session as in observe; the limit also logs `SESSION_LIMIT`.
+ * - The delivery is reserved before the proposer runs and counted only when the host
+ *   accepted it. It waits for the session to be idle, and gives up after
+ *   `DELIVERY_IDLE_WAIT_MS` without queueing anything.
  */
-export async function remediateTurn(
+export async function deliverOnce(
   reviewed: ReviewedTurn,
   dependencies: RemediateDependencies,
 ): Promise<void> {
-  const step = chainStepOf(reviewed, dependencies.remediation);
-
-  switch (step.kind) {
-    case "NONE":
-      return;
-    case "STOP":
-    case "RESOLVED":
-      await endChain(chainEndOf(step, reviewed.turn.id), dependencies);
-      return;
-    case "DELIVER":
-      // The core only decides `DELIVER` from a request.
-      if (reviewed.request === null) return;
-      await deliver(step, reviewed, reviewed.request, dependencies);
-      return;
-  }
-}
-
-/**
- * Ends the session's saved chain as unverified after an execution that has no turn of its
- * own (interrupted, failed, or not attributable): it cannot judge the chain.
- */
-export async function endOrphanChain(
-  sessionID: string,
-  dependencies: Pick<RemediateDependencies, "remediation" | "operational">,
-): Promise<void> {
-  const { chains, maxAttempts } = dependencies.remediation;
-  const active = chains.activeChain(sessionID);
-
-  if (active === null) return;
-
-  const step = decideOrphanStep(active, maxAttempts);
-
-  if (step.kind === "STOP") {
-    await closeChains([{ state: step.state, code: step.code }], dependencies);
-  }
-}
-
-function chainStepOf(reviewed: ReviewedTurn, setup: RemediateSetup): ChainStep {
-  const { mark, mixed } = reviewed.delivery;
-  const chain = mark === null ? null : setup.chains.load(mark.chainId);
-
-  return decideRemediateStep({
-    maxAttempts: setup.maxAttempts,
-    delivery: mark,
-    chain,
-    request: reviewed.request,
-    results: reviewed.results,
-    turnId: reviewed.turn.id,
-    mixed,
+  const { request, findings, sessionID, turn } = reviewed;
+  const { ledger, originPrompt } = dependencies.remediation;
+  const decision = decideAgentDelivery({
+    agentOptIn: true,
+    fromDelivery: reviewed.delivery.fromDelivery,
+    deliveredInSession: ledger.used(sessionID),
   });
-}
 
-async function deliver(
-  step: Extract<ChainStep, { kind: "DELIVER" }>,
-  reviewed: ReviewedTurn,
-  request: RemediationProposalRequest,
-  dependencies: RemediateDependencies,
-): Promise<void> {
-  const { chains, originPrompt } = dependencies.remediation;
-  const { sessionID } = reviewed;
-  const end = (code: ChainClosure["code"]) =>
-    closeChains([{ state: step.state, code }], dependencies);
+  if (decision !== "DELIVER" || !ledger.reserve(sessionID)) {
+    if (decision !== "PANEL") {
+      await writeEvent(
+        { kind: "REMEDIATION_NOT_SENT", unitId: turn.id, code: "SESSION_LIMIT" },
+        dependencies,
+      );
+    }
 
-  if (!chains.countDelivery(sessionID)) {
-    await end("SESSION_LIMIT");
+    if (request !== null) await proposeForTurn(request, dependencies);
+
     return;
   }
 
-  const draft = await draftProposal(request, dependencies, "remediate");
-
-  if (draft.status === "DUPLICATE") return;
-
-  if (draft.status === "FAILED") {
-    await end("PROPOSAL_FAILED");
-    return;
-  }
-
-  if (dependencies.isBusy(sessionID)) {
-    await end("UNVERIFIED");
-    return;
-  }
-
-  await closeChains(chains.save(sessionID, step.state), dependencies);
-
-  const mark = { chainId: step.chainId, attempt: step.attempt, maxAttempts: step.maxAttempts };
-  const text = formatAgentDelivery({
-    unit: `turn ${reviewed.turn.id}`,
-    ...mark,
-    findings: deliveryFindingsOf(request),
-    strategyText: draft.status === "READY" ? draft.text.slice(0, PROPOSAL_MAX_TEXT_LENGTH) : "",
-  });
+  let settled = false;
 
   try {
-    await originPrompt.promptVisible(sessionID, text, mark);
-  } catch {
-    await end("DELIVERY_FAILED");
-    return;
+    if (!dependencies.proposals.claim(turn.id)) return;
+
+    const strategy = request === null ? null : await proposeStrategy(request, dependencies);
+    const text = formatAgentDelivery({
+      unit: turn.id,
+      findings: findings.findings,
+      omitted: findings.omitted,
+      strategyText: strategy,
+    });
+
+    if ((await dependencies.idle.untilIdle(sessionID, DELIVERY_IDLE_WAIT_MS)) === "TIMEOUT") {
+      await writeEvent(notSent(turn.id, "SESSION_BUSY_TIMEOUT"), dependencies);
+
+      return;
+    }
+
+    const outcome = await originPrompt.promptVisible(sessionID, text, { v: 1, unitId: turn.id });
+
+    if (outcome === "FAILED") {
+      await writeEvent(notSent(turn.id, "HOST_REJECTED"), dependencies);
+
+      return;
+    }
+
+    ledger.commit(sessionID);
+    settled = true;
+    await writeEvent(
+      {
+        kind: "REMEDIATION_SENT",
+        unitId: turn.id,
+        strategy: strategy === null ? "FINDINGS_ONLY" : "PROPOSAL",
+      },
+      dependencies,
+    );
+  } finally {
+    if (!settled) ledger.release(sessionID);
   }
-
-  await writeEvent({ kind: "REMEDIATION_SENT", ...mark }, dependencies);
 }
 
-function closeChains(
-  closures: readonly ChainClosure[],
-  dependencies: Pick<RemediateDependencies, "remediation" | "operational">,
-): Promise<void> {
-  const { remediation } = dependencies;
-
-  for (const closure of closures) {
-    remediation.chains.remove(closure.state.chainId);
-  }
-
-  return recordClosures(closures, remediation.maxAttempts, endSinkOf(dependencies));
-}
-
-async function endChain(
-  entry: ChainEndRecord,
-  dependencies: Pick<RemediateDependencies, "remediation" | "operational">,
-): Promise<void> {
-  dependencies.remediation.chains.remove(entry.chainId);
-  await writeEvent(endEventOf(entry), dependencies);
-  await recordEnd(entry, dependencies);
-}
-
-function endSinkOf(
-  dependencies: Pick<RemediateDependencies, "remediation" | "operational">,
-): ChainEndSink {
-  return {
-    stopped: (_code, entry) => writeEvent(endEventOf(entry), dependencies),
-    record: (entry) => recordEnd(entry, dependencies),
-  };
-}
-
-function recordEnd(
-  entry: ChainEndRecord,
-  dependencies: Pick<RemediateDependencies, "remediation">,
-): Promise<void> {
-  return dependencies.remediation.chainLog.record({ host: "opencode", ...entry });
-}
-
-function endEventOf(entry: ChainEndRecord): OperationalEvent {
-  return entry.result === "RESOLVED"
-    ? {
-        kind: "REMEDIATION_RESOLVED",
-        chainId: entry.chainId,
-        fixed: entry.resolvedIds.length,
-        attempts: entry.attempts,
-      }
-    : {
-        kind: "REMEDIATION_STOPPED",
-        chainId: entry.chainId,
-        attempt: entry.attempts,
-        maxAttempts: entry.maxAttempts,
-        code: entry.result,
-      };
+function notSent(
+  unitId: string,
+  cause: "SESSION_BUSY_TIMEOUT" | "HOST_REJECTED",
+): OperationalEvent {
+  return { kind: "REMEDIATION_NOT_SENT", unitId, code: "DELIVERY_FAILED", cause };
 }
 
 function writeEvent(

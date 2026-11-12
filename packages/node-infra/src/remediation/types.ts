@@ -1,17 +1,17 @@
-import type { RemediationMode } from "@jevguard/core";
-
 /** Where a proposal goes: shown to the user, or sent to the agent of the session. */
 export type RemediationDelivery = "user" | "agent";
 
-/** What the user's file turns on: where proposals go, the mode, the chain bound and an optional model. */
+/** Keys of the retired remediation chain; still accepted and validated, never acted on. */
+export type LegacyRemediationKey = "LEGACY_MODE" | "LEGACY_MAX_ATTEMPTS";
+
+/** The retired `mode` values; they are validated but never change behavior. */
+export type LegacyMode = "observe" | "remediate";
+
+/** What the user's file turns on: where proposals go and an optional model. */
 export interface RemediationUserSettings {
   readonly delivery: RemediationDelivery;
   /** `null` unless the host accepts a `model` key and the user set one. */
   readonly model: string | null;
-  /** `observe` (default) never messages the agent beyond one delivery; `remediate` runs a bounded chain. */
-  readonly mode: RemediationMode;
-  /** Deliveries one chain may make, 1..3; meaningful only in `remediate`. */
-  readonly maxAttempts: number;
 }
 
 export type RemediationUserSettingsInvalidReason =
@@ -21,7 +21,11 @@ export type RemediationUserSettingsInvalidReason =
 
 export type RemediationUserSettingsResult =
   | { readonly status: "DISABLED" }
-  | { readonly status: "ENABLED"; readonly settings: RemediationUserSettings }
+  | {
+      readonly status: "ENABLED";
+      readonly settings: RemediationUserSettings;
+      readonly warnings: readonly LegacyRemediationKey[];
+    }
   | { readonly status: "INVALID"; readonly reason: RemediationUserSettingsInvalidReason };
 
 /** What a host accepts besides the shared keys. Without `isModel`, a `model` key is invalid. */

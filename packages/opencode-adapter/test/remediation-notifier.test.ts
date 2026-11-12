@@ -181,36 +181,37 @@ describe("operational log sink", () => {
   });
 });
 
-describe("operational log sink (remediation chain)", () => {
-  test("logs each chain step with ids, counts and codes only", async () => {
+describe("operational log sink (remediation delivery)", () => {
+  test("logs each delivery event with ids and codes only", async () => {
     const writer = new FakeLogWriter();
     const sink = createOperationalLogSink(writer);
 
-    await sink.write({ kind: "REMEDIATION_SENT", chainId: "msg_a", attempt: 1, maxAttempts: 2 });
+    await sink.write({ kind: "REMEDIATION_SENT", unitId: "msg_a", strategy: "PROPOSAL" });
     await sink.write({
-      kind: "REMEDIATION_STOPPED",
-      chainId: "msg_a",
-      attempt: 2,
-      maxAttempts: 2,
-      code: "LIMIT",
+      kind: "REMEDIATION_NOT_SENT",
+      unitId: "msg_a",
+      code: "DELIVERY_FAILED",
+      cause: "SESSION_BUSY_TIMEOUT",
     });
-    await sink.write({ kind: "REMEDIATION_RESOLVED", chainId: "msg_a", fixed: 1, attempts: 1 });
+    await sink.write({ kind: "REMEDIATION_CONFIG_LEGACY", keys: ["LEGACY_MODE"] });
     await sink.write({ kind: "REMEDIATION_CONFIG_INVALID", reason: "USER_CONFIG_INVALID" });
 
     expect(writer.logs.map((log) => [log.level, log.message])).toEqual([
-      ["info", "JevGuard sent remediation attempt 1/2 to the agent"],
-      ["warn", "JevGuard remediation stopped · attempt 2/2 · LIMIT"],
-      ["info", "JevGuard remediation resolved · 1 finding(s) fixed in 1 attempt(s)"],
+      ["info", "JevGuard sent the remediation to the agent · PROPOSAL"],
+      ["warn", "JevGuard remediation not sent · DELIVERY_FAILED · SESSION_BUSY_TIMEOUT"],
+      [
+        "warn",
+        "JevGuard remediation: mode/max_attempts in your opencode.yaml are no longer used · see docs/configuration.md",
+      ],
       [
         "warn",
         "JevGuard remediation is off · your opencode.yaml is not valid (USER_CONFIG_INVALID) · see docs/configuration.md",
       ],
     ]);
     expect(writer.logs[1]?.extra).toEqual({
-      chainId: "msg_a",
-      attempt: 2,
-      maxAttempts: 2,
-      code: "LIMIT",
+      unitId: "msg_a",
+      code: "DELIVERY_FAILED",
+      cause: "SESSION_BUSY_TIMEOUT",
     });
   });
 });

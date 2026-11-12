@@ -188,7 +188,7 @@ describe("readProposal", () => {
 });
 
 describe("createOpenCodeOriginPromptFacade", () => {
-  test("queues one visible synthetic message with the chain mark in its metadata", async () => {
+  test("queues one visible synthetic message with the delivery mark in its metadata", async () => {
     const calls: unknown[] = [];
     const context = {
       session: {
@@ -198,18 +198,19 @@ describe("createOpenCodeOriginPromptFacade", () => {
       },
     } as unknown as OriginPromptContext;
 
-    await createOpenCodeOriginPromptFacade(context).promptVisible("ses_1", "frame", {
-      chainId: "msg_a",
-      attempt: 1,
-      maxAttempts: 2,
-    });
+    const outcome = await createOpenCodeOriginPromptFacade(context).promptVisible(
+      "ses_1",
+      "frame",
+      { v: 1, unitId: "msg_a" },
+    );
 
+    expect(outcome).toBe("SENT");
     expect(calls).toEqual([
       {
         sessionID: "ses_1",
         text: "frame",
         description: DELIVERY_DESCRIPTION,
-        metadata: { jevguard: { chainId: "msg_a", attempt: 1, maxAttempts: 2 } },
+        metadata: { jevguard: { v: 1, unitId: "msg_a" } },
         delivery: "queue",
       },
     ]);

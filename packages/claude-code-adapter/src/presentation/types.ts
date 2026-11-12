@@ -40,23 +40,8 @@ export interface ReviewFeedRecorded {
   readonly results: readonly ReviewFeedResult[];
   /** Present only when the worker wrote a private proposal request for this unit. */
   readonly proposal?: true;
-  /** Present only for a unit that belongs to a remediation chain. */
-  readonly chain?: ReviewFeedChain;
   /** Present only when the user's remediation file is invalid; a closed code, never its text. */
   readonly remediationConfig?: string;
-}
-
-/**
- * Where a unit stands in its remediation chain: the chain id, the attempt it belongs to,
- * a typed result code (`DELIVERING`, `RESOLVED` or a stop code) and how many findings the
- * chain fixed. Never findings, paths or text.
- */
-export interface ReviewFeedChain {
-  readonly chainId: string;
-  readonly attempt: number;
-  readonly maxAttempts: number;
-  readonly result: string;
-  readonly fixed: number;
 }
 
 export type ReviewFeedLine = ReviewFeedStarted | ReviewFeedRecorded;
@@ -71,14 +56,6 @@ export interface FeedEnvironment {
 /** Where a remediation proposal goes: a panel only the user sees, or the agent itself. */
 export type ProposalDelivery = "user" | "agent";
 
-/** Chain data a `remediate` request carries so the mod can frame the agent delivery. */
-export interface DeliveryChain {
-  readonly chainId: string;
-  readonly attempt: number;
-  readonly maxAttempts: number;
-  readonly findings: readonly DeliveryFinding[];
-}
-
 /**
  * One private request for a remediation proposal, written by the worker and read once
  * by the in-session mod. Sensitive: it carries the task and the attributed patch, so it
@@ -86,17 +63,23 @@ export interface DeliveryChain {
  * worker when blank or expired.
  */
 export interface ProposalRequestFile {
-  readonly v: 1;
+  readonly v: 2;
   readonly kind: "PROPOSAL_REQUEST";
   readonly turnId: string;
   readonly createdAt: string;
   readonly expiresAt: string;
+  /** What the user chose; the mod decides what actually happens with `fromDelivery`. */
   readonly delivery: ProposalDelivery;
+  /** The unit's task is itself an automatic delivery, so it never triggers another one. */
+  readonly fromDelivery: boolean;
   readonly model: string | null;
-  readonly system: string;
-  readonly prompt: string;
-  /** Present only for a `remediate` chain; the delivery is then always `agent`. */
-  readonly chain?: DeliveryChain;
+  /** The proposer's prompts; both `null` when the unit has no proposal and only findings go out. */
+  readonly system: string | null;
+  readonly prompt: string | null;
+  /** The `FAIL` findings of the unit, bounded; never empty when the delivery is `agent`. */
+  readonly findings: readonly DeliveryFinding[];
+  /** How many findings the bounds left out; shown to the agent as "+N more". */
+  readonly omitted: number;
 }
 
 /** A finished proposal as the panel and the agent delivery carry it. */
@@ -106,7 +89,7 @@ export interface ProposalView {
   readonly text: string;
   readonly applyInstruction: string;
   readonly delivery: ProposalDelivery;
-  readonly chain?: DeliveryChain;
+  readonly findings: readonly DeliveryFinding[];
 }
 
 /** Why a proposal did not reach the user; a closed set, never text, paths or findings. */
@@ -134,19 +117,11 @@ export interface FeedWatch {
   readonly armedAtMs: number | null;
 }
 
-/** One line and toast announcing how a remediation chain ended. */
-export interface ChainNotice {
-  readonly turnId: string;
-  readonly text: string;
-}
-
 export interface WatchTick {
   readonly watch: FeedWatch;
   readonly displays: readonly ReviewDisplay[];
   /** Turn ids of fresh reviews whose private proposal request is waiting for the mod. */
   readonly proposals: readonly string[];
-  /** Lines and toasts for chains that ended (resolved or stopped) in fresh reviews. */
-  readonly chains: readonly ChainNotice[];
   /** Distinct invalid-configuration codes carried by fresh reviews; remediation was off for them. */
   readonly configIssues: readonly string[];
   readonly status: string | null;

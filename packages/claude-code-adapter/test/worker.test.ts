@@ -1,5 +1,4 @@
 import type {
-  ChainState,
   JevEvaluationPort,
   JevEvaluationResult,
   JevRequest,
@@ -7,19 +6,13 @@ import type {
   JevRuleRequest,
   PolicyLoader,
 } from "@jevguard/core";
-import { formatAgentDelivery } from "@jevguard/core";
-import type {
-  RemediationChainEntry,
-  ReviewHistoryFileSystem,
-  ReviewHistoryRecord,
-} from "@jevguard/node-infra";
+import type { ReviewHistoryFileSystem, ReviewHistoryRecord } from "@jevguard/node-infra";
 import { createLocalReviewHistory } from "@jevguard/node-infra";
 import { describe, expect, test } from "vitest";
 import type { ClaudeReviewHandoff } from "../src/hook";
 import {
   AUTO_DELIVERY_MARKER,
   type ProposalRequestFile,
-  type ReviewFeedChain,
   toFeedRecorded,
   toFeedStarted,
 } from "../src/presentation";
@@ -226,9 +219,6 @@ class Harness {
   readonly proposalWrites: ProposalRequestFile[] = [];
   readonly proposalRemovals: string[] = [];
   readonly feedProposalFlags: boolean[] = [];
-  readonly feedChains: (ReviewFeedChain | undefined)[] = [];
-  readonly chains = new Map<string, ChainState>();
-  readonly chainEntries: RemediationChainEntry[] = [];
   proposalWriteResult: "WRITTEN" | "FAILED" = "WRITTEN";
   proposalSweeps = 0;
   parsedConfig: unknown = null;
@@ -263,25 +253,8 @@ class Harness {
         remove: (value) => {
           this.proposalRemovals.push(value.turnId);
         },
-        loadChain: (_handoff, chainId) => this.chains.get(chainId) ?? null,
-        saveChain: (_handoff, state) => {
-          this.chains.set(state.chainId, state);
-
-          return true;
-        },
-        removeChain: (_handoff, chainId) => {
-          this.chains.delete(chainId);
-        },
         sweep: () => {
           this.proposalSweeps += 1;
-
-          return [];
-        },
-        activeChain: () => [...this.chains.values()].at(-1) ?? null,
-      },
-      chainLog: {
-        record: async (entry) => {
-          this.chainEntries.push(entry);
         },
       },
       jevFor: () => {
@@ -307,16 +280,15 @@ class Harness {
           this.feedEvents.push(`started:${value.turnId}`);
           this.feedLines.push(JSON.stringify(toFeedStarted(value.turnId, NOW.toISOString())));
         },
-        recorded: (value, review, proposal, chain) => {
+        recorded: (value, review, proposal) => {
           if (this.feedFailure) throw new Error("EIO");
 
           this.feedProposalFlags.push(proposal);
-          this.feedChains.push(chain);
           this.feedEvents.push(
             `recorded:${value.turnId}:history=${this.historyFiles.records().length}`,
           );
           this.feedLines.push(
-            JSON.stringify(toFeedRecorded(review, [], NOW.toISOString(), proposal, chain)),
+            JSON.stringify(toFeedRecorded(review, [], NOW.toISOString(), proposal)),
           );
 
           return true;
@@ -695,12 +667,14 @@ describe("runWorker", () => {
 
 const ENABLED_USER: ClaudeRemediationSettingsResult = {
   status: "ENABLED",
-  settings: { delivery: "user", model: "sonnet", mode: "observe", maxAttempts: 2 },
+  settings: { delivery: "user", model: "sonnet" },
+  warnings: [],
 };
 
 const ENABLED_AGENT: ClaudeRemediationSettingsResult = {
   status: "ENABLED",
-  settings: { delivery: "agent", model: null, mode: "observe", maxAttempts: 2 },
+  settings: { delivery: "agent", model: null },
+  warnings: [],
 };
 
 function failingHarness(remediation: ClaudeRemediationSettingsResult): Harness {
@@ -816,7 +790,7 @@ describe("runWorker remediation", () => {
     expect(harness.logs).toContain("REMEDIATION_PROJECT_MODEL_IGNORED");
   });
 
-  test("an agent delivery is downgraded when the task is itself an automatic delivery", async () => {
+  test("the user's agent delivery is kept and flagged when the task is itself a delivery", async () => {
     const harness = failingHarness(ENABLED_AGENT);
     const resolution = turnResolution(0);
 
@@ -831,9 +805,17 @@ describe("runWorker remediation", () => {
     );
     await harness.run();
 
-    expect(harness.proposalWrites[0]?.delivery).toBe("user");
-    expect(harness.logs).toContain("PROPOSAL_DELIVERY_DOWNGRADED");
-    expect(harness.logs).toContain("PROPOSAL_REQUEST_WRITTEN:USER");
+    expect(harness.proposalWrites[0]).toMatchObject({ delivery: "agent", fromDelivery: true });
+    expect(harness.logs).toContain("PROPOSAL_REQUEST_WRITTEN:AGENT");
+  });
+
+  test("an ordinary task is not flagged as a delivery", async () => {
+    const harness = failingHarness(ENABLED_AGENT);
+
+    put(harness, handoff(0, turnResolution(0)));
+    await harness.run();
+
+    expect(harness.proposalWrites[0]).toMatchObject({ fromDelivery: false, omitted: 0 });
   });
 
   test("an agent delivery stays agent for an ordinary task", async () => {
@@ -905,185 +887,133 @@ describe("runWorker remediation", () => {
   });
 });
 
-const ENABLED_REMEDIATE: ClaudeRemediationSettingsResult = {
-  status: "ENABLED",
-  settings: { delivery: "agent", model: null, mode: "remediate", maxAttempts: 2 },
-};
+describe("runWorker agent delivery", () => {
+  test("an agent request carries every finding and a user request none", async () => {
+    const agent = failingHarness(ENABLED_AGENT);
+    const user = failingHarness(ENABLED_USER);
 
-function markedTurn(ordinal: number, attempt: number, chainId: string) {
-  const resolution = turnResolution(ordinal);
+    put(agent, handoff(0, turnResolution(0)));
+    put(user, handoff(0, turnResolution(0)));
+    await agent.run();
+    await user.run();
 
-  if (resolution.status !== "TURN") throw new Error("expected a TURN");
+    const [file] = agent.proposalWrites;
 
-  const task = formatAgentDelivery({
-    unit: `turn ${ordinal}`,
-    attempt,
-    maxAttempts: 2,
-    chainId,
-    findings: [],
-    strategyText: "fix it",
+    expect(file).toMatchObject({ v: 2, delivery: "agent" });
+    expect(file?.findings.length).toBeGreaterThan(0);
+    expect(file?.findings[0]).toMatchObject({ kind: "RULE", severity: "error" });
+    expect(user.proposalWrites[0]?.findings).toEqual([]);
   });
 
-  return handoff(ordinal, { status: "TURN", turn: { ...resolution.turn, task } });
-}
-
-describe("runWorker remediate chain", () => {
-  const CHAIN_ID = "claude-code:s:e:0";
-
-  async function firstDelivery(): Promise<Harness> {
-    const harness = failingHarness(ENABLED_REMEDIATE);
+  test("a legacy mode or max_attempts key is logged by code and remediation stays on", async () => {
+    const harness = failingHarness({
+      status: "ENABLED",
+      settings: { delivery: "agent", model: null },
+      warnings: ["LEGACY_MODE", "LEGACY_MAX_ATTEMPTS"],
+    });
 
     put(harness, handoff(0, turnResolution(0)));
     await harness.run();
 
-    return harness;
-  }
-
-  test("a human turn with an error FAIL starts a chain with an agent request", async () => {
-    const harness = await firstDelivery();
-    const [file] = harness.proposalWrites;
-
-    expect(file).toMatchObject({
-      delivery: "agent",
-      chain: { chainId: CHAIN_ID, attempt: 1, maxAttempts: 2 },
-    });
-    expect(file?.chain?.findings.length).toBeGreaterThan(0);
-    expect(harness.feedChains).toEqual([
-      { chainId: CHAIN_ID, attempt: 1, maxAttempts: 2, result: "DELIVERING", fixed: 0 },
-    ]);
-    expect(harness.chains.get(CHAIN_ID)).toMatchObject({ attempts: 1, turnIds: [CHAIN_ID] });
-    expect(harness.logs).toContain("CHAIN_DELIVERING");
-    expect(harness.chainEntries).toEqual([]);
+    expect(harness.logs).toContain("REMEDIATION_LEGACY_MODE");
+    expect(harness.logs).toContain("REMEDIATION_LEGACY_MAX_ATTEMPTS");
+    expect(harness.proposalWrites[0]?.delivery).toBe("agent");
   });
 
-  test("a corrected turn resolves the chain: log line, feed result, no new request", async () => {
-    const harness = await firstDelivery();
-    const [first] = harness.proposalWrites;
-
-    harness.jev.probability = 0.1;
-    put(harness, markedTurn(1, 1, CHAIN_ID));
-    await harness.run();
-
-    expect(harness.proposalWrites).toHaveLength(1);
-    expect(harness.chainEntries).toMatchObject([
-      {
-        host: "claude-code",
-        chainId: CHAIN_ID,
-        attempts: 1,
-        maxAttempts: 2,
-        result: "RESOLVED",
-        remainingIds: [],
-        resolvedIds: expect.arrayContaining([first?.chain?.findings[0]?.id]),
-        turnIds: [CHAIN_ID, "claude-code:s:e:1"],
-      },
-    ]);
-    expect(harness.feedChains.at(-1)).toMatchObject({ result: "RESOLVED", fixed: 2 });
-    expect(harness.chains.size).toBe(0);
-    expect(harness.logs).toContain("CHAIN_RESOLVED");
-  });
-
-  test("the same failure again stops the chain without another request", async () => {
-    const harness = await firstDelivery();
-
-    put(harness, markedTurn(1, 1, CHAIN_ID));
-    await harness.run();
-
-    expect(harness.proposalWrites).toHaveLength(1);
-    expect(harness.chainEntries).toMatchObject([{ result: "REPEATED_FAILURE" }]);
-    expect(harness.feedChains.at(-1)).toMatchObject({ result: "REPEATED_FAILURE", fixed: 0 });
-    expect(harness.logs).toContain("CHAIN_STOPPED:REPEATED_FAILURE");
-    expect(harness.chains.size).toBe(0);
-  });
-
-  test("a mark whose chain state is gone stops as UNVERIFIED", async () => {
-    const harness = failingHarness(ENABLED_REMEDIATE);
-
-    put(harness, markedTurn(1, 1, CHAIN_ID));
-    await harness.run();
-
-    expect(harness.proposalWrites).toEqual([]);
-    expect(harness.chainEntries).toMatchObject([{ result: "UNVERIFIED" }]);
-  });
-
-  test("a chain past a lowered limit ends with a maxAttempts the feed accepts", async () => {
-    const first = await firstDelivery();
-    const state = first.chains.get(CHAIN_ID);
-
-    if (state === undefined) throw new Error("expected a saved chain");
-
-    const lowered = failingHarness({
-      status: "ENABLED",
-      settings: { delivery: "agent", model: null, mode: "remediate", maxAttempts: 1 },
-    });
-
-    lowered.chains.set(CHAIN_ID, {
-      ...state,
-      attempts: 2,
-      signatures: [...state.signatures, "0123456789abcdef"],
-      turnIds: [...state.turnIds, "claude-code:s:e:1"],
-    });
-    put(lowered, markedTurn(2, 2, CHAIN_ID));
-    await lowered.run();
-
-    expect(lowered.chainEntries).toMatchObject([{ attempts: 2, maxAttempts: 2 }]);
-    expect(lowered.feedChains.at(-1)).toMatchObject({ attempt: 2, maxAttempts: 2 });
-  });
-
-  test("observe mode never writes a chain, even for an agent delivery", async () => {
+  test("the log and feed carry no task, patch or path", async () => {
     const harness = failingHarness(ENABLED_AGENT);
 
     put(harness, handoff(0, turnResolution(0)));
     await harness.run();
 
-    expect(harness.proposalWrites[0]).not.toHaveProperty("chain");
-    expect(harness.feedChains).toEqual([undefined]);
-    expect(harness.chains.size).toBe(0);
-    expect(harness.chainEntries).toEqual([]);
-  });
-
-  test("auto_propose false in the repo vetoes the chain; the repo cannot turn it on", async () => {
-    const harness = failingHarness(ENABLED_REMEDIATE);
-
-    withProjectConfig(harness, { auto_propose: false });
-    put(harness, handoff(0, turnResolution(0)));
-    await harness.run();
-
-    expect(harness.proposalWrites).toEqual([]);
-    expect(harness.feedChains).toEqual([undefined]);
-    expect(harness.chains.size).toBe(0);
-
-    const disabled = failingHarness({ status: "DISABLED" });
-
-    withProjectConfig(disabled, { auto_propose: true, mode: "remediate" });
-    put(disabled, handoff(0, turnResolution(0)));
-    await disabled.run();
-
-    expect(disabled.proposalWrites).toEqual([]);
-    expect(disabled.chains.size).toBe(0);
-  });
-
-  test("a chain whose feed record was not written drops its state", async () => {
-    const harness = failingHarness(ENABLED_REMEDIATE);
-
-    harness.feedFailure = true;
-    put(harness, handoff(0, turnResolution(0)));
-    await harness.run();
-
-    expect(harness.proposalRemovals).toEqual([CHAIN_ID]);
-    expect(harness.chains.size).toBe(0);
-  });
-
-  test("the chain log and feed carry no task, patch or path", async () => {
-    const harness = await firstDelivery();
-
-    put(harness, markedTurn(1, 1, CHAIN_ID));
-    await harness.run();
-
-    const visible = JSON.stringify([harness.logs, harness.feedLines, harness.chainEntries]);
+    const visible = JSON.stringify([harness.logs, harness.feedLines]);
 
     for (const marker of [PROMPT_MARKER, PATCH_MARKER, PATH_MARKER, "/project-0"]) {
       expect(visible).not.toContain(marker);
     }
+  });
+});
+
+function oversizedResolution(ordinal: number, files = 33): ClaudeReviewHandoff["resolution"] {
+  const patch = ["--- a/f", "+++ b/f", "@@ -1 +1 @@", "-a", `+${"x".repeat(60_000)}`, ""].join(
+    "\n",
+  );
+
+  return {
+    status: "TURN",
+    turn: {
+      id: `claude-code:s:e:${ordinal}`,
+      task: PROMPT_MARKER,
+      files: Array.from({ length: Math.min(files, 2) }, (_, index) => ({
+        path: `src/big-${index}.ts`,
+        patch,
+      })),
+    },
+  };
+}
+
+describe("runWorker findings-only delivery", () => {
+  test("a diff above the limit with agent delivery writes a request without a proposal", async () => {
+    const harness = failingHarness(ENABLED_AGENT);
+
+    put(harness, handoff(0, oversizedResolution(0)));
+    await harness.run();
+
+    const [file] = harness.proposalWrites;
+
+    expect(harness.proposalWrites).toHaveLength(1);
+    expect(file).toMatchObject({ v: 2, delivery: "agent", system: null, prompt: null });
+    expect(file?.findings.length).toBeGreaterThan(0);
+    expect(file?.findings[0]?.locations.length).toBeGreaterThan(0);
+    expect(harness.logs).toContain("PROPOSAL_REQUEST_WRITTEN:AGENT");
+    expect(harness.feedProposalFlags).toEqual([true]);
+  });
+
+  test("the same unit with user delivery writes nothing", async () => {
+    const harness = failingHarness(ENABLED_USER);
+
+    put(harness, handoff(0, oversizedResolution(0)));
+    await harness.run();
+
+    expect(harness.proposalWrites).toEqual([]);
+    expect(harness.feedProposalFlags).toEqual([false]);
+  });
+
+  test("a unit that is itself a delivery writes no findings-only request", async () => {
+    const harness = failingHarness(ENABLED_AGENT);
+    const resolution = oversizedResolution(0);
+
+    if (resolution.status !== "TURN") throw new Error("expected a TURN");
+
+    put(
+      harness,
+      handoff(0, {
+        status: "TURN",
+        turn: { ...resolution.turn, task: `${AUTO_DELIVERY_MARKER} · unit 3]` },
+      }),
+    );
+    await harness.run();
+
+    expect(harness.proposalWrites).toEqual([]);
+  });
+
+  test("more findings than the limit (32 rules plus the built-in) are cut to 32 and counted, still delivered to the agent", async () => {
+    const rules = Array.from({ length: 32 }, (_, index) =>
+      RULES.replace("## Example", `## example-${index}`),
+    ).join("\n\n");
+    const harness = failingHarness(ENABLED_AGENT);
+
+    harness.policyLoader = {
+      load: async () => ({ status: "LOADED", source: { rules, config: null } }),
+    };
+    put(harness, handoff(0, turnResolution(0)));
+    await harness.run();
+
+    const [file] = harness.proposalWrites;
+
+    expect(file?.delivery).toBe("agent");
+    expect(file?.findings).toHaveLength(32);
+    expect(file?.omitted).toBe(1);
   });
 });
 

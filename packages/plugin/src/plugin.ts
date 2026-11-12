@@ -6,7 +6,6 @@ import {
   createNodeReviewHistoryFileSystem,
   createPolicyFileLoader,
   createProcessReviewHistoryContext,
-  createRemediationChainLog,
   type RemediationUserSettingsResult,
 } from "@jevguard/node-infra";
 import {
@@ -29,10 +28,10 @@ import {
 } from "@jevguard/opencode-adapter";
 import type { Plugin } from "@opencode/plugin";
 import { createDefaultJevPort } from "./jev-port";
-import { createRemediationChains } from "./remediation/chains";
 import { createChildExecutionWatcher } from "./remediation/child-executions";
+import { createDeliveryLedger } from "./remediation/deliveries";
 import { PROPOSAL_TIMEOUT_MS } from "./remediation/propose";
-import type { RemediateSetup } from "./remediation/remediate";
+import type { RemediateSetup } from "./remediation/types";
 import { createOpenCodeRemediationSettings } from "./remediation/user-settings";
 import { createPluginRuntime } from "./runtime";
 import { readBundledSkills, registerSkills } from "./skills/register-skills";
@@ -46,8 +45,9 @@ const SHUTDOWN_DRAIN_MS = 2_000;
 type Registration = { readonly dispose: () => Promise<void> };
 
 /**
- * `remediate` only when the user's own `opencode.yaml` opts in; a refused file is logged
- * once and leaves remediation off.
+ * Agent delivery only when the user's own `opencode.yaml` opts into `delivery: agent`; a
+ * refused file is logged once and leaves remediation off, and legacy `mode`/`max_attempts`
+ * keys are logged once as no longer used.
  */
 function remediationSetupOf(
   context: Plugin.Context,
@@ -64,17 +64,19 @@ function remediationSetupOf(
     return null;
   }
 
-  if (settings.status !== "ENABLED" || settings.settings.mode !== "remediate") return null;
+  if (settings.status !== "ENABLED") return null;
+
+  if (settings.warnings.length > 0) {
+    void operational
+      .write({ kind: "REMEDIATION_CONFIG_LEGACY", keys: settings.warnings })
+      .catch(() => undefined);
+  }
+
+  if (settings.settings.delivery !== "agent") return null;
 
   return {
     originPrompt: createOpenCodeOriginPromptFacade(context),
-    maxAttempts: settings.settings.maxAttempts,
-    chains: createRemediationChains(),
-    chainLog: createRemediationChainLog({
-      context: createProcessReviewHistoryContext(),
-      fileSystem: createNodeReviewHistoryFileSystem(),
-      now: () => new Date(),
-    }),
+    ledger: createDeliveryLedger(),
   };
 }
 
@@ -202,8 +204,9 @@ function delay(ms: number): Promise<void> {
  * OpenCode 2.2.x server plugin. Each completed execution is reviewed detached from the
  * agent: findings go to the log. In observe (the default), a `FAIL` the project's `.jev`
  * allows prepares one proposal in a deny-all child session. Only when the user's own
- * `opencode.yaml` opts into `remediate` is one visible remediation message queued into the
- * originating session per attempt, under the core's anti-loop chain. Nothing is applied.
+ * `opencode.yaml` opts into `delivery: agent` is one visible message with every finding and
+ * the strategy queued into the originating session per reviewed unit (never for a turn that
+ * came from a delivery). Nothing is applied.
  */
 const plugin: Plugin.Plugin = {
   id: PLUGIN_ID,

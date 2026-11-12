@@ -102,6 +102,7 @@ export type {
 export { resolveGateConfig } from "./gate/config";
 export { DEFAULT_GATE_CONFIG } from "./gate/defaults";
 export { evaluateGate } from "./gate/evaluate-gate";
+export { isProbability } from "./gate/probability";
 export type { GateConfigResult, GateEvaluation, GateUnavailable } from "./gate/types";
 export type {
   ConfigParseFailureReason,
@@ -127,67 +128,44 @@ export type {
   PolicySourcePort,
 } from "./ports/types";
 export { COMPLEXITY_ANSWER, SCOPE_CREEP_ANSWER } from "./ports/types";
-export type {
-  AutoDelivery,
-  ChainFailure,
-  ChainOutcomeIds,
-  ChainState,
-  ChainStep,
-  ChainStepInput,
-  ChainStopCode,
-} from "./remediation/chain";
-export {
-  abandonDeliver,
-  chainFailuresOf,
-  chainIdsOf,
-  decideChainStep,
-  decideOrphanStep,
-  decideRemediateStep,
-  failureSignature,
-  unresolvedIds,
-} from "./remediation/chain";
-export { MAX_CHAIN_ORIGINS, parseChainState } from "./remediation/chain-state";
-export type { ChainClosure, ChainEndRecord, ChainEndSink } from "./remediation/closures";
-export { chainEndOf, expiredClosure, recordClosures } from "./remediation/closures";
 export { parseModelSpecifier, resolveRemediationConfig } from "./remediation/config";
-export { deliveryFindingsOf } from "./remediation/delivery-findings";
-export type { AgentDeliveryInput, DeliveryFinding } from "./remediation/delivery-frame";
+export { decideAgentDelivery, withinSessionLimit } from "./remediation/delivery-decision";
+export { collectDeliveryFindings, deliveryFindingsOf } from "./remediation/delivery-findings";
 export {
-  AGENT_NOTICE,
   AUTO_DELIVERY_MARKER,
+  boundProposalText,
   formatAgentDelivery,
   isAutoDeliveredTask,
-  PROPOSAL_END,
-  PROPOSAL_START,
-  parseAutoDelivery,
+  NO_STRATEGY_NOTICE,
+  stripControlCharacters,
 } from "./remediation/delivery-frame";
 export { buildProposalText, PROPOSER_AGENT_PROMPT } from "./remediation/prompt";
-export { buildProposalRequest } from "./remediation/request";
+export { buildProposalRequest, proposesOnFail } from "./remediation/request";
 export { createRemediationProposalStore } from "./remediation/store";
 export type {
+  AgentDeliveryDecision,
+  DeliveryFinding,
+  DeliveryFindings,
+  FindingLocation,
   ProposalTrigger,
   RemediationBuiltInFinding,
   RemediationConfig,
   RemediationConfigResult,
-  RemediationMode,
   RemediationProposalRequest,
   RemediationProposalStore,
   RemediationRuleFinding,
   RemediationRuleSnapshot,
 } from "./remediation/types";
 export {
-  CHAIN_ID_PATTERN,
-  CHAIN_ID_SOURCE,
   DEFAULT_REMEDIATION_CONFIG,
+  DELIVERY_MAX_FINDING_PATH_LENGTH,
+  DELIVERY_MAX_FINDING_TEXT_LENGTH,
+  DELIVERY_MAX_FINDINGS,
   FINDING_ID_PATTERN,
-  isAttemptCount,
   MAX_AGENT_DELIVERIES_PER_SESSION,
-  MAX_ATTEMPTS_CEILING,
-  MAX_ATTEMPTS_DEFAULT,
+  MAX_FINDING_LOCATIONS,
   PROPOSAL_MAX_TEXT_LENGTH,
-  PROPOSER_AGENT_NAME,
   REMEDIATION_MAX_TASK_LENGTH,
-  withinSessionLimit,
 } from "./remediation/types";
 export { aggregateReviewHistory } from "./report/aggregate";
 export type {

@@ -34,6 +34,12 @@ export interface EvidencePolicy {
   readonly deniedDirectoryNames: readonly string[];
 }
 
+/** The post-image line range a unified-diff hunk header declares. */
+export interface HunkRange {
+  readonly newStart: number;
+  readonly newLines: number;
+}
+
 /**
  * Result of selecting the turn's evidence for a scope-free built-in check. There is
  * no scope, so `NO_SCOPE_MATCH` cannot occur and every attributed nonempty file is

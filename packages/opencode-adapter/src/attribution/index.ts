@@ -21,10 +21,8 @@ export {
   type TurnTracker,
   type TurnTrackerDependencies,
 } from "./turn-tracker";
-export { writtenPaths } from "./written-paths";
 export type {
   AttributionFailureReason,
-  DeliveryMark,
   FileContent,
   OpenCodeFileDiff,
   OpenCodeMessage,
@@ -35,3 +33,4 @@ export type {
   TurnDelivery,
   WorkingFileDiff,
 } from "./types";
+export { writtenPaths } from "./written-paths";

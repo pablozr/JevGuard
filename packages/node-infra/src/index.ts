@@ -34,9 +34,6 @@ export type {
   HistoryEnvironment,
   LocalReviewHistory,
   LocalReviewHistoryDependencies,
-  RemediationChainEntry,
-  RemediationChainLog,
-  RemediationChainLogDependencies,
   ReviewHistoryFileSystem,
   ReviewHistoryPathContext,
   ReviewHistoryReadResult,
@@ -48,11 +45,9 @@ export {
   createMirroredReviewLogSink,
   createNodeReviewHistoryFileSystem,
   createProcessReviewHistoryContext,
-  createRemediationChainLog,
   DEFAULT_HISTORY_MAX_BYTES,
   DEFAULT_HISTORY_MAX_RECORDS,
   resolveHistoryFilePath,
-  resolveRemediationChainsFilePath,
 } from "./history";
 export type {
   JevTransport,
@@ -86,6 +81,7 @@ export {
   policyFilePaths,
 } from "./policy";
 export type {
+  LegacyRemediationKey,
   ProjectProbe,
   RemediationDelivery,
   RemediationUserSettings,

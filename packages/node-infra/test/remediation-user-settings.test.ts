@@ -8,10 +8,13 @@ import {
   userConfigFileOf,
 } from "../src";
 
+const LEGACY_WARNINGS = ["LEGACY_MODE", "LEGACY_MAX_ATTEMPTS"];
 const REMEDIATE = {
   status: "ENABLED",
-  settings: { delivery: "agent", model: null, mode: "remediate", maxAttempts: 3 },
+  settings: { delivery: "agent", model: null },
+  warnings: LEGACY_WARNINGS,
 };
+const INVALID = { status: "INVALID", reason: "USER_CONFIG_INVALID" };
 
 describe("resolveRemediationUserSettings", () => {
   test("refuses a model key when the host accepts no model", () => {
@@ -20,7 +23,31 @@ describe("resolveRemediationUserSettings", () => {
     ).toEqual({ status: "INVALID", reason: "USER_CONFIG_INVALID" });
   });
 
-  test("accepts the shared keys for remediate", () => {
+  test("enables agent delivery without warnings", () => {
+    expect(
+      resolveRemediationUserSettings({ remediation: { enabled: true, delivery: "agent" } }),
+    ).toEqual({
+      status: "ENABLED",
+      settings: { delivery: "agent", model: null },
+      warnings: [],
+    });
+  });
+
+  test.each([
+    ["mode remediate without agent delivery", { mode: "remediate" }],
+    [
+      "max_attempts above the old ceiling",
+      { delivery: "agent", mode: "remediate", max_attempts: 4 },
+    ],
+    ["max_attempts with mode observe", { delivery: "agent", mode: "observe", max_attempts: 2 }],
+    ["an unknown key", { delivery: "agent", chain: true }],
+  ])("keeps the old validation: %s is invalid", (_name, section) => {
+    expect(resolveRemediationUserSettings({ remediation: { enabled: true, ...section } })).toEqual(
+      INVALID,
+    );
+  });
+
+  test("accepts the retired keys with a warning each", () => {
     expect(
       resolveRemediationUserSettings({
         remediation: { enabled: true, delivery: "agent", mode: "remediate", max_attempts: 3 },

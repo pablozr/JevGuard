@@ -1,11 +1,6 @@
 import type { ReviewResult, RuleEvidenceMetadata, TurnReview } from "@jevguard/core";
 import type { ClaudeAcquisitionReason } from "../acquisition";
-import type {
-  ReviewFeedChain,
-  ReviewFeedRecorded,
-  ReviewFeedResult,
-  ReviewFeedStarted,
-} from "./types";
+import type { ReviewFeedRecorded, ReviewFeedResult, ReviewFeedStarted } from "./types";
 
 interface ResultIdentity {
   readonly lane: ReviewFeedResult["lane"];
@@ -48,14 +43,13 @@ export function toFeedStarted(turnId: string, at: string): ReviewFeedStarted {
 
 /**
  * Projects a review onto the feed allowlist: ids, outcomes, probabilities, reasons and
- * counts. `proposal` and `chain` are written only when present, so other lines are unchanged.
+ * counts. `proposal` is written only when present, so other lines are unchanged.
  */
 export function toFeedRecorded(
   review: TurnReview,
   causes: readonly ClaudeAcquisitionReason[],
   at: string,
   proposal = false,
-  chain?: ReviewFeedChain,
   remediationConfig?: string,
 ): ReviewFeedRecorded {
   return {
@@ -67,7 +61,6 @@ export function toFeedRecorded(
     causes: [...causes],
     results: review.results.map(toFeedResult),
     ...(proposal ? { proposal: true as const } : {}),
-    ...(chain === undefined ? {} : { chain: { ...chain } }),
     ...(remediationConfig === undefined ? {} : { remediationConfig }),
   };
 }

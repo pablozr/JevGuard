@@ -1,3 +1,20 @@
+export type {
+  AttributionContext,
+  AttributionFailureReason,
+  FileContent,
+  LocatedExecution,
+  OpenCodeFileDiff,
+  OpenCodeMessage,
+  OpenCodeSessionFacade,
+  PatchNormalization,
+  TurnAttribution,
+  TurnDeduplicator,
+  TurnDelivery,
+  TurnTracker,
+  TurnTrackerDependencies,
+  WorkingFileDiff,
+  WorkingSnapshot,
+} from "./attribution";
 export {
   attributeSnapshotDiff,
   captureSnapshot,
@@ -15,37 +32,6 @@ export {
   writtenPaths,
 } from "./attribution";
 export type {
-  AttributionContext,
-  AttributionFailureReason,
-  DeliveryMark,
-  FileContent,
-  LocatedExecution,
-  OpenCodeFileDiff,
-  OpenCodeMessage,
-  OpenCodeSessionFacade,
-  PatchNormalization,
-  TurnAttribution,
-  TurnDeduplicator,
-  TurnDelivery,
-  TurnTracker,
-  TurnTrackerDependencies,
-  WorkingFileDiff,
-  WorkingSnapshot,
-} from "./attribution";
-export {
-  addPluginEntry,
-  checkOpenCodeVersion,
-  createConfirmationPrompt,
-  createDefaultConfigDocument,
-  createNodeConfigFileSystem,
-  inspectInstall,
-  install,
-  JEVGUARD_PLUGIN_ENTRY,
-  OPENCODE_ENGINE_RANGE,
-  readInstalledOpenCodeVersion,
-  resolveConfigPath,
-} from "./opencode-config";
-export type {
   ConfigFileSystem,
   ConfirmationPrompt,
   ConfirmationResult,
@@ -61,6 +47,36 @@ export type {
   PluginEntryMutation,
 } from "./opencode-config";
 export {
+  addPluginEntry,
+  checkOpenCodeVersion,
+  createConfirmationPrompt,
+  createDefaultConfigDocument,
+  createNodeConfigFileSystem,
+  inspectInstall,
+  install,
+  JEVGUARD_PLUGIN_ENTRY,
+  OPENCODE_ENGINE_RANGE,
+  readInstalledOpenCodeVersion,
+  resolveConfigPath,
+} from "./opencode-config";
+export type {
+  OpenCodeLogRecord,
+  OpenCodeLogWriter,
+  OperationalEvent,
+  OperationalLogSink,
+  PresentationDelivery,
+  PresentationPorts,
+  ProposalFailureReason,
+  ProposalSessionNavigator,
+  RemediationDeliveryEvent,
+  RemediationFailureLogSink,
+  RemediationNotifier,
+  ReviewPresenter,
+  ReviewToast,
+  ToastSink,
+  ToastVariant,
+} from "./presentation";
+export {
   countSummary,
   createConsoleLogWriter,
   createNullSessionNavigator,
@@ -73,9 +89,18 @@ export {
   displayOutcome,
   logLevelFor,
   reviewLogMessage,
-  toReviewToast,
   toastVariantFor,
+  toReviewToast,
 } from "./presentation";
+export type {
+  DeliveryMark,
+  DeliveryOutcome,
+  OriginPromptContext,
+  OriginSessionPromptFacade,
+  ProposalContext,
+  ProposalModel,
+  ProposalSessionFacade,
+} from "./remediation";
 export {
   createOpenCodeOriginPromptFacade,
   createOpenCodeProposalSessionFacade,
@@ -83,27 +108,3 @@ export {
   PROPOSER_PERMISSIONS,
   registerProposalRetryGuard,
 } from "./remediation";
-export type {
-  OriginPromptContext,
-  OriginSessionPromptFacade,
-  ProposalContext,
-  ProposalModel,
-  ProposalSessionFacade,
-} from "./remediation";
-export type {
-  OpenCodeLogRecord,
-  OpenCodeLogWriter,
-  OperationalEvent,
-  RemediationChainEvent,
-  OperationalLogSink,
-  PresentationDelivery,
-  PresentationPorts,
-  ProposalFailureReason,
-  ProposalSessionNavigator,
-  RemediationFailureLogSink,
-  RemediationNotifier,
-  ReviewPresenter,
-  ReviewToast,
-  ToastSink,
-  ToastVariant,
-} from "./presentation";

@@ -1,4 +1,10 @@
-import type { Turn } from "@jevguard/core";
+import {
+  DEFAULT_EVIDENCE_POLICY,
+  type ParsedRule,
+  parseUnifiedDiff,
+  planRuleEvidence,
+  type Turn,
+} from "@jevguard/core";
 import { describe, expect, test } from "vitest";
 import {
   createTurnTracker,
@@ -9,6 +15,7 @@ import {
   MAX_OPEN_SNAPSHOTS,
   MAX_SNAPSHOT_FILE_BYTES,
   MAX_SNAPSHOT_TOTAL_BYTES,
+  attributeSnapshotDiff,
   normalizeFileDiff,
   writtenPaths,
 } from "../src/index";
@@ -122,11 +129,10 @@ describe("normalizeFileDiff", () => {
     }
 
     expect(result.file.path).toBe("src/auth.ts");
-    expect(result.file.patch).toContain("--- a/src/auth.ts");
-    expect(result.file.patch).toContain("+++ b/src/auth.ts");
-    expect(result.file.patch).toContain("@@ -1,2 +1,2 @@");
-    expect(result.file.patch).toContain("-old");
-    expect(result.file.patch).toContain("+new");
+    expect(result.file.patch).toBe(
+      "--- a/src/auth.ts\n+++ b/src/auth.ts\n@@ -1,2 +1,2 @@\n-old\n+new\n line\n\\ No newline at end of file\n",
+    );
+    expect(result.file.patch).not.toContain("=====");
   });
 
   test("marks added and deleted files with /dev/null", () => {
@@ -137,16 +143,118 @@ describe("normalizeFileDiff", () => {
     expect(deleted.status).toBe("PATCH");
 
     if (added.status === "PATCH") {
-      expect(added.file.patch).toContain("--- /dev/null");
-      expect(added.file.patch).toContain("+++ b/src/new.ts");
-      expect(added.file.patch).toContain("@@ -0,0 +1,1 @@");
+      expect(added.file.patch).toBe(
+        "--- /dev/null\n+++ b/src/new.ts\n@@ -0,0 +1,1 @@\n+hello\n\\ No newline at end of file\n",
+      );
     }
 
     if (deleted.status === "PATCH") {
-      expect(deleted.file.patch).toContain("--- a/src/gone.ts");
-      expect(deleted.file.patch).toContain("+++ /dev/null");
-      expect(deleted.file.patch).toContain("@@ -1,1 +0,0 @@");
+      expect(deleted.file.patch).toBe(
+        "--- a/src/gone.ts\n+++ /dev/null\n@@ -1,1 +0,0 @@\n-hello\n\\ No newline at end of file\n",
+      );
     }
+  });
+
+  test("emits one minimal hunk with 3 context lines for a single changed line", () => {
+    const rows = Array.from({ length: 100 }, (_, index) => `line ${index}`);
+    const before = `${rows.join("\n")}\n`;
+    const after = `${rows.map((row, index) => (index === 50 ? "line fifty" : row)).join("\n")}\n`;
+    const result = normalizeFileDiff({ file: "src/big.ts", before, after });
+
+    expect(result.status).toBe("PATCH");
+
+    if (result.status !== "PATCH") {
+      return;
+    }
+
+    const patch = result.file.patch;
+    const body = patch.split("\n").slice(3, -1);
+
+    expect(patch.match(/^@@ /gm)).toHaveLength(1);
+    expect(patch).toContain("@@ -48,7 +48,7 @@");
+    expect(body).toHaveLength(8);
+    expect(body.filter((row) => row.startsWith("-") || row.startsWith("+"))).toEqual([
+      "-line 50",
+      "+line fifty",
+    ]);
+    expect(patch).not.toContain("-line 0\n");
+    expect(patch.length).toBeLessThan(300);
+  });
+
+  test("marks a missing final newline on the side that lacks it", () => {
+    const result = normalizeFileDiff({ file: "x.ts", before: "a\nb", after: "a\nb\nc" });
+
+    expect(result).toEqual({
+      status: "PATCH",
+      file: {
+        path: "x.ts",
+        patch:
+          "--- a/x.ts\n+++ b/x.ts\n@@ -1,2 +1,3 @@\n a\n-b\n\\ No newline at end of file\n+b\n+c\n\\ No newline at end of file\n",
+      },
+    });
+  });
+
+  test("a spent deadline is INCOMPLETE, never a partial patch", () => {
+    const before = Array.from({ length: 20000 }, (_, index) => `l${index}`).join("\n");
+    const after = Array.from({ length: 20000 }, (_, index) => `m${(index * 7) % 20000}`).join("\n");
+
+    expect(normalizeFileDiff({ file: "src/a.ts", before: "a", after: "b" }, 0)).toEqual({
+      status: "INCOMPLETE",
+    });
+    expect(normalizeFileDiff({ file: "src/a.ts", before, after }, 1)).toEqual({
+      status: "INCOMPLETE",
+    });
+  });
+
+  test("a rebuilt patch parses strictly and is sliced by hunk in the core planner", () => {
+    const rows = (replacements: Readonly<Record<number, string>>) =>
+      `${Array.from({ length: 120 }, (_, index) => replacements[index] ?? `line ${index}`).join("\n")}\n`;
+    const result = normalizeFileDiff({
+      file: "src/a.ts",
+      before: rows({}),
+      after: rows({ 5: "changed five", 110: "changed one-ten" }),
+    });
+
+    expect(result.status).toBe("PATCH");
+
+    if (result.status !== "PATCH") {
+      return;
+    }
+
+    const patch = result.file.patch;
+    const rule: ParsedRule = {
+      id: "R-1",
+      severity: "error",
+      scope: null,
+      evidence: "code",
+      description: "A rule.",
+      violation: "A violation.",
+      allowed: null,
+    };
+    const plan = planRuleEvidence(
+      { id: "t1", task: "task", files: [{ path: "src/a.ts", patch }] },
+      rule,
+      {
+        ...DEFAULT_EVIDENCE_POLICY,
+        maxDiffLength: patch.length - 1,
+      },
+    );
+
+    expect(parseUnifiedDiff(patch)).toEqual({
+      status: "PARSED",
+      files: [{ path: "src/a.ts", patch }],
+    });
+    expect(plan.status).toBe("PLANNED");
+
+    if (plan.status !== "PLANNED") {
+      return;
+    }
+
+    expect(plan.slices.map((slice) => slice.kind)).toEqual(["HUNK", "HUNK"]);
+    expect(plan.slices.map((slice) => slice.hunkOrdinal)).toEqual([0, 1]);
+    expect(
+      plan.slices.every((slice) => slice.diff.startsWith("--- a/src/a.ts\n+++ b/src/a.ts\n@@ ")),
+    ).toBe(true);
   });
 
   test("reports empty content and incomplete diffs explicitly", () => {
@@ -268,8 +376,29 @@ describe("turn tracker", () => {
     const turn = attributedTurn(await tracker.finish("ses_1"));
 
     expect(turn.files.map((file) => file.path)).toEqual(["src/dirty.ts"]);
-    expect(turn.files[0]?.patch).toContain("-start");
-    expect(turn.files[0]?.patch).toContain("+end");
+    expect(turn.files[0]?.patch).toBe(
+      "--- a/src/dirty.ts\n+++ b/src/dirty.ts\n@@ -1,1 +1,1 @@\n-start\n+end\n",
+    );
+  });
+
+  test("a spent patch budget makes a dirty-at-start attribution INCOMPLETE", async () => {
+    const { facade, tracker } = setup();
+
+    facade.diffs = [{ file: "src/dirty.ts", patch: "P-dirty" }];
+    facade.files.set("src/dirty.ts", text("start\n"));
+    await begin(tracker, "ses_1");
+
+    const start = {
+      diffs: new Map(facade.diffs.map((diff) => [diff.file, diff])),
+      contents: new Map(facade.files),
+      incomplete: false,
+    };
+    const endDiffs = [{ file: "src/dirty.ts", patch: "P-dirty-2" }];
+
+    facade.files.set("src/dirty.ts", text("end\n"));
+
+    expect(await attributeSnapshotDiff(start, endDiffs, facade, 0)).toBeNull();
+    expect(await attributeSnapshotDiff(start, endDiffs, facade)).toHaveLength(1);
   });
 
   test("attributes an untracked file created by the turn", async () => {
@@ -468,8 +597,7 @@ describe("turn tracker", () => {
 });
 
 describe("executionDelivery", () => {
-  const mark = { chainId: "msg_a", attempt: 1, maxAttempts: 2 };
-  const marked = (id: string, value: unknown = mark): OpenCodeMessage => ({
+  const marked = (id: string, value: unknown): OpenCodeMessage => ({
     id,
     type: "synthetic",
     completed: false,
@@ -479,26 +607,36 @@ describe("executionDelivery", () => {
   const human: OpenCodeMessage = { id: "u1", type: "user", completed: false, text: "task" };
 
   test("reads the mark only from a synthetic message's metadata", () => {
-    expect(executionDelivery([marked("s1")])).toEqual({ mark, mixed: false });
-    expect(executionDelivery([human])).toEqual({ mark: null, mixed: false });
+    expect(executionDelivery([marked("s1", { v: 1, unitId: "msg_a" })])).toEqual({
+      fromDelivery: true,
+    });
+    expect(executionDelivery([human])).toEqual({ fromDelivery: false });
     expect(
-      executionDelivery([{ ...human, metadata: { jevguard: mark } } as OpenCodeMessage]),
-    ).toEqual({ mark: null, mixed: false });
+      executionDelivery([
+        { ...human, metadata: { jevguard: { v: 1, unitId: "msg_a" } } } as OpenCodeMessage,
+      ]),
+    ).toEqual({ fromDelivery: false });
   });
 
-  test("is mixed when a marked delivery shares the execution with an unmarked input", () => {
-    expect(executionDelivery([human, marked("s1")])).toEqual({ mark, mixed: true });
+  test("stays a delivery when a human input shares the execution", () => {
+    expect(executionDelivery([human, marked("s1", { v: 1, unitId: "msg_a" })])).toEqual({
+      fromDelivery: true,
+    });
   });
 
-  test("ignores a malformed mark", () => {
+  test("accepts the old chain mark and any malformed object", () => {
     for (const value of [
-      { chainId: "bad id", attempt: 1, maxAttempts: 2 },
-      { chainId: "msg_a", attempt: 3, maxAttempts: 2 },
-      { chainId: "msg_a", attempt: 0, maxAttempts: 2 },
-      "msg_a",
-      null,
+      { chainId: "msg_a", attempt: 1, maxAttempts: 2 },
+      { chainId: "bad id", attempt: 9 },
+      {},
     ]) {
-      expect(executionDelivery([marked("s1", value)])).toEqual({ mark: null, mixed: false });
+      expect(executionDelivery([marked("s1", value)])).toEqual({ fromDelivery: true });
+    }
+  });
+
+  test("ignores a mark that is not an object", () => {
+    for (const value of ["msg_a", null, ["x"], undefined]) {
+      expect(executionDelivery([marked("s1", value)])).toEqual({ fromDelivery: false });
     }
   });
 });

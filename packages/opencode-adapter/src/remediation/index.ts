@@ -8,6 +8,8 @@ export {
   registerProposalRetryGuard,
 } from "./opencode";
 export type {
+  DeliveryMark,
+  DeliveryOutcome,
   OriginSessionPromptFacade,
   ProposalModel,
   ProposalSessionFacade,

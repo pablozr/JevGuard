@@ -1,15 +1,14 @@
 import type {
-  ChainStopCode,
+  DeliveryFindings,
   JevEvaluationPort,
   PolicyConfigParser,
   PolicyLoader,
   RemediationProposalRequest,
   TurnReview,
 } from "@jevguard/core";
-import type { RemediationChainLog, ReviewLogEntry } from "@jevguard/node-infra";
+import type { LegacyRemediationKey, ReviewLogEntry } from "@jevguard/node-infra";
 import type { ClaudeAcquisitionReason } from "../acquisition";
 import type { ClaudeReviewHandoff } from "../capture/types";
-import type { ReviewFeedChain } from "../presentation";
 import type {
   ClaudeRemediationInvalidReason,
   ClaudeRemediationSettingsResult,
@@ -58,14 +57,10 @@ export type WorkerLogCode =
   | "WORKER_FAILED"
   | `REMEDIATION_${ClaudeRemediationInvalidReason}`
   | "REMEDIATION_PROJECT_MODEL_IGNORED"
-  | "PROPOSAL_DELIVERY_DOWNGRADED"
   | `PROPOSAL_REQUEST_WRITTEN:${"USER" | "AGENT"}`
   | "PROPOSAL_REQUEST_WRITE_FAILED"
   | "PROPOSAL_REQUEST_TOO_LARGE"
-  | "CHAIN_DELIVERING"
-  | "CHAIN_STATE_SAVE_FAILED"
-  | "CHAIN_RESOLVED"
-  | `CHAIN_STOPPED:${ChainStopCode}`;
+  | `REMEDIATION_${LegacyRemediationKey}`;
 
 export interface WorkerLogEntry {
   readonly timestamp: string;
@@ -80,7 +75,6 @@ export interface WorkerReviewFeed {
     handoff: ClaudeReviewHandoff,
     review: TurnReview,
     proposal: boolean,
-    chain?: ReviewFeedChain,
     remediationConfig?: string,
   ): boolean;
   sweep(): void;
@@ -102,8 +96,6 @@ export interface WorkerDependencies {
   /** The user's opt-in for remediation in one project; read only for a unit that can be reviewed. */
   readonly remediationFor: (projectRoot: string) => ClaudeRemediationSettingsResult;
   readonly proposals: WorkerProposalStore;
-  /** Local record of ended remediation chains; never rejects. */
-  readonly chainLog: RemediationChainLog;
   /** Builds a fresh Jev port per handoff, so one stuck review never holds another's slots. */
   readonly jevFor: () => JevEvaluationPort;
   readonly deadline: ReviewDeadline;
@@ -120,6 +112,10 @@ export interface ReviewedHandoff {
   readonly deadlineExceeded: boolean;
   /** The complete, safe proposal request, only when proposals were enabled and the review has a FAIL. */
   readonly proposal: RemediationProposalRequest | null;
+  /** Every `FAIL` finding, bounded, whenever proposals were enabled; independent of `proposal`. */
+  readonly findings: DeliveryFindings;
+  /** The unit's task is itself an automatic delivery. */
+  readonly fromDelivery: boolean;
   /** The project's `.jev` pinned a remediation model, which Claude Code ignores. */
   readonly projectModelIgnored: boolean;
 }

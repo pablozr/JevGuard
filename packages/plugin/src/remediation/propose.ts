@@ -1,8 +1,7 @@
 import {
   buildProposalText,
-  parseModelSpecifier,
   PROPOSER_AGENT_PROMPT,
-  type RemediationMode,
+  parseModelSpecifier,
   type RemediationProposalRequest,
   type RemediationProposalStore,
 } from "@jevguard/core";
@@ -33,14 +32,15 @@ export interface ProposalDependencies {
 
 /**
  * What one proposer run produced. `SHOWN` is an observe proposal left for the user in its
- * child session; `DUPLICATE` means another review already claimed the turn.
+ * child session; `READY` is the answer of an `agent` run kept in the background.
  */
-export type ProposalDraft =
+type ProposalDraft =
   | { readonly status: "SHOWN" }
   | { readonly status: "READY"; readonly text: string }
-  | { readonly status: "NO_MODEL" }
-  | { readonly status: "FAILED" }
-  | { readonly status: "DUPLICATE" };
+  | { readonly status: "FAILED" };
+
+/** `observe` opens the child for the user; `agent` keeps it in the background for a delivery. */
+type ProposalMode = "observe" | "agent";
 
 const FAILED: ProposalDraft = { status: "FAILED" };
 
@@ -49,10 +49,10 @@ const FAILED: ProposalDraft = { status: "FAILED" };
  * shows it to the user in the child session (observe).
  */
 export async function proposeForTurn(
-  request: RemediationProposalRequest | null,
+  request: RemediationProposalRequest,
   dependencies: ProposalDependencies,
 ): Promise<void> {
-  if (request === null) {
+  if (!dependencies.proposals.claim(request.evaluationId)) {
     return;
   }
 
@@ -64,11 +64,24 @@ export async function proposeForTurn(
 }
 
 /**
- * Runs the proposer once for an evaluated turn. In `observe` the child is opened for the
- * user; in `remediate` it stays in the background and its answer is returned.
+ * Runs the proposer in the background for an agent delivery and returns its strategy,
+ * or `null` when it failed, timed out or had no model; the typed reason is already
+ * logged. The caller has claimed the evaluation.
+ */
+export async function proposeStrategy(
+  request: RemediationProposalRequest,
+  dependencies: ProposalDependencies,
+): Promise<string | null> {
+  const draft = await draftProposal(request, dependencies, "agent");
+
+  return draft.status === "READY" ? draft.text : null;
+}
+
+/**
+ * Runs the proposer once for an evaluated turn the caller already claimed. In
+ * `observe` the child is opened for the user; in `agent` it stays in the background and
+ * its answer is returned.
  *
- * - The evaluation identity is claimed before any session call, so a duplicate review
- *   cannot create a second proposal.
  * - The model is explicit: the configured specifier wins, otherwise the originating
  *   session's model. With no readable model, no child is created and the typed
  *   `REMEDIATION_PROPOSAL_SKIPPED_NO_MODEL` is logged.
@@ -76,16 +89,16 @@ export async function proposeForTurn(
  *   the prompt so its own executions are never reviewed. The proposer contract leads
  *   the prompt text.
  * - The child execution is awaited through its lifecycle events; past the time budget
- *   it is interrupted and `REMEDIATION_PROPOSAL_TIMEOUT` is reported. In `remediate`, a
+ *   it is interrupted and `REMEDIATION_PROPOSAL_TIMEOUT` is reported. In `agent`, a
  *   succeeded child's answer is its last assistant text.
  *
  * Every failure is a safe typed log plus a generic toast, each contained; nothing
  * reaches the originating review or session.
  */
-export async function draftProposal(
+async function draftProposal(
   request: RemediationProposalRequest,
   dependencies: ProposalDependencies,
-  mode: RemediationMode,
+  mode: ProposalMode,
 ): Promise<ProposalDraft> {
   const configured = request.model === null ? null : parseModelSpecifier(request.model);
 
@@ -94,16 +107,12 @@ export async function draftProposal(
     return FAILED;
   }
 
-  if (!dependencies.proposals.claim(request.evaluationId)) {
-    return { status: "DUPLICATE" };
-  }
-
   const model =
     configured ?? (await readOriginModel(dependencies.proposalFacade, request.sessionID));
 
   if (model === null) {
     await contain(() => dependencies.failures.write("REMEDIATION_PROPOSAL_SKIPPED_NO_MODEL"));
-    return { status: "NO_MODEL" };
+    return FAILED;
   }
 
   let sessionID: string;

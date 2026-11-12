@@ -74,8 +74,8 @@ export function createRemediationFailureLogSink(
 /**
  * Builds the operational log sink: `JevGuard skipped · interrupted|failed` for an
  * execution that is never reviewed, one line with the typed reason for an attribution
- * failure, and one line per remediation chain step. Only ids, counts and typed codes are
- * attached.
+ * failure, and one line per remediation delivery or config event. Only ids, counts and
+ * typed codes are attached.
  */
 export function createOperationalLogSink(writer: OpenCodeLogWriter): OperationalLogSink {
   return {
@@ -94,7 +94,8 @@ export function createOperationalLogSink(writer: OpenCodeLogWriter): Operational
 
 function levelOf(event: OperationalEvent): "info" | "warn" {
   return event.kind === "ATTRIBUTION_UNAVAILABLE" ||
-    event.kind === "REMEDIATION_STOPPED" ||
+    event.kind === "REMEDIATION_NOT_SENT" ||
+    event.kind === "REMEDIATION_CONFIG_LEGACY" ||
     event.kind === "REMEDIATION_CONFIG_INVALID"
     ? "warn"
     : "info";
@@ -107,11 +108,11 @@ function operationalMessage(event: OperationalEvent): string {
     case "ATTRIBUTION_UNAVAILABLE":
       return ATTRIBUTION_LOG_MESSAGE;
     case "REMEDIATION_SENT":
-      return `JevGuard sent remediation attempt ${event.attempt}/${event.maxAttempts} to the agent`;
-    case "REMEDIATION_STOPPED":
-      return `JevGuard remediation stopped · attempt ${event.attempt}/${event.maxAttempts} · ${event.code}`;
-    case "REMEDIATION_RESOLVED":
-      return `JevGuard remediation resolved · ${event.fixed} finding(s) fixed in ${event.attempts} attempt(s)`;
+      return `JevGuard sent the remediation to the agent · ${event.strategy}`;
+    case "REMEDIATION_NOT_SENT":
+      return `JevGuard remediation not sent · ${event.code}${event.cause === undefined ? "" : ` · ${event.cause}`}`;
+    case "REMEDIATION_CONFIG_LEGACY":
+      return "JevGuard remediation: mode/max_attempts in your opencode.yaml are no longer used · see docs/configuration.md";
     case "REMEDIATION_CONFIG_INVALID":
       return `JevGuard remediation is off · your opencode.yaml is not valid (${event.reason}) · see docs/configuration.md`;
   }

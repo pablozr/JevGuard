@@ -1,53 +1,58 @@
 import { describe, expect, it } from "vitest";
 import {
   AUTO_DELIVERY_MARKER,
-  CHAIN_ID_PATTERN,
+  type DeliveryFinding,
   formatAgentDelivery,
   isAutoDeliveredTask,
-  PROPOSAL_END,
-  PROPOSAL_START,
-  parseAutoDelivery,
+  NO_STRATEGY_NOTICE,
+  REMEDIATION_MAX_TASK_LENGTH,
 } from "../src";
+import { PROPOSAL_END, PROPOSAL_START } from "../src/remediation/delivery-frame";
 
-const INPUT = {
-  unit: "turn 3",
-  attempt: 1,
-  maxAttempts: 2,
-  chainId: "claude-code:abc:3",
-  findings: [
-    {
-      id: "no-eval",
-      severity: "error",
-      probability: 0.934,
-      paths: ["src/a.ts"],
-      violation: "Calls eval.",
-      allowed: "Never.",
-    },
+const FINDING: DeliveryFinding = {
+  id: "no-eval",
+  kind: "RULE",
+  description: "Do not call eval.",
+  severity: "error",
+  probability: 0.934,
+  violation: "Calls eval.",
+  allowed: "Never.",
+  locations: [
+    { path: "src/a.ts", hunk: { ordinal: 1, newStart: 52, newLines: 4 } },
+    { path: "src/b.ts", hunk: null },
   ],
-  strategyText: "Replace eval.",
 };
 
+const INPUT = { unit: "turn 3", findings: [FINDING], omitted: 0, strategyText: "Replace eval." };
+
 describe("formatAgentDelivery", () => {
-  it("opens with the old marker prefix and round-trips through parseAutoDelivery", () => {
+  it("opens with the marker prefix so the resulting turn is recognized", () => {
     const text = formatAgentDelivery(INPUT);
 
-    expect(text.startsWith(AUTO_DELIVERY_MARKER)).toBe(true);
+    expect(text.startsWith(`${AUTO_DELIVERY_MARKER} · turn 3]`)).toBe(true);
     expect(isAutoDeliveredTask(text)).toBe(true);
-    expect(parseAutoDelivery(text)).toEqual({
-      attempt: 1,
-      maxAttempts: 2,
-      chainId: "claude-code:abc:3",
-    });
+    expect(isAutoDeliveredTask(`${AUTO_DELIVERY_MARKER} · attempt 1/2 · chain x]`)).toBe(true);
+    expect(isAutoDeliveredTask("fix the bug")).toBe(false);
   });
 
-  it("lists findings, constraints and the stop clause, and no diff or task", () => {
+  it("lists findings with description, locations and the strategy block", () => {
     const text = formatAgentDelivery(INPUT);
 
-    expect(text).toContain("- no-eval (error, p=0.93) in src/a.ts");
+    expect(text).toContain("- no-eval — Do not call eval. (error, p=0.93)");
     expect(text).toContain("Violation: Calls eval.");
     expect(text).toContain("Allowed: Never.");
+    expect(text).toContain("Location: src/a.ts hunk #1 (+52,4); src/b.ts");
+    expect(text).toContain(`${PROPOSAL_START}\nReplace eval.\n${PROPOSAL_END}`);
     expect(text).toContain("do not change tests, configuration, dependencies or .jev/");
     expect(text).toContain("say so and stop");
+  });
+
+  it("states that no strategy exists when the proposer failed", () => {
+    const text = formatAgentDelivery({ ...INPUT, strategyText: null });
+
+    expect(text).toContain(NO_STRATEGY_NOTICE);
+    expect(text).not.toContain(PROPOSAL_START);
+    expect(text).toContain("no-eval");
   });
 
   it("strips control characters and proposal delimiters from model text", () => {
@@ -60,33 +65,42 @@ describe("formatAgentDelivery", () => {
     expect(text.split("\n").filter((line) => line === PROPOSAL_END)).toHaveLength(1);
     expect(text.split("\n").filter((line) => line === PROPOSAL_START)).toHaveLength(1);
   });
-});
 
-describe("parseAutoDelivery", () => {
-  it("returns null without a mark and LEGACY for a mark without an attempt", () => {
-    expect(parseAutoDelivery("fix the bug")).toBeNull();
-    expect(parseAutoDelivery(`${AUTO_DELIVERY_MARKER} · turn 2]\nnotice`)).toBe("LEGACY");
+  it("clips a long finding text to one line of 1000 characters", () => {
+    const text = formatAgentDelivery({
+      ...INPUT,
+      findings: [{ ...FINDING, violation: `${"x".repeat(1500)}\nsecond line` }],
+    });
+
+    const line = text.split("\n").find((entry) => entry.startsWith("  Violation: "));
+
+    expect(line?.length).toBe("  Violation: ".length + 1000);
   });
 
-  it("finds a mark inside a longer task", () => {
-    const task = `prefix\n${formatAgentDelivery(INPUT)}`;
+  it("truncates a huge strategy so the frame fits a task", () => {
+    const text = formatAgentDelivery({ ...INPUT, strategyText: "s".repeat(60_000) });
 
-    expect(parseAutoDelivery(task)).toMatchObject({ attempt: 1 });
+    expect(text.length).toBeLessThanOrEqual(REMEDIATION_MAX_TASK_LENGTH);
+    expect(text).toContain(`\n[truncated]\n${PROPOSAL_END}`);
+    expect(text).toContain("no-eval");
   });
-});
 
-describe("chain id shape", () => {
-  it.each([
-    ["a long id", "a".repeat(512), true],
-    ["too long", "a".repeat(513), false],
-    ["a space", "a b", false],
-    ["a bracket", "a]b", false],
-    ["colons and dots", "claude-code:s.1:e_2", true],
-  ])("the delivery mark and CHAIN_ID_PATTERN agree on %s", (_name, chainId, valid) => {
-    const text = formatAgentDelivery({ ...INPUT, chainId });
-    const parsed = parseAutoDelivery(text);
+  it("drops findings that alone exceed the task limit and counts them", () => {
+    const finding = { ...FINDING, violation: "v".repeat(1000), allowed: "a".repeat(1000) };
+    const text = formatAgentDelivery({
+      ...INPUT,
+      findings: Array.from({ length: 32 }, () => finding),
+      omitted: 1,
+    });
 
-    expect(CHAIN_ID_PATTERN.test(chainId)).toBe(valid);
-    expect(parsed !== null && parsed !== "LEGACY" && parsed.chainId === chainId).toBe(valid);
+    expect(text.length).toBeLessThanOrEqual(REMEDIATION_MAX_TASK_LENGTH);
+    expect(text).toMatch(/\+\d+ more findings not listed/);
+  });
+
+  it("states how many findings were left out", () => {
+    const text = formatAgentDelivery({ ...INPUT, omitted: 1 });
+
+    expect(text).toContain("+1 more findings not listed");
+    expect(formatAgentDelivery(INPUT)).not.toContain("more findings not listed");
   });
 });

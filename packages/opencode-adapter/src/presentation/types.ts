@@ -1,5 +1,5 @@
-import type { ChainStopCode, TurnReview } from "@jevguard/core";
-import type { DeliveryStatus, StructuredLogSink } from "@jevguard/node-infra";
+import type { TurnReview } from "@jevguard/core";
+import type { DeliveryStatus, LegacyRemediationKey, StructuredLogSink } from "@jevguard/node-infra";
 import type { AttributionFailureReason } from "../attribution/types";
 
 export type ToastVariant = "info" | "success" | "warning" | "error";
@@ -75,33 +75,26 @@ export interface ProposalSessionNavigator {
 export type OperationalEvent =
   | { readonly kind: "TURN_SKIPPED"; readonly reason: "interrupted" | "failed" }
   | { readonly kind: "ATTRIBUTION_UNAVAILABLE"; readonly reason: AttributionFailureReason }
-  | RemediationChainEvent;
+  | RemediationDeliveryEvent;
 
 /**
- * One step of a remediation chain, as the log shows it: ids, counts and typed codes only.
+ * What the log says about a remediation delivery: ids and typed codes only.
  * `REMEDIATION_CONFIG_INVALID` says the user's `opencode.yaml` was refused, so remediation
- * stays off.
+ * stays off; `REMEDIATION_CONFIG_LEGACY` says it still carries retired keys.
  */
-export type RemediationChainEvent =
+export type RemediationDeliveryEvent =
   | {
       readonly kind: "REMEDIATION_SENT";
-      readonly chainId: string;
-      readonly attempt: number;
-      readonly maxAttempts: number;
+      readonly unitId: string;
+      readonly strategy: "PROPOSAL" | "FINDINGS_ONLY";
     }
   | {
-      readonly kind: "REMEDIATION_STOPPED";
-      readonly chainId: string;
-      readonly attempt: number;
-      readonly maxAttempts: number;
-      readonly code: ChainStopCode;
+      readonly kind: "REMEDIATION_NOT_SENT";
+      readonly unitId: string;
+      readonly code: "DELIVERY_FAILED" | "SESSION_LIMIT";
+      readonly cause?: "SESSION_BUSY_TIMEOUT" | "HOST_REJECTED";
     }
-  | {
-      readonly kind: "REMEDIATION_RESOLVED";
-      readonly chainId: string;
-      readonly fixed: number;
-      readonly attempts: number;
-    }
+  | { readonly kind: "REMEDIATION_CONFIG_LEGACY"; readonly keys: readonly LegacyRemediationKey[] }
   | { readonly kind: "REMEDIATION_CONFIG_INVALID"; readonly reason: string };
 
 export interface OperationalLogSink {

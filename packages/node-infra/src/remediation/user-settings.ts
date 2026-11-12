@@ -1,8 +1,9 @@
 import { readFileSync } from "node:fs";
-import { isAttemptCount, MAX_ATTEMPTS_DEFAULT } from "@jevguard/core";
 import { parsePolicyConfig } from "../policy";
 import { createNodeProjectProbe, isInsideProject, orNullWhenMissing } from "./containment";
 import type {
+  LegacyMode,
+  LegacyRemediationKey,
   RemediationUserSettings,
   RemediationUserSettingsResult,
   RemediationUserSettingsRules,
@@ -17,6 +18,11 @@ const CONFIG_DIRECTORY = "jevguard";
 const SECTION_KEY = "remediation";
 const SHARED_KEYS = ["enabled", "delivery", "mode", "max_attempts"];
 const MODEL_KEY = "model";
+const LEGACY_MAX_ATTEMPTS_CEILING = 3;
+const LEGACY_KEYS: Readonly<Record<string, LegacyRemediationKey>> = {
+  mode: "LEGACY_MODE",
+  max_attempts: "LEGACY_MAX_ATTEMPTS",
+};
 
 const DISABLED: RemediationUserSettingsResult = { status: "DISABLED" };
 const INVALID: RemediationUserSettingsResult = {
@@ -42,17 +48,29 @@ function deliveryOf(value: unknown): RemediationUserSettings["delivery"] | null 
   return value === "user" || value === "agent" ? value : null;
 }
 
-function modeOf(value: unknown): RemediationUserSettings["mode"] | null {
+function legacyModeOf(value: unknown): LegacyMode | null {
   if (value === undefined) return "observe";
 
   return value === "observe" || value === "remediate" ? value : null;
 }
 
-/** An integer in 1..3, only valid with `remediate`; the default is 2. */
-function maxAttemptsOf(value: unknown, mode: RemediationUserSettings["mode"]): number | null {
-  if (value === undefined) return MAX_ATTEMPTS_DEFAULT;
+/** An integer in 1..3, only valid with `remediate`; absent is valid. */
+function isLegacyMaxAttempts(value: unknown, mode: LegacyMode): boolean {
+  if (value === undefined) return true;
 
-  return mode === "remediate" && isAttemptCount(value) ? value : null;
+  return (
+    mode === "remediate" &&
+    typeof value === "number" &&
+    Number.isInteger(value) &&
+    value >= 1 &&
+    value <= LEGACY_MAX_ATTEMPTS_CEILING
+  );
+}
+
+function legacyKeysOf(section: JsonRecord): readonly LegacyRemediationKey[] {
+  return Object.entries(LEGACY_KEYS)
+    .filter(([key]) => section[key] !== undefined)
+    .map(([, code]) => code);
 }
 
 function sectionResult(
@@ -66,26 +84,28 @@ function sectionResult(
   const { enabled } = section;
   const delivery = deliveryOf(section.delivery);
   const model = modelOf(section.model, rules);
-  const mode = modeOf(section.mode);
+  const mode = legacyModeOf(section.mode);
 
   if (enabled !== undefined && typeof enabled !== "boolean") return INVALID;
   if (delivery === null || model === undefined || mode === null) return INVALID;
   if (mode === "remediate" && delivery !== "agent") return INVALID;
-
-  const maxAttempts = maxAttemptsOf(section.max_attempts, mode);
-
-  if (maxAttempts === null) return INVALID;
+  if (!isLegacyMaxAttempts(section.max_attempts, mode)) return INVALID;
 
   return enabled === true
-    ? { status: "ENABLED", settings: { delivery, model, mode, maxAttempts } }
+    ? {
+        status: "ENABLED",
+        settings: { delivery, model },
+        warnings: legacyKeysOf(section),
+      }
     : DISABLED;
 }
 
 /**
  * Validates the `remediation` section of a user's host file. An absent file or section,
  * or `enabled: false`, is `DISABLED`; any unknown key, wrong type, unknown delivery or a
- * model the host does not accept is `INVALID`. `mode: remediate` needs `delivery: agent`,
- * and `max_attempts` (1..3) needs `remediate`.
+ * model the host does not accept is `INVALID`. The retired `mode` and `max_attempts` keys
+ * keep their old validation (`remediate` needs `delivery: agent`, `max_attempts` is 1..3 and
+ * needs `remediate`) but never change behavior; an enabled result lists them as warnings.
  */
 export function resolveRemediationUserSettings(
   value: unknown,

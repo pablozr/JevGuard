@@ -1,23 +1,22 @@
-export {
-  abandonDeliver,
-  chainFailuresOf,
-  chainIdsOf,
-  decideChainStep,
-  decideOrphanStep,
-  decideRemediateStep,
-  failureSignature,
-  unresolvedIds,
-} from "./chain";
-export { MAX_CHAIN_ORIGINS, parseChainState } from "./chain-state";
-export type { ChainClosure, ChainEndRecord, ChainEndSink } from "./closures";
-export { chainEndOf, expiredClosure, recordClosures } from "./closures";
 export { parseModelSpecifier, resolveRemediationConfig } from "./config";
-export { deliveryFindingsOf } from "./delivery-findings";
-export { formatAgentDelivery, isAutoDeliveredTask, parseAutoDelivery } from "./delivery-frame";
+export { decideAgentDelivery, withinSessionLimit } from "./delivery-decision";
+export { collectDeliveryFindings, deliveryFindingsOf } from "./delivery-findings";
+export {
+  AUTO_DELIVERY_MARKER,
+  boundProposalText,
+  formatAgentDelivery,
+  isAutoDeliveredTask,
+  NO_STRATEGY_NOTICE,
+  stripControlCharacters,
+} from "./delivery-frame";
 export { buildProposalText, PROPOSER_AGENT_PROMPT } from "./prompt";
-export { buildProposalRequest } from "./request";
+export { buildProposalRequest, proposesOnFail } from "./request";
 export { createRemediationProposalStore } from "./store";
 export type {
+  AgentDeliveryDecision,
+  DeliveryFinding,
+  DeliveryFindings,
+  FindingLocation,
   ProposalTrigger,
   RemediationBuiltInFinding,
   RemediationConfig,
@@ -28,16 +27,13 @@ export type {
   RemediationRuleSnapshot,
 } from "./types";
 export {
-  CHAIN_ID_PATTERN,
-  CHAIN_ID_SOURCE,
   DEFAULT_REMEDIATION_CONFIG,
+  DELIVERY_MAX_FINDING_PATH_LENGTH,
+  DELIVERY_MAX_FINDING_TEXT_LENGTH,
+  DELIVERY_MAX_FINDINGS,
   FINDING_ID_PATTERN,
-  isAttemptCount,
   MAX_AGENT_DELIVERIES_PER_SESSION,
-  MAX_ATTEMPTS_CEILING,
-  MAX_ATTEMPTS_DEFAULT,
+  MAX_FINDING_LOCATIONS,
   PROPOSAL_MAX_TEXT_LENGTH,
-  PROPOSER_AGENT_NAME,
   REMEDIATION_MAX_TASK_LENGTH,
-  withinSessionLimit,
 } from "./types";

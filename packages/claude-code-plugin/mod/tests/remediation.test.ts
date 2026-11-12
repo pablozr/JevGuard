@@ -17,6 +17,16 @@ const ZERO_USAGE = {
   cache_read_input_tokens: 0,
   cache_creation_input_tokens: 0,
 };
+const FINDING = {
+  id: "no-eval",
+  kind: "RULE",
+  description: "No eval",
+  severity: "error",
+  probability: 0.93,
+  violation: "Calls eval.",
+  allowed: "Never.",
+  locations: [{ path: "src/a.ts", hunk: { ordinal: 1, newStart: 3, newLines: 4 } }],
+};
 const PROPOSAL_TEXT = [
   "Strategy",
   "1. Split the module.",
@@ -40,16 +50,21 @@ function requestPath(ordinal: number, session = "sess1"): string {
 }
 
 function requestFile(ordinal: number, overrides: object = {}, session = "sess1"): string {
+  const agent = "delivery" in overrides && overrides.delivery === "agent";
+
   return JSON.stringify({
-    v: 1,
+    v: 2,
     kind: "PROPOSAL_REQUEST",
     turnId: turnId(ordinal, session),
     createdAt: new Date(NOW).toISOString(),
     expiresAt: new Date(NOW + 3_600_000).toISOString(),
     delivery: "user",
+    fromDelivery: false,
     model: "sonnet",
     system: SYSTEM_TEXT,
     prompt: PROMPT_TEXT,
+    findings: agent ? [FINDING] : [],
+    omitted: 0,
     ...overrides,
   });
 }
@@ -103,6 +118,7 @@ function world(on: On) {
     placed: true,
     refuse: false,
     failSubmit: false,
+    failCount: false,
     sessionId: "sess1",
     failWrite: false,
     values: new Map<string, unknown>(),
@@ -124,6 +140,8 @@ function world(on: On) {
   on("state.set", (_$, e) => {
     const key = `${e.plugin}/${e.key}`;
     const version = (state.versions.get(key) ?? 0) + 1;
+
+    if (state.failCount && key === DELIVERIES_KEY) throw new Error("state refused");
 
     state.values.set(key, e.value);
     state.versions.set(key, version);
@@ -296,8 +314,12 @@ test("agent mode submits one framed message and never as the user", async ($, on
   expect(state.submits).toHaveLength(1);
   expect(state.submits[0]?.text.startsWith(MARKER)).toBe(true);
   expect(JSON.stringify(state.submits[0]?.origin)).not.toContain("asUser");
-  expect(state.logs).toContain("JevGuard sent a remediation proposal for unit 1 to the agent");
+  expect(state.submits[0]?.text).toContain("no-eval");
+  expect(state.submits[0]?.text).toContain("src/a.ts hunk #1 (+3,4)");
+  expect(state.submits[0]?.text).toContain("split the module in two files");
+  expect(state.logs).toContain("JevGuard sent the findings for unit 1 to the agent");
   expect(state.opens).toHaveLength(1);
+  expect(state.values.get(DELIVERIES_KEY)).toEqual({ sess1: 1 });
 });
 
 test("the fourth agent delivery in a session becomes a panel with a limit line", async ($, on) => {
@@ -577,207 +599,50 @@ for (const surface of ["terminal", "desktop"] as const) {
   });
 }
 
-const CHAIN_ID = turnId(1);
-
-function chainOf(attempt: number, maxAttempts = 2): object {
-  return {
-    chainId: CHAIN_ID,
-    attempt,
-    maxAttempts,
-    findings: [
-      {
-        id: "no-eval",
-        severity: "error",
-        probability: 0.93,
-        paths: ["src/a.ts"],
-        violation: "Calls eval.",
-        allowed: "Never.",
-      },
-    ],
-  };
-}
-
-function chainFeedLine(ordinal: number, result: string, attempt: number, fixed = 0): string {
-  return JSON.stringify({
-    v: 1,
-    kind: "RECORDED",
-    turnId: turnId(ordinal),
-    at: new Date(NOW).toISOString(),
-    counts: { pass: 0, warn: 0, fail: 0, skipped: 0, unavailable: 0 },
-    causes: [],
-    results: [],
-    chain: { chainId: CHAIN_ID, attempt, maxAttempts: 2, result, fixed },
-  });
-}
-
 async function started($: Engine): Promise<void> {
   await $.session.start(SESSION);
   await completeTurn($);
 }
 
-test("a remediate request frames the delivery with the attempt n/m and the findings", async ($, on) => {
+test("a failed completion in agent mode still delivers the findings alone", async ($, on) => {
   const { state, clock } = world(on);
 
   await started($);
-  seed(state, [1], { delivery: "agent", chain: chainOf(1) });
+  state.completion = {
+    isAnswered: false,
+    reason: "api-error",
+    status: 429,
+    error: "rate_limit",
+    usage: ZERO_USAGE,
+  };
+  seed(state, [1], { delivery: "agent" });
   state.files.set(FEED_FILE, feedLines([1]));
   await settle(clock);
 
   const [submit] = state.submits;
 
   expect(state.submits).toHaveLength(1);
-  expect(submit?.text.startsWith(MARKER)).toBe(true);
-  expect(submit?.text).toContain("attempt 1/2");
   expect(submit?.text).toContain("no-eval");
-  expect(JSON.stringify(submit?.origin)).not.toContain("asUser");
-  expect(state.logs).toContain("JevGuard sent remediation attempt 1/2 for unit 1 to the agent");
-  expect(state.toasts).toContain("JevGuard sent remediation attempt 1/2 for unit 1 to the agent");
+  expect(submit?.text).not.toContain("--- proposal start ---");
+  expect(state.logs).toContain("JevGuard proposal unavailable · unit 1 · MODEL_API_ERROR");
+  expect(state.opens).toEqual([]);
+  expect(state.values.get(DELIVERIES_KEY)).toEqual({ sess1: 1 });
 });
 
-test("the second attempt says 2/2", async ($, on) => {
+test("a failed completion in user mode delivers nothing", async ($, on) => {
   const { state, clock } = world(on);
 
   await started($);
-  seed(state, [1], { delivery: "agent", chain: chainOf(2) });
+  state.refuse = true;
+  seed(state, [1]);
   state.files.set(FEED_FILE, feedLines([1]));
   await settle(clock);
-
-  expect(state.submits[0]?.text).toContain("attempt 2/2");
-});
-
-test("a resolved chain is a visible line and toast without a model call or a submit", async ($, on) => {
-  const { state, clock } = world(on);
-
-  await started($);
-  state.files.set(FEED_FILE, chainFeedLine(2, "RESOLVED", 1, 2));
-  await settle(clock);
-
-  const line = "JevGuard remediation resolved · unit 2 · 2 finding(s) fixed in 1 attempt(s)";
-
-  expect(state.logs).toContain(line);
-  expect(state.toasts).toContain(line);
-  expect(state.submits).toEqual([]);
-  expect(state.models).toEqual([]);
-});
-
-test("a stopped chain is a visible line and toast with its code and no submit", async ($, on) => {
-  const { state, clock } = world(on);
-
-  await started($);
-  state.files.set(FEED_FILE, chainFeedLine(2, "REPEATED_FAILURE", 1));
-  await settle(clock);
-
-  const line = "JevGuard remediation stopped · unit 2 · attempt 1/2 · REPEATED_FAILURE";
-
-  expect(state.logs).toContain(line);
-  expect(state.toasts).toContain(line);
-  expect(state.submits).toEqual([]);
-});
-
-test("a chain delivery in flight prints nothing from the feed", async ($, on) => {
-  const { state, clock } = world(on);
-
-  await started($);
-  state.files.set(FEED_FILE, chainFeedLine(2, "DELIVERING", 1));
-  await settle(clock);
-
-  expect(state.logs.filter((line) => line.includes("remediation"))).toEqual([]);
-});
-
-test("the fourth chain delivery stops with SESSION_LIMIT and shows the proposal", async ($, on) => {
-  const { state, clock } = world(on);
-
-  await started($);
-  seed(state, [1, 2, 3, 4], { delivery: "agent", chain: chainOf(1) });
-  state.files.set(FEED_FILE, feedLines([1, 2, 3, 4]));
-  await settle(clock);
-
-  const line = "JevGuard remediation stopped · unit 4 · attempt 1/2 · SESSION_LIMIT";
-
-  expect(state.submits).toHaveLength(3);
-  expect(state.logs).toContain(line);
-  expect(state.toasts).toContain(line);
-  expect(state.toasts).toContain("JevGuard proposal ready · unit 4");
-});
-
-test("a refused submit is a visible DELIVERY_FAILED and the proposal goes to the user", async ($, on) => {
-  const { state, clock } = world(on);
-
-  await started($);
-  state.failSubmit = true;
-  seed(state, [1], { delivery: "agent", chain: chainOf(1) });
-  state.files.set(FEED_FILE, feedLines([1]));
-  await settle(clock);
-
-  const line = "JevGuard remediation stopped · unit 1 · attempt 1/2 · DELIVERY_FAILED";
 
   expect(state.submits).toEqual([]);
-  expect(state.logs).toContain(line);
-  expect(state.toasts).toContain(line);
-  expect(state.toasts).toContain("JevGuard proposal ready · unit 1");
+  expect(state.values.has(DELIVERIES_KEY)).toBe(false);
 });
 
-test("a chain on a user-delivery request is invalid and never reaches the model", async ($, on) => {
-  const { state, clock } = world(on);
-
-  await started($);
-  seed(state, [1], { delivery: "user", chain: chainOf(1) });
-  state.files.set(FEED_FILE, feedLines([1]));
-  await settle(clock);
-
-  expect(state.models).toEqual([]);
-  expect(state.submits).toEqual([]);
-});
-
-function outcomePath(ordinal: number): string {
-  return requestPath(ordinal).replace(/\.json$/, ".outcome.json");
-}
-
-function outcomeOf(ordinal: number, code: string): string {
-  return JSON.stringify({ v: 1, kind: "PROPOSAL_OUTCOME", turnId: turnId(ordinal), code });
-}
-
-test("a refused submit in a chain writes a DELIVERY_FAILED outcome for the worker", async ($, on) => {
-  const { state, clock } = world(on);
-
-  await started($);
-  state.failSubmit = true;
-  seed(state, [1], { delivery: "agent", chain: chainOf(1) });
-  state.files.set(FEED_FILE, feedLines([1]));
-  await settle(clock);
-
-  expect(state.files.get(outcomePath(1))).toBe(outcomeOf(1, "DELIVERY_FAILED"));
-});
-
-test("the session limit in a chain writes a SESSION_LIMIT outcome for the fourth unit only", async ($, on) => {
-  const { state, clock } = world(on);
-
-  await started($);
-  seed(state, [1, 2, 3, 4], { delivery: "agent", chain: chainOf(1) });
-  state.files.set(FEED_FILE, feedLines([1, 2, 3, 4]));
-  await settle(clock);
-
-  expect(state.files.get(outcomePath(4))).toBe(outcomeOf(4, "SESSION_LIMIT"));
-  expect([1, 2, 3].map((ordinal) => state.files.get(outcomePath(ordinal)))).toEqual([
-    undefined,
-    undefined,
-    undefined,
-  ]);
-});
-
-test("a delivered chain request writes no outcome", async ($, on) => {
-  const { state, clock } = world(on);
-
-  await started($);
-  seed(state, [1], { delivery: "agent", chain: chainOf(1) });
-  state.files.set(FEED_FILE, feedLines([1]));
-  await settle(clock);
-
-  expect(state.submits).toHaveLength(1);
-  expect(state.files.has(outcomePath(1))).toBe(false);
-});
-
-test("a failed request without a chain writes no outcome", async ($, on) => {
+test("a refused submit is a visible DELIVERY_FAILED, the panel opens and no quota is spent", async ($, on) => {
   const { state, clock } = world(on);
 
   await started($);
@@ -786,7 +651,71 @@ test("a failed request without a chain writes no outcome", async ($, on) => {
   state.files.set(FEED_FILE, feedLines([1]));
   await settle(clock);
 
-  expect(state.files.has(outcomePath(1))).toBe(false);
+  expect(state.submits).toEqual([]);
+  expect(state.logs).toContain("JevGuard proposal unavailable · unit 1 · DELIVERY_FAILED");
+  expect(state.toasts).toContain("JevGuard proposal ready · unit 1");
+  expect(state.values.has(DELIVERIES_KEY)).toBe(false);
+});
+
+test("a request from another session is shown to the user and never submitted", async ($, on) => {
+  const { state, clock } = world(on);
+
+  await started($);
+  seed(state, [1], { delivery: "agent" });
+  state.files.set(FEED_FILE, feedLines([1]));
+  state.sessionId = "sess2";
+  await settle(clock);
+
+  expect(state.submits).toEqual([]);
+  expect(state.logs).toContain("JevGuard remediation not sent · other session · unit 1");
+  expect(state.toasts).toContain("JevGuard remediation not sent · other session · unit 1");
+});
+
+test("a delivery that cannot be counted is still reported as delivered", async ($, on) => {
+  const { state, clock } = world(on);
+
+  await started($);
+  state.failCount = true;
+  seed(state, [1], { delivery: "agent" });
+  state.files.set(FEED_FILE, feedLines([1]));
+  await settle(clock);
+
+  expect(state.submits).toHaveLength(1);
+  expect(state.logs).toContain("JevGuard sent the findings for unit 1 to the agent");
+  expect(state.logs).not.toContain("JevGuard proposal unavailable · unit 1 · DELIVERY_FAILED");
+  expect(state.opens).toHaveLength(1);
+});
+
+test("a request without a proposal skips the model and delivers the findings once", async ($, on) => {
+  const { state, clock } = world(on);
+
+  await started($);
+  seed(state, [1], { delivery: "agent", system: null, prompt: null, omitted: 2 });
+  state.files.set(FEED_FILE, feedLines([1]));
+  await settle(clock);
+
+  const [submit] = state.submits;
+
+  expect(state.models).toEqual([]);
+  expect(state.submits).toHaveLength(1);
+  expect(submit?.text).toContain("no-eval");
+  expect(submit?.text).toContain("+2 more findings not listed");
+  expect(submit?.text).not.toContain("--- proposal start ---");
+  expect(state.values.get(DELIVERIES_KEY)).toEqual({ sess1: 1 });
+});
+
+test("a unit that is itself a delivery gets the panel and no further submit", async ($, on) => {
+  const { state, clock } = world(on);
+
+  await started($);
+  seed(state, [1], { delivery: "agent", fromDelivery: true });
+  state.files.set(FEED_FILE, feedLines([1]));
+  await settle(clock);
+
+  expect(state.submits).toEqual([]);
+  expect(state.models).toHaveLength(1);
+  expect(state.opens).toHaveLength(1);
+  expect(state.values.has(DELIVERIES_KEY)).toBe(false);
 });
 
 test("an invalid remediation config in the feed is a visible line and toast", async ($, on) => {
