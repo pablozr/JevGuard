@@ -1,3 +1,4 @@
+import { homedir } from "node:os";
 import {
   createNodePolicyFileSystem,
   createPolicyFileLoader,
@@ -8,7 +9,6 @@ import {
   inspectInstall,
   readInstalledOpenCodeVersion,
 } from "@jevguard/opencode-adapter";
-import { homedir } from "node:os";
 import { createDefaultCredentialProvider } from "../../jev-port";
 import { resolveProjectRoot } from "../project-root";
 import { diagnose } from "./diagnose";

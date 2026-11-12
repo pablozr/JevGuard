@@ -1,10 +1,10 @@
+import { homedir } from "node:os";
 import type { InstallOutcome, InstallTarget } from "@jevguard/opencode-adapter";
 import {
   createConfirmationPrompt,
   createNodeConfigFileSystem,
   install,
 } from "@jevguard/opencode-adapter";
-import { homedir } from "node:os";
 
 export function performInstall(target: InstallTarget): Promise<InstallOutcome> {
   return install({

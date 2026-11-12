@@ -1,5 +1,5 @@
-import { checkFilePath, DEFAULT_EVIDENCE_POLICY } from "@jevguard/core";
 import type { RuleSeverity } from "@jevguard/core";
+import { checkFilePath, DEFAULT_EVIDENCE_POLICY } from "@jevguard/core";
 import { parsePolicyConfig } from "@jevguard/node-infra/policy";
 import type {
   ProvenanceEntry,

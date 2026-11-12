@@ -1,6 +1,3 @@
-import { JEVGUARD_PLUGIN_ENTRY } from "@jevguard/opencode-adapter";
-import type { LoginFailureReason } from "@jevguard/node-infra";
-import type { InstallFailureReason, InstallTarget } from "@jevguard/opencode-adapter";
 import type {
   ReportBuiltInCount,
   ReportReasonCount,
@@ -9,6 +6,9 @@ import type {
   ReviewCounts,
   ReviewReport,
 } from "@jevguard/core";
+import type { LoginFailureReason } from "@jevguard/node-infra";
+import type { InstallFailureReason, InstallTarget } from "@jevguard/opencode-adapter";
+import { JEVGUARD_PLUGIN_ENTRY } from "@jevguard/opencode-adapter";
 
 export const USAGE = [
   "Usage: jevguard login",

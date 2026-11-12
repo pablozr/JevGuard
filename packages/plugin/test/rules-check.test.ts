@@ -12,8 +12,8 @@ import { aggregateReview } from "@jevguard/core";
 import { parsePolicyConfig, toReviewLogEntry } from "@jevguard/node-infra";
 import { describe, expect, test } from "vitest";
 import { parseRulesCheckArguments } from "../src/cli/rules-check/arguments";
-import { rulesCheckExitCode } from "../src/cli/rules-check/exit-code";
 import { executeRulesCheck, RULES_CHECK_DEFAULT_TASK } from "../src/cli/rules-check/execute";
+import { rulesCheckExitCode } from "../src/cli/rules-check/exit-code";
 import {
   describeDiffInputFailure,
   describeRulesCheck,

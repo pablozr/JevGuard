@@ -4,13 +4,13 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, describe, expect, test } from "vitest";
+import { summarizeRules } from "../src/skills/jevguard-rules/rules-summary";
 import {
   type BundledSkill,
   frontmatterDescription,
   readBundledSkills,
   registerSkills,
 } from "../src/skills/register-skills";
-import { summarizeRules } from "../src/skills/jevguard-rules/rules-summary";
 import {
   BUNDLED_SKILL_NAMES,
   resolveInstalledSkillDirectories,
