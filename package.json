@@ -24,6 +24,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.0.0",
+    "@jevguard/claude-code-adapter": "workspace:*",
     "@jevguard/core": "workspace:*",
     "@jevguard/node-infra": "workspace:*",
     "@jevguard/opencode-adapter": "workspace:*",

@@ -1,4 +1,5 @@
 import type { TurnFile } from "@jevguard/core";
+import { DEFAULT_PATCH_BUDGET_MS } from "./build-patch";
 import { normalizeFileDiff } from "./normalize-patch";
 import type { FileContent, OpenCodeSessionFacade, WorkingFileDiff } from "./types";
 
@@ -30,14 +31,16 @@ export async function captureSnapshot(facade: OpenCodeSessionFacade): Promise<Wo
 /**
  * Attributes the per-file patches of one execution from its start snapshot and the
  * working-tree diff at `succeeded`. A file clean at start keeps the host patch; a file
- * dirty at start is rebuilt from its start content to its current content, so prior
- * dirt never counts as the turn's change. Returns `null` (INCOMPLETE) when any cap is
- * exceeded, a patch is truncated, or a needed content is unknown.
+ * dirty at start is rebuilt as a minimal patch from its start content to its current
+ * content, so prior dirt never counts as the turn's change. Returns `null`
+ * (INCOMPLETE) when any cap is exceeded, a patch is truncated, a needed content is
+ * unknown, or the patch budget is spent.
  */
 export async function attributeSnapshotDiff(
   start: WorkingSnapshot,
   endDiffs: readonly WorkingFileDiff[],
   facade: OpenCodeSessionFacade,
+  patchBudgetMs = DEFAULT_PATCH_BUDGET_MS,
 ): Promise<readonly TurnFile[] | null> {
   const end = toDiffMap(endDiffs);
 
@@ -57,6 +60,7 @@ export async function attributeSnapshotDiff(
     (path) => end.get(path)?.patch !== start.diffs.get(path)?.patch,
   );
   const current = changedDirty.length === 0 ? new Map() : await facade.readFiles(changedDirty);
+  const deadlineMs = Date.now() + patchBudgetMs;
 
   for (const path of changedDirty) {
     const before = textOf(start.contents.get(path));
@@ -66,7 +70,7 @@ export async function attributeSnapshotDiff(
       return null;
     }
 
-    const normalized = normalizeFileDiff({ file: path, before, after });
+    const normalized = normalizeFileDiff({ file: path, before, after }, deadlineMs - Date.now());
 
     if (normalized.status === "INCOMPLETE") {
       return null;

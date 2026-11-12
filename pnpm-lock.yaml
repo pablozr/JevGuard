@@ -11,6 +11,9 @@ importers:
       '@biomejs/biome':
         specifier: ^2.0.0
         version: 2.5.14
+      '@jevguard/claude-code-adapter':
+        specifier: workspace:*
+        version: link:packages/claude-code-adapter
       '@jevguard/core':
         specifier: workspace:*
         version: link:packages/core
@@ -76,6 +79,9 @@ importers:
       '@jevguard/node-infra':
         specifier: workspace:*
         version: link:../node-infra
+      diff:
+        specifier: ^9.0.0
+        version: 9.0.0
     devDependencies:
       '@opencode/plugin':
         specifier: 2.2.2
