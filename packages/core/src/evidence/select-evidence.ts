@@ -1,34 +1,9 @@
-import type { ParsedRule, RuleEvidenceClass, RuleScope, Turn, TurnFile } from "../domain/types";
+import type { RuleEvidenceClass, RuleScope, Turn, TurnFile } from "../domain/types";
 import { DEFAULT_EVIDENCE_POLICY } from "./defaults";
 import { fileExtension } from "./paths";
 import { checkFilePath } from "./safety";
 import { matchesRuleScope } from "./scope";
-import type { EvidencePolicy, EvidenceSelection, TurnEvidenceSelection } from "./types";
-
-/**
- * Selects the complete evidence for one rule from the turn's attributed file
- * patches. Only files matching the rule scope and the rule's evidence class
- * contribute paths and patches, the assembled diff is never truncated, and the
- * safety policy is evaluated against exactly those applicable files. A blocked
- * applicable file yields `BLOCKED_EVIDENCE` rather than partial evidence.
- */
-export function selectRuleEvidence(
-  turn: Turn,
-  rule: ParsedRule,
-  policy: EvidencePolicy = DEFAULT_EVIDENCE_POLICY,
-): EvidenceSelection {
-  if (hasNoAttributedPatch(turn)) {
-    return { status: "SKIPPED", reason: "NO_ATTRIBUTED_PATCH" };
-  }
-
-  const applicableFiles = selectApplicableFiles(turn.files, rule.scope, rule.evidence, policy);
-
-  if (applicableFiles.length === 0) {
-    return { status: "SKIPPED", reason: "NO_SCOPE_MATCH" };
-  }
-
-  return mountEvidence(applicableFiles, policy);
-}
+import type { EvidencePolicy, TurnEvidenceSelection } from "./types";
 
 /**
  * Selects the complete evidence for a scope-free built-in check: every attributed

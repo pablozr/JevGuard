@@ -35,16 +35,6 @@ export interface EvidencePolicy {
 }
 
 /**
- * Result of selecting one rule's evidence. `SELECTED` carries the complete,
- * untruncated attributed diff; `SKIPPED` and `UNAVAILABLE` are operational states,
- * never semantic verdicts.
- */
-export type EvidenceSelection =
-  | { readonly status: "SELECTED"; readonly evidence: RuleEvidence }
-  | { readonly status: "SKIPPED"; readonly reason: SkippedReason }
-  | { readonly status: "UNAVAILABLE"; readonly reason: EvidenceUnavailableReason };
-
-/**
  * Result of selecting the turn's evidence for a scope-free built-in check. There is
  * no scope, so `NO_SCOPE_MATCH` cannot occur and every attributed nonempty file is
  * treated as applicable.

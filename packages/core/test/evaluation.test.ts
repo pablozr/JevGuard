@@ -1,6 +1,8 @@
 import { describe, expect, test } from "vitest";
 import type {
-  EvaluateRuleInput,
+  GateConfig,
+  EvidencePolicy,
+  ReviewResult,
   JevEvaluationPort,
   JevEvaluationResult,
   JevRequest,
@@ -10,7 +12,7 @@ import type {
   Turn,
   TurnFile,
 } from "../src/index";
-import { DEFAULT_EVIDENCE_POLICY, DEFAULT_GATE_CONFIG, evaluateRule } from "../src/index";
+import { DEFAULT_EVIDENCE_POLICY, DEFAULT_GATE_CONFIG, evaluateRules } from "../src/index";
 
 const LOGIN_PATCH = "diff --git a/src/auth/login.ts b/src/auth/login.ts\n+const limit = 5;";
 const ALLOWED = "Validation, HTTP mapping, and delegation to services.";
@@ -67,7 +69,33 @@ function makeRule(overrides: Partial<ParsedRule> = {}): ParsedRule {
   };
 }
 
-function makeInput(overrides: Partial<EvaluateRuleInput> = {}): EvaluateRuleInput {
+interface SingleRuleInput {
+  readonly turn: Turn;
+  readonly rule: ParsedRule;
+  readonly gateConfig: GateConfig;
+  readonly evidencePolicy: EvidencePolicy;
+}
+
+async function evaluateOne(input: SingleRuleInput, jev: JevEvaluationPort): Promise<ReviewResult> {
+  const review = await evaluateRules(
+    {
+      turn: input.turn,
+      rules: [{ status: "PARSED", rule: input.rule }],
+      gateConfig: { status: "VALID", config: input.gateConfig },
+      evidencePolicy: input.evidencePolicy,
+    },
+    { jev },
+  );
+  const [result] = review.results;
+
+  if (result === undefined) {
+    throw new Error("expected one rule result");
+  }
+
+  return result;
+}
+
+function makeInput(overrides: Partial<SingleRuleInput> = {}): SingleRuleInput {
   return {
     turn: makeTurn(),
     rule: makeRule(),
@@ -105,12 +133,12 @@ const unavailable = {
   reason: "JEV_FAILURE",
 };
 
-describe("evaluateRule request", () => {
+describe("evaluateRules single rule request", () => {
   test("builds exactly one Noul with English criteria and a single Allowed", async () => {
     const port = new FakeJevPort(evaluated(0.1));
     const rule = makeRule({ allowed: ALLOWED });
 
-    await evaluateRule(makeInput({ rule }), { jev: port });
+    await evaluateOne(makeInput({ rule }), port);
 
     expect(port.requests).toHaveLength(1);
 
@@ -133,7 +161,7 @@ describe("evaluateRule request", () => {
   test("omits the allowed criterion when the rule has no exception", async () => {
     const port = new FakeJevPort(evaluated(0.1));
 
-    await evaluateRule(makeInput(), { jev: port });
+    await evaluateOne(makeInput(), port);
 
     const request = firstRequest(port);
 
@@ -142,7 +170,7 @@ describe("evaluateRule request", () => {
   });
 });
 
-describe("evaluateRule gate outcomes", () => {
+describe("evaluateRules single rule gate outcomes", () => {
   test.each([
     [0.1, "PASS"],
     [0.399, "PASS"],
@@ -153,29 +181,29 @@ describe("evaluateRule gate outcomes", () => {
   ] as const)("maps error probability %s to %s", async (probability, outcome) => {
     const port = new FakeJevPort(evaluated(probability));
 
-    const result = await evaluateRule(makeInput(), { jev: port });
+    const result = await evaluateOne(makeInput(), port);
 
-    expect(result).toEqual({ ...selectedContext, outcome, violationProbability: probability });
+    expect(result).toMatchObject({
+      ...selectedContext,
+      outcome,
+      violationProbability: probability,
+    });
     expect(port.requests).toHaveLength(1);
   });
 
   test("a warning rule warns at the boundary and never fails", async () => {
     const rule = makeRule({ severity: "warning" });
 
-    const pass = await evaluateRule(makeInput({ rule }), {
-      jev: new FakeJevPort(evaluated(0.599)),
-    });
-    const warn = await evaluateRule(makeInput({ rule }), {
-      jev: new FakeJevPort(evaluated(0.999)),
-    });
+    const pass = await evaluateOne(makeInput({ rule }), new FakeJevPort(evaluated(0.599)));
+    const warn = await evaluateOne(makeInput({ rule }), new FakeJevPort(evaluated(0.999)));
 
-    expect(pass).toEqual({
+    expect(pass).toMatchObject({
       ...selectedContext,
       severity: "warning",
       outcome: "PASS",
       violationProbability: 0.599,
     });
-    expect(warn).toEqual({
+    expect(warn).toMatchObject({
       ...selectedContext,
       severity: "warning",
       outcome: "WARN",
@@ -184,13 +212,13 @@ describe("evaluateRule gate outcomes", () => {
   });
 });
 
-describe("evaluateRule short-circuits", () => {
+describe("evaluateRules single rule short-circuits", () => {
   test("skips without calling the port when the turn has no attributed patch", async () => {
     const port = new FakeJevPort(evaluated(0.1));
 
-    const result = await evaluateRule(makeInput({ turn: makeTurn({ files: [] }) }), { jev: port });
+    const result = await evaluateOne(makeInput({ turn: makeTurn({ files: [] }) }), port);
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       ...selectedContext,
       scopedPaths: [],
       outcome: "SKIPPED",
@@ -204,9 +232,9 @@ describe("evaluateRule short-circuits", () => {
     const turn = makeTurn({ files: [file("docs/readme.md", "patch-docs")] });
     const rule = makeRule({ scope: { include: ["src/**"], exclude: [] } });
 
-    const result = await evaluateRule(makeInput({ turn, rule }), { jev: port });
+    const result = await evaluateOne(makeInput({ turn, rule }), port);
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       ...selectedContext,
       scopedPaths: [],
       outcome: "SKIPPED",
@@ -219,9 +247,9 @@ describe("evaluateRule short-circuits", () => {
     const port = new FakeJevPort(evaluated(0.1));
     const turn = makeTurn({ files: [file("src/.env", "SECRET=1")] });
 
-    const result = await evaluateRule(makeInput({ turn }), { jev: port });
+    const result = await evaluateOne(makeInput({ turn }), port);
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       ...selectedContext,
       scopedPaths: [],
       outcome: "UNAVAILABLE",
@@ -234,9 +262,9 @@ describe("evaluateRule short-circuits", () => {
     const port = new FakeJevPort(evaluated(0.1));
     const evidencePolicy = { ...DEFAULT_EVIDENCE_POLICY, maxDiffLength: 4 };
 
-    const result = await evaluateRule(makeInput({ evidencePolicy }), { jev: port });
+    const result = await evaluateOne(makeInput({ evidencePolicy }), port);
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       ...selectedContext,
       scopedPaths: [],
       outcome: "UNAVAILABLE",
@@ -246,20 +274,20 @@ describe("evaluateRule short-circuits", () => {
   });
 });
 
-describe("evaluateRule port failures", () => {
+describe("evaluateRules single rule port failures", () => {
   test("converts a typed failure into UNAVAILABLE without a gate outcome", async () => {
     const port = new FakeJevPort({ kind: "RULE", status: "FAILED", reason: "MISSING_CREDENTIAL" });
 
-    const result = await evaluateRule(makeInput(), { jev: port });
+    const result = await evaluateOne(makeInput(), port);
 
-    expect(result).toEqual(unavailable);
+    expect(result).toMatchObject(unavailable);
     expect(port.requests).toHaveLength(1);
   });
 
   test("contains a rejected port promise as UNAVAILABLE instead of throwing", async () => {
     const port = new FakeJevPort(new Error("transport down"));
 
-    await expect(evaluateRule(makeInput(), { jev: port })).resolves.toEqual(unavailable);
+    await expect(evaluateOne(makeInput(), port)).resolves.toMatchObject(unavailable);
     expect(port.requests).toHaveLength(1);
   });
 
@@ -268,15 +296,15 @@ describe("evaluateRule port failures", () => {
     async (probability) => {
       const port = new FakeJevPort(evaluated(probability));
 
-      const result = await evaluateRule(makeInput(), { jev: port });
+      const result = await evaluateOne(makeInput(), port);
 
-      expect(result).toEqual(unavailable);
+      expect(result).toMatchObject(unavailable);
       expect(port.requests).toHaveLength(1);
     },
   );
 });
 
-describe("evaluateRule context", () => {
+describe("evaluateRules single rule context", () => {
   test("records the turn, rule, severity, and only the scoped paths", async () => {
     const port = new FakeJevPort(evaluated(0.1));
     const turn = makeTurn({
@@ -287,7 +315,7 @@ describe("evaluateRule context", () => {
       severity: "warning",
     });
 
-    const result = await evaluateRule(makeInput({ turn, rule }), { jev: port });
+    const result = await evaluateOne(makeInput({ turn, rule }), port);
 
     expect(result).toMatchObject({
       turnId: "turn-1",

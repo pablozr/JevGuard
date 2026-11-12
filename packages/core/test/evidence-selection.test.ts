@@ -3,7 +3,7 @@ import type { EvidencePolicy, ParsedRule, RuleScope, Turn, TurnFile } from "../s
 import {
   DEFAULT_EVIDENCE_POLICY,
   matchesRuleScope,
-  selectRuleEvidence,
+  planRuleEvidence,
   selectTurnEvidence,
 } from "../src/index";
 
@@ -37,28 +37,29 @@ function makeRule(overrides: Partial<ParsedRule> = {}): ParsedRule {
   };
 }
 
-describe("selectRuleEvidence", () => {
+describe("planRuleEvidence selection", () => {
   test("skips when the turn has no attributed patch", () => {
-    expect(selectRuleEvidence(makeTurn({ files: [] }), makeRule())).toEqual({
+    expect(planRuleEvidence(makeTurn({ files: [] }), makeRule())).toEqual({
       status: "SKIPPED",
       reason: "NO_ATTRIBUTED_PATCH",
     });
 
-    expect(selectRuleEvidence(makeTurn({ files: [file("src/a.ts", "")] }), makeRule())).toEqual({
+    expect(planRuleEvidence(makeTurn({ files: [file("src/a.ts", "")] }), makeRule())).toEqual({
       status: "SKIPPED",
       reason: "NO_ATTRIBUTED_PATCH",
     });
 
-    expect(
-      selectRuleEvidence(makeTurn({ files: [file("src/a.ts", "   \n")] }), makeRule()),
-    ).toEqual({ status: "SKIPPED", reason: "NO_ATTRIBUTED_PATCH" });
+    expect(planRuleEvidence(makeTurn({ files: [file("src/a.ts", "   \n")] }), makeRule())).toEqual({
+      status: "SKIPPED",
+      reason: "NO_ATTRIBUTED_PATCH",
+    });
   });
 
   test("skips when the scope matches no changed file", () => {
     const turn = makeTurn({ files: [file("docs/readme.md", "patch-md")] });
     const rule = makeRule({ scope: ruleScope(["src/**"]) });
 
-    expect(selectRuleEvidence(turn, rule)).toEqual({
+    expect(planRuleEvidence(turn, rule)).toEqual({
       status: "SKIPPED",
       reason: "NO_SCOPE_MATCH",
     });
@@ -68,11 +69,17 @@ describe("selectRuleEvidence", () => {
     const turn = makeTurn({
       files: [file("src/a.ts", "patch-a"), file("config/app.json", "patch-b")],
     });
-    const result = selectRuleEvidence(turn, makeRule({ scope: null }));
+    const result = planRuleEvidence(turn, makeRule({ scope: null }));
 
     expect(result).toEqual({
-      status: "SELECTED",
-      evidence: { files: ["src/a.ts", "config/app.json"], diff: "patch-a\npatch-b" },
+      status: "PLANNED",
+      slices: [
+        expect.objectContaining({
+          kind: "WHOLE",
+          files: ["src/a.ts", "config/app.json"],
+          diff: "patch-a\npatch-b",
+        }),
+      ],
     });
   });
 
@@ -84,15 +91,21 @@ describe("selectRuleEvidence", () => {
         file("src/c.ts", "patch-src-c"),
       ],
     });
-    const result = selectRuleEvidence(turn, makeRule({ scope: ruleScope(["src/**"]) }));
+    const result = planRuleEvidence(turn, makeRule({ scope: ruleScope(["src/**"]) }));
 
     expect(result).toEqual({
-      status: "SELECTED",
-      evidence: { files: ["src/a.ts", "src/c.ts"], diff: "patch-src-a\npatch-src-c" },
+      status: "PLANNED",
+      slices: [
+        expect.objectContaining({
+          kind: "WHOLE",
+          files: ["src/a.ts", "src/c.ts"],
+          diff: "patch-src-a\npatch-src-c",
+        }),
+      ],
     });
 
-    if (result.status === "SELECTED") {
-      expect(result.evidence.diff).not.toContain("patch-backend-b");
+    if (result.status === "PLANNED") {
+      expect(result.slices[0]?.diff).not.toContain("patch-backend-b");
     }
   });
 
@@ -100,11 +113,17 @@ describe("selectRuleEvidence", () => {
     const turn = makeTurn({
       files: [file("backend\\src\\app.ts", "patch-backend")],
     });
-    const result = selectRuleEvidence(turn, makeRule({ scope: ruleScope(["backend/**"]) }));
+    const result = planRuleEvidence(turn, makeRule({ scope: ruleScope(["backend/**"]) }));
 
     expect(result).toEqual({
-      status: "SELECTED",
-      evidence: { files: ["backend\\src\\app.ts"], diff: "patch-backend" },
+      status: "PLANNED",
+      slices: [
+        expect.objectContaining({
+          kind: "WHOLE",
+          files: ["backend\\src\\app.ts"],
+          diff: "patch-backend",
+        }),
+      ],
     });
   });
 
@@ -112,12 +131,12 @@ describe("selectRuleEvidence", () => {
     const turn = makeTurn({
       files: [file("root.ts", "patch-root"), file("src/deep/file.ts", "patch-deep")],
     });
-    const result = selectRuleEvidence(turn, makeRule({ scope: ruleScope(["**/*.ts"]) }));
+    const result = planRuleEvidence(turn, makeRule({ scope: ruleScope(["**/*.ts"]) }));
 
-    expect(result.status).toBe("SELECTED");
+    expect(result.status).toBe("PLANNED");
 
-    if (result.status === "SELECTED") {
-      expect(result.evidence.files).toEqual(["root.ts", "src/deep/file.ts"]);
+    if (result.status === "PLANNED") {
+      expect(result.slices[0]?.files).toEqual(["root.ts", "src/deep/file.ts"]);
     }
   });
 
@@ -128,27 +147,27 @@ describe("selectRuleEvidence", () => {
     });
     const rule = makeRule({ scope: ruleScope(["src/**"]) });
 
-    expect(selectRuleEvidence(turn, rule, policy).status).toBe("SELECTED");
+    expect(planRuleEvidence(turn, rule, policy).status).toBe("PLANNED");
 
     const overLimit = makeTurn({ files: [file("src/a.ts", "01234567890")] });
 
-    expect(
-      selectRuleEvidence(overLimit, makeRule({ scope: ruleScope(["src/**"]) }), policy),
-    ).toEqual({
-      status: "UNAVAILABLE",
-      reason: "OVERSIZED_DIFF",
-    });
+    expect(planRuleEvidence(overLimit, makeRule({ scope: ruleScope(["src/**"]) }), policy)).toEqual(
+      {
+        status: "UNAVAILABLE",
+        reason: "OVERSIZED_DIFF",
+      },
+    );
   });
 
   test("a sensitive file outside the scope is not sent and does not block", () => {
     const turn = makeTurn({
       files: [file("src/a.ts", "patch-src"), file(".env", "SECRET=1")],
     });
-    const result = selectRuleEvidence(turn, makeRule({ scope: ruleScope(["src/**"]) }));
+    const result = planRuleEvidence(turn, makeRule({ scope: ruleScope(["src/**"]) }));
 
     expect(result).toEqual({
-      status: "SELECTED",
-      evidence: { files: ["src/a.ts"], diff: "patch-src" },
+      status: "PLANNED",
+      slices: [expect.objectContaining({ kind: "WHOLE", files: ["src/a.ts"], diff: "patch-src" })],
     });
   });
 
@@ -156,7 +175,7 @@ describe("selectRuleEvidence", () => {
     const turn = makeTurn({
       files: [file("src/a.ts", "patch-src"), file(".env", "SECRET=1")],
     });
-    const result = selectRuleEvidence(turn, makeRule({ scope: ruleScope(["**"]) }));
+    const result = planRuleEvidence(turn, makeRule({ scope: ruleScope(["**"]) }));
 
     expect(result).toEqual({ status: "UNAVAILABLE", reason: "BLOCKED_EVIDENCE" });
   });
@@ -176,7 +195,7 @@ describe("selectRuleEvidence", () => {
     ];
 
     for (const path of files) {
-      expect(selectRuleEvidence(makeTurn({ files: [file(path, "patch")] }), makeRule())).toEqual({
+      expect(planRuleEvidence(makeTurn({ files: [file(path, "patch")] }), makeRule())).toEqual({
         status: "UNAVAILABLE",
         reason: "BLOCKED_EVIDENCE",
       });
@@ -185,14 +204,14 @@ describe("selectRuleEvidence", () => {
 
   test("blocks an applicable file without an allowlisted extension", () => {
     const turn = makeTurn({ files: [file("src/a.ts", "patch-src"), file("Dockerfile", "patch")] });
-    const result = selectRuleEvidence(turn, makeRule({ scope: null }));
+    const result = planRuleEvidence(turn, makeRule({ scope: null }));
 
     expect(result).toEqual({ status: "UNAVAILABLE", reason: "BLOCKED_EVIDENCE" });
   });
 
   test("without scope, safety evaluates every changed file", () => {
     const turn = makeTurn({ files: [file("src/a.ts", "patch-src"), file(".env", "SECRET=1")] });
-    const result = selectRuleEvidence(turn, makeRule({ scope: null }));
+    const result = planRuleEvidence(turn, makeRule({ scope: null }));
 
     expect(result).toEqual({ status: "UNAVAILABLE", reason: "BLOCKED_EVIDENCE" });
   });
@@ -201,9 +220,9 @@ describe("selectRuleEvidence", () => {
     const turn = makeTurn({
       files: [file("src/a.ts", "patch-src"), file("src/.env", "SECRET=1")],
     });
-    const result = selectRuleEvidence(turn, makeRule({ scope: ruleScope(["src/**"]) }));
+    const result = planRuleEvidence(turn, makeRule({ scope: ruleScope(["src/**"]) }));
 
-    expect(result.status).not.toBe("SELECTED");
+    expect(result.status).not.toBe("PLANNED");
   });
 
   test("a scope list applies inclusions together with exclusions", () => {
@@ -217,16 +236,22 @@ describe("selectRuleEvidence", () => {
     });
     const rule = makeRule({ scope: ruleScope(["src/**"], ["**/*.test.ts"]) });
 
-    expect(selectRuleEvidence(turn, rule)).toEqual({
-      status: "SELECTED",
-      evidence: { files: ["src/a.ts", "src/nested/b.ts"], diff: "patch-a\npatch-b" },
+    expect(planRuleEvidence(turn, rule)).toEqual({
+      status: "PLANNED",
+      slices: [
+        expect.objectContaining({
+          kind: "WHOLE",
+          files: ["src/a.ts", "src/nested/b.ts"],
+          diff: "patch-a\npatch-b",
+        }),
+      ],
     });
   });
 
   test("ignores a prose doc for a default code rule", () => {
     const onlyDocs = makeTurn({ files: [file("docs/guide.md", "patch-docs")] });
 
-    expect(selectRuleEvidence(onlyDocs, makeRule({ scope: null }))).toEqual({
+    expect(planRuleEvidence(onlyDocs, makeRule({ scope: null }))).toEqual({
       status: "SKIPPED",
       reason: "NO_SCOPE_MATCH",
     });
@@ -235,9 +260,9 @@ describe("selectRuleEvidence", () => {
       files: [file("src/a.ts", "patch-src"), file("docs/guide.md", "patch-docs")],
     });
 
-    expect(selectRuleEvidence(mixed, makeRule({ scope: null }))).toEqual({
-      status: "SELECTED",
-      evidence: { files: ["src/a.ts"], diff: "patch-src" },
+    expect(planRuleEvidence(mixed, makeRule({ scope: null }))).toEqual({
+      status: "PLANNED",
+      slices: [expect.objectContaining({ kind: "WHOLE", files: ["src/a.ts"], diff: "patch-src" })],
     });
   });
 
@@ -248,12 +273,15 @@ describe("selectRuleEvidence", () => {
         files: [file("docs/guide.md", "patch-docs"), file("docs/notes.txt", "patch-notes")],
       });
 
-      expect(selectRuleEvidence(turn, makeRule({ scope: null, evidence }))).toEqual({
-        status: "SELECTED",
-        evidence: {
-          files: ["docs/guide.md", "docs/notes.txt"],
-          diff: "patch-docs\npatch-notes",
-        },
+      expect(planRuleEvidence(turn, makeRule({ scope: null, evidence }))).toEqual({
+        status: "PLANNED",
+        slices: [
+          expect.objectContaining({
+            kind: "WHOLE",
+            files: ["docs/guide.md", "docs/notes.txt"],
+            diff: "patch-docs\npatch-notes",
+          }),
+        ],
       });
     },
   );
@@ -262,11 +290,13 @@ describe("selectRuleEvidence", () => {
     const turn = makeTurn({
       files: [file("src/a.ts", "patch-src"), file("docs/guide.md", "patch-docs")],
     });
-    const result = selectRuleEvidence(turn, makeRule({ scope: null, evidence: "docs" }));
+    const result = planRuleEvidence(turn, makeRule({ scope: null, evidence: "docs" }));
 
     expect(result).toEqual({
-      status: "SELECTED",
-      evidence: { files: ["docs/guide.md"], diff: "patch-docs" },
+      status: "PLANNED",
+      slices: [
+        expect.objectContaining({ kind: "WHOLE", files: ["docs/guide.md"], diff: "patch-docs" }),
+      ],
     });
   });
 
@@ -274,7 +304,7 @@ describe("selectRuleEvidence", () => {
     const turn = makeTurn({
       files: [file("docs/guide.md", "patch-docs"), file("secrets/credentials.json", "SECRET=1")],
     });
-    const result = selectRuleEvidence(turn, makeRule({ scope: null, evidence: "docs" }));
+    const result = planRuleEvidence(turn, makeRule({ scope: null, evidence: "docs" }));
 
     expect(result).toEqual({ status: "UNAVAILABLE", reason: "BLOCKED_EVIDENCE" });
   });
@@ -287,14 +317,17 @@ describe("selectRuleEvidence", () => {
         file("tsconfig.json", "patch-json"),
       ],
     });
-    const result = selectRuleEvidence(turn, makeRule({ scope: null }));
+    const result = planRuleEvidence(turn, makeRule({ scope: null }));
 
     expect(result).toEqual({
-      status: "SELECTED",
-      evidence: {
-        files: ["config/app.yaml", "data/table.csv", "tsconfig.json"],
-        diff: "patch-yaml\npatch-csv\npatch-json",
-      },
+      status: "PLANNED",
+      slices: [
+        expect.objectContaining({
+          kind: "WHOLE",
+          files: ["config/app.yaml", "data/table.csv", "tsconfig.json"],
+          diff: "patch-yaml\npatch-csv\npatch-json",
+        }),
+      ],
     });
   });
 });

@@ -10,7 +10,7 @@ import { assembleSlicedRuleResult, overBudgetMetadata } from "./assemble-rule";
 import { buildReviewContext } from "./build-context";
 import { buildJevRequest } from "./build-request";
 import { evaluateRuleBatchWithPort } from "./evaluate-with-port";
-import type { EvaluateRuleDependencies, EvaluateRulesInput } from "./types";
+import type { EvaluateRulesDependencies, EvaluateRulesInput } from "./types";
 
 interface RulePlanSlot {
   readonly kind: "PLAN";
@@ -31,7 +31,7 @@ type RuleSlot = { readonly kind: "RESULT"; readonly result: RuleReviewResult } |
  */
 export async function evaluateRules(
   input: EvaluateRulesInput,
-  dependencies: EvaluateRuleDependencies,
+  dependencies: EvaluateRulesDependencies,
 ): Promise<TurnReview> {
   if (input.gateConfig.status === "INVALID") {
     const results = input.rules.map((candidate) =>

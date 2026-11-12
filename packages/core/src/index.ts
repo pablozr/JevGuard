@@ -53,11 +53,9 @@ export type {
 } from "./domain/types";
 export { buildReviewContext } from "./evaluation/build-context";
 export { buildJevRequest } from "./evaluation/build-request";
-export { evaluateRule } from "./evaluation/evaluate-rule";
 export { evaluateRules } from "./evaluation/evaluate-rules";
 export type {
-  EvaluateRuleDependencies,
-  EvaluateRuleInput,
+  EvaluateRulesDependencies,
   EvaluateRulesInput,
 } from "./evaluation/types";
 export { DEFAULT_EVIDENCE_POLICY } from "./evidence/defaults";
@@ -65,7 +63,7 @@ export { parseUnifiedDiff } from "./evidence/parse-unified-diff";
 export { planRuleEvidence } from "./evidence/plan-slices";
 export { checkFilePath } from "./evidence/safety";
 export { matchesRuleScope, matchesScope } from "./evidence/scope";
-export { selectRuleEvidence, selectTurnEvidence } from "./evidence/select-evidence";
+export { selectTurnEvidence } from "./evidence/select-evidence";
 export {
   MAX_EXTRA_RULE_CALLS_PER_TURN,
   MAX_SLICES_PER_RULE,
@@ -76,7 +74,6 @@ export type {
   DiffParseFailureReason,
   DiffParseResult,
   EvidencePolicy,
-  EvidenceSelection,
   EvidenceSlice,
   EvidenceUnavailableReason,
   FileRejectionReason,

@@ -1,17 +1,10 @@
-import type { GateConfig, ParsedRule, Turn } from "../domain/types";
+import type { Turn } from "../domain/types";
 import type { EvidencePolicy } from "../evidence/types";
 import type { GateConfigResult } from "../gate/types";
 import type { JevEvaluationPort } from "../ports/types";
 import type { RuleParseResults } from "../rules/types";
 
-export interface EvaluateRuleInput {
-  readonly turn: Turn;
-  readonly rule: ParsedRule;
-  readonly gateConfig: GateConfig;
-  readonly evidencePolicy: EvidencePolicy;
-}
-
-export interface EvaluateRuleDependencies {
+export interface EvaluateRulesDependencies {
   readonly jev: JevEvaluationPort;
 }
 
