@@ -10,10 +10,10 @@ Read:
 - [`README.md`](./README.md) for product intent;
 - local [`SPEC.md`](./SPEC.md) for scope and the normative contracts;
 - [`AGENTS.md`](./AGENTS.md) for architecture and code standards;
-- local [`docs/adr`](./docs/adr) for decisions that should not be casually reversed.
+- [`docs/adr`](./docs/adr/README.md) for decisions that should not be casually reversed.
 
-`SPEC.md`, `CONTEXT.md`, `docs/adr/`, and `docs/tasks/` are intentionally local
-planning records and are ignored by Git. Do not add, force-add, or publish them.
+`SPEC.md`, `CONTEXT.md`, `docs/tasks/`, and `PLUGIN-FLOW.md` are intentionally local
+planning records and are ignored by Git. `docs/adr/` is published. Do not add, force-add, or publish them.
 
 ## Development setup
 
@@ -40,8 +40,8 @@ manager.
 
 ## Architecture and debugging guide
 
-This is a working map for locating and fixing behavior. `SPEC.md`, `CONTEXT.md`,
-and `docs/adr/` remain authoritative for scope and contracts.
+This is a working map for locating and fixing behavior. The local `SPEC.md` and
+`CONTEXT.md` and the published `docs/adr/` remain authoritative for scope and contracts.
 
 ### Package dependency direction
 
@@ -93,9 +93,10 @@ in `plugin` or `core`.
    instance. The batch counts as one request.
 7. `evaluateRules` evaluates each parsed rule in source order. One rule's failure
    never suppresses its siblings, and one built-in answer never suppresses the other.
-8. `evaluateRule` selects the rule's scoped, safe, complete evidence, then calls the
-   Jev port at most once with one Noul request. Missing scope or patch is `SKIPPED`
-   without calling Jev.
+8. `planRuleEvidence` selects the rule's scoped, safe, complete evidence and slices
+   oversized evidence by file and hunk; each slice is one Noul request to the Jev
+   port, and the rule's verdict is the maximum of its slice judgments. Missing scope
+   or patch is `SKIPPED` without calling Jev.
 9. `evaluateGate` converts the returned violation probability into a local
    `PASS`/`WARN`/`FAIL` using exact thresholds; `SCOPE-CREEP` and `COMPLEXITY` use
    their fixed gates.
@@ -106,11 +107,12 @@ in `plugin` or `core`.
 11. After presentation, when remediation is enabled and the review contains any
     `FAIL`, `buildProposalRequest` builds one aggregate request — every `FAIL` finding
     (local `error` rules and the `SCOPE-CREEP` built-in), the task, and the complete,
-    safe, full attributed patch — and `proposeForTurn` sends it once to the hidden
-    `jevguard-proposer` subagent in an isolated child session parented to the source
-    session. The full patch must pass the safety policy; a blocked or oversized patch
-    records no proposal. The child session is excluded from review, and a host, model,
-    or toast failure never affects the review or later turns.
+    safe, full attributed patch — and `proposeForTurn` sends it once to an isolated,
+    deny-all child session parented to the source session. The full patch must pass the
+    safety policy; a blocked or oversized patch records no proposal. The child session
+    is excluded from review, and a host or model failure never affects the review or
+    later turns. Only with the user's own `delivery: agent` does `remediateTurn` also
+    queue one visible message into the source session.
 
 ```mermaid
 flowchart TD
@@ -138,7 +140,7 @@ flowchart TD
     K --> L["One structured log + TUI toast, rules then SCOPE-CREEP then COMPLEXITY"]
     L --> M{"Remediation enabled and any FAIL in review?"}
     M -->|no| Z["No proposal"]
-    M -->|yes, one per turn| P["One aggregate request to hidden jevguard-proposer in a child session + generic toast (configurable, strategy only)"]
+    M -->|yes, one per turn| P["One aggregate request to a deny-all child session (configurable, strategy only); with the user's delivery: agent, one visible message with the findings and the strategy"]
 ```
 
 ### Safe auto-propose remediation
@@ -148,19 +150,24 @@ automatic, configurable, and strategy-only. After presentation, when `.jev/confi
 enables remediation and the review contains any `FAIL`, the review builds one
 aggregate request — every `FAIL` finding (local `error` rules and the `SCOPE-CREEP`
 built-in), the task, and the complete, safe, full attributed patch — and schedules at
-most one proposal. The plugin `config` hook registers the hidden `jevguard-proposer`
-subagent with wildcard-disabled tools and wildcard-deny permissions
-(`{"*": "deny"}`); there is no command hook.
+most one proposal. No agent is registered for it: the child session is created with
+wildcard-deny permissions (`{"*": "deny"}`), and there is no command hook.
 
 `proposeForTurn` claims the evaluated turn (`messageID`), creates one child session
 parented to the source session, registers it so its own idle events are excluded from
-review for the plugin lifetime, and prompts the proposer subagent with the configured
-model when present and otherwise the host's model, plus a fixed system prompt. The
-subagent cannot call a tool, edit a file, or produce a patch: it returns a strategy and
-one manual apply instruction. A generic toast reports that the proposal is ready, and a
-contained child-session or prompt failure shows a generic error toast and writes one
-safe structured log entry carrying only a typed reason code. Every host, model, or
-toast failure is contained and never affects the review or later turns.
+review for the plugin lifetime, and prompts the child session with the configured
+model when present and otherwise the source session's model, plus a fixed system prompt.
+The child cannot call a tool, edit a file, or produce a patch: it returns a strategy and
+one manual apply instruction. The OpenCode `2.2.x` server context has no toast channel,
+so a contained child-session or prompt failure writes one safe structured log entry
+carrying only a typed reason code. Every host or model failure is contained and never
+affects the review or later turns.
+
+`packages/plugin/src/remediation/remediate.ts` adds the opt-in `delivery: agent`, read
+only from the user's own `opencode.yaml`: the core's delivery decision (one delivery per
+unit, 3 messages per session, none for a turn that came from a delivery) runs the
+proposer in the background and queues one visible message into the source session, never
+while it is busy.
 
 The full attributed patch must pass the same safety policy as the review. A blocked or
 oversized patch records no proposal, even when a rule-scoped `FAIL` exists, and there
@@ -222,11 +229,12 @@ server idle evaluation — there is no separate verifier and no automatic apply.
   - `packages/core/src/remediation/prompt.ts` — fixed proposer system prompt and
     labelled untrusted-data user content.
   - `packages/opencode-adapter/src/presentation/remediation.ts` — the fixed, generic
-    remediation-ready toast.
+    remediation notifier and failure log sink.
   - `packages/opencode-adapter/src/remediation/opencode.ts` — child-session creation
     and proposer prompt over the OpenCode SDK.
-  - `packages/plugin/src/remediation/config.ts` — registers the hidden
-    `jevguard-proposer` subagent on the host config.
+  - `packages/plugin/src/remediation/remediate.ts`, `deliveries.ts`, `idle-waiter.ts`,
+    `user-settings.ts` — the opt-in single delivery, its session ledger, the idle wait and
+    the user's `opencode.yaml`.
   - `packages/plugin/src/remediation/propose.ts` — claims, creates the child session,
     prompts the proposer, and notifies.
 - Composition and artifact
@@ -249,7 +257,8 @@ server idle evaluation — there is no separate verifier and no automatic apply.
   server plugin; it acts only when a review contains a `FAIL` and the complete full-turn
   evidence is safe. Never widen it to unattended retries, re-evaluation, automatic
   apply, or code edits, and never let the proposer prompt the source session or inject
-  into its context.
+  into its context. The one exception is the opt-in `delivery: agent` message (one per unit),
+  enabled only from the user's own config file.
 - Never expose the API key in config, arguments, logs, errors, toasts, fixtures, or
   agent context. Accept the key only through the OS credential store or the
   CI/automation environment override.
@@ -300,7 +309,8 @@ orchestration in `core`.
 - Do not change `UNAVAILABLE` into a semantic verdict.
 - Keep the review observe-only. Do not add blocking behavior, source-session
   prompting, or agent-context injection to the review. The auto-propose remediation
-  workflow must stay configurable, bounded, strategy-only, and separate.
+  workflow must stay configurable, bounded, strategy-only, and separate; the only
+  source-session message is the user-opted `delivery: agent` delivery.
 - Do not expose API keys, environment files, secrets, or rejected evidence in
   tests, fixtures, logs, or documentation.
 - Do not accept the TypeSafe API key as a CLI argument or repository setting. Local

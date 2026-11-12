@@ -1,5 +1,7 @@
 # JevGuard
 
+[![CI](https://github.com/pablozr/JevGuard/actions/workflows/ci.yml/badge.svg)](https://github.com/pablozr/JevGuard/actions/workflows/ci.yml)
+
 > **Semantic policy engine for coding agents.**
 >
 > JevGuard reviews every change an AI coding agent makes against the rules of your
@@ -15,7 +17,7 @@ your local deterministic gate to return `PASS`, `WARN`, or `FAIL`.
 
 | Host | Package | Status |
 | --- | --- | --- |
-| [OpenCode](https://opencode.ai) | `@pablozrrrr/jevguard` | Available, targets OpenCode `1.18.32` |
+| [OpenCode](https://opencode.ai) | `@pablozrrrr/jevguard` | Available, targets OpenCode `2.2.x` (`>=2.2.2 <2.3`) |
 | [Claude Code](https://claude.com/claude-code) | `@pablozrrrr/jevguard-claude-code` | Available through this repository's plugin marketplace |
 | Codex | — | Planned |
 
@@ -63,11 +65,11 @@ coding agent.
 > agent context or block a task. When remediation is enabled and a review has any
 > `FAIL`, the plugin asks for a proposal in an isolated, deny-all child session; the
 > proposal never edits code. See [OpenCode 2.2.x limitations](#opencode-22x-limitations).
-> On Claude Code and OpenCode, a user who opts in with `mode: remediate` in their own
-> `claude-code.yaml` or `opencode.yaml` gets a bounded chain of at most 3 visible
-> correction messages to the agent; see
+> On Claude Code and OpenCode, a user who opts in with `delivery: agent` in their own
+> `claude-code.yaml` or `opencode.yaml` gets at most one visible message per reviewed unit
+> to the agent (the failing findings and the strategy), at most 3 per session; see
 > [Remediation proposals](docs/configuration.md#remediation-proposals) and
-> [OpenCode `mode: remediate`](docs/configuration.md#opencode-mode-remediate-bounded-chain).
+> [OpenCode `delivery: agent`](docs/configuration.md#opencode-delivery-agent-one-delivery-per-unit).
 > The Claude Code plugin is distributed through this repository's marketplace; see the
 > [Claude Code guide](./docs/configuration.md#claude-code).
 
@@ -265,11 +267,6 @@ or secret is logged.
 Installing `@pablozrrrr/jevguard` does **not** register it with OpenCode by itself.
 OpenCode `2.2.x` only loads plugins listed in `plugins: [...]` in `opencode.json`.
 
-> [!WARNING]
-> The `jevguard install` command below still writes the OpenCode `1.x` `plugin` key.
-> Until it is migrated, register the plugin on `2.2.x` with the manual `plugins`
-> entry shown after it.
-
 The installer is run from the installed CLI:
 
 ```sh
@@ -433,7 +430,8 @@ Known limitations:
 
 - Target host is OpenCode `2.2.x` (minimum `2.2.2`). The plugin does not load on
   `2.1.x` or `1.x`. A real-host smoke on `2.2.2` (2026-11-02) covered observe
-  and `remediate` (FAIL review, deny-all proposer, attempt 1/2, `RESOLVED`).
+  and remediation (FAIL review, deny-all proposer). The single-delivery flow replaced the
+  earlier chain and has not been re-smoked on the real host.
 - OpenCode `2.2.2` does not install dependencies for a `file:` plugin spec. Use
   the registry package; a local `file:` build needs its dependencies installed
   next to it.
@@ -585,7 +583,7 @@ for the full contract.
 
 The current release implements the full local review path:
 
-- OpenCode V1 plugin loads.
+- The OpenCode `2.2.x` V2 plugin loads.
 - A completed assistant response is detected.
 - The direct parent user task and assistant-attributed diff are acquired.
 - Every `## <RULE-ID>` block in `.jev/rules.md` is parsed in source order. Each
@@ -714,7 +712,10 @@ has a `FAIL` — one proposal child session.
 The review does not inject anything into the agent context, prompt the source session,
 add session messages, or block a task. The proposal is a separate, configurable,
 strategy-only workflow delivered by the server plugin; it never edits code and never
-applies a change. A real-host smoke on OpenCode `2.2.2` passed; see
+applies a change. Only a user who opts in with `delivery: agent` in their own
+`opencode.yaml` gets one visible message per reviewed unit queued into the source
+session, at most 3 per session and never while the session is busy; see
+[OpenCode `delivery: agent`](docs/configuration.md#opencode-delivery-agent-one-delivery-per-unit). A real-host smoke on OpenCode `2.2.2` passed for observe; see
 [OpenCode 2.2.x limitations](#opencode-22x-limitations).
 
 The Claude Code plugin reuses the same core, policy files, gate, and local history. It
@@ -741,6 +742,7 @@ Use `pnpm check` to run format, lint, typecheck, and tests in sequence. See
 
 - [Configuration reference](./docs/configuration.md)
 - [Security model](./docs/security.md)
+- [Architecture decisions](./docs/adr/README.md)
 - [Contributing](./CONTRIBUTING.md)
 - [Agent instructions](./AGENTS.md)
 

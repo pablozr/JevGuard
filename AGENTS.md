@@ -6,10 +6,10 @@ JevGuard is a semantic policy engine for coding agents. Jev provides narrow
 probabilistic judgments; deterministic code owns policy, thresholds, outcomes,
 workflow, and presentation.
 
-Read the local [`SPEC.md`](./SPEC.md), [`CONTEXT.md`](./CONTEXT.md), and applicable
-local ADRs before changing behavior. They are deliberately ignored by Git and are
-the authoritative working-product record in this repository. The V0.1 specification
-is normative.
+Read the local [`SPEC.md`](./SPEC.md) and [`CONTEXT.md`](./CONTEXT.md), deliberately
+ignored by Git, and the applicable ADRs in [`docs/adr/`](./docs/adr/README.md) before
+changing behavior. Together they are the authoritative working-product record in this
+repository. The V0.1 specification is normative.
 
 ## Package boundaries
 
@@ -44,9 +44,10 @@ testkit ────────────────────────
   YAML config parsing, the review-log allowlist projection, and the bounded local
   review history. It never imports a host SDK or TUI API; host adapters never depend
   on each other.
-- `opencode-adapter` owns OpenCode event handling, task/diff attribution,
-  OpenCode-specific infrastructure, structured logging, TUI toasts, the proposal
-  child session, and the safe remediation notifier.
+- `opencode-adapter` owns OpenCode execution-event handling, task/diff attribution,
+  OpenCode-specific infrastructure, structured logging, the proposal child session,
+  the origin-session prompt facade for the opt-in delivery, and the safe remediation notifier
+  (a no-op toast sink on the 2.2.x server context, which has no toast channel).
 - `claude-code-adapter` owns Claude Code hook-event normalization, tool-attributed
   quiescent-unit acquisition (ADR 0014) and the `Turn` mapping. It never imports
   `opencode-adapter` or a host SDK. Its core (`hook-event/`, `acquisition/`, `turn/`)
@@ -68,9 +69,15 @@ testkit ────────────────────────
   strategy-only (ADR 0014): the worker writes a private proposal request, and the mod makes
   one `$.model.complete` call and shows the result in a user-only panel; an explicit
   user opt-in (`delivery: agent`) may also submit it to the agent once, visibly.
-- `plugin` is composition plus the single public OpenCode server plugin entrypoint.
-  Its `config` hook registers the bundled `jevguard-rules` and `jev-init` skills and
-  the hidden `jevguard-proposer` subagent; there is no command hook and no apply path.
+- `plugin` is composition plus the single public OpenCode 2.2.x server plugin entrypoint
+  (V2 `Plugin.Plugin`, engine range `>=2.2.2 <2.3`). It registers the bundled
+  `jevguard-rules` and `jev-init` skills through `skill.transform`; there is no command
+  hook and no apply path. In `observe` (the default) a `FAIL` prepares one strategy-only
+  proposal in a deny-all child session. Only when the user's own `opencode.yaml` opts
+  into `delivery: agent` does `plugin/src/remediation` also queue one visible message
+  (the failing findings and the strategy) into the source session per reviewed unit,
+  never while the session is busy and never for a turn that came from a delivery. The
+  repository can only veto it.
 - `testkit` provides fixtures and fakes; never make production packages depend on it.
 
 The credential CLI and OS credential-store integration are `node-infra`
@@ -99,24 +106,37 @@ the current repository diff when host attribution fails.
   remediation workflow (see `SPEC.md` §8) is delivered by the server plugin: after a
   review with any `FAIL`, and only when remediation is enabled (the default), the
   plugin sends the task, the complete safe attributed patch, and every `FAIL` finding
-  (rules and built-ins) to a hidden `jevguard-proposer` subagent in an isolated child
-  session parented to the source session, using the configured `remediation.model` when
-  present and otherwise inheriting the host's model, then shows a generic toast. A
-  contained proposal failure shows a generic error toast and writes only one typed
-  reason code to the log — never task, diff, findings, paths, or credentials. The
-  proposer has no tools and returns a strategy only; it never edits code or applies
-  anything. The
+  (rules and built-ins) to an isolated, deny-all child session parented to the source
+  session (no agent is registered for it), using the configured `remediation.model`
+  when present and otherwise the source session's model. A contained proposal failure
+  writes only one typed reason code to the log (the OpenCode 2.2.x server context has no
+  toast channel) — never task, diff, findings, paths, or credentials. The proposer has
+  no tools and returns a strategy only; it never edits code or applies anything. The
   user reviews the proposal and copies its manual apply instruction into their normal
-  coding agent, and that ordinary turn is reviewed normally. Do not broaden it: no
-  parent injection, no repository or global diff fallback, no retry or re-evaluation
-  loop, and no background session prompting beyond that single child-session proposal.
+  coding agent, and that ordinary turn is reviewed normally. In `observe` do not
+  broaden it: no parent injection, no repository or global diff fallback, no retry or
+  re-evaluation loop, and no background session prompting beyond that single
+  child-session proposal.
+  OpenCode exception (`delivery: agent`, opt-in; ADR 0015): only when the user enables it in
+  their own `opencode.yaml` (never in the repository, which can only veto it with
+  `remediation.auto_propose: false`), the plugin runs the proposer in the background and
+  queues at most one visible, framed message into the source session per reviewed unit. It
+  carries every `FAIL` finding (id, description, severity, probability, location with
+  hunk) and the strategy, or the findings alone when the proposer failed. It is sent only
+  after the execution succeeded and never while the session is busy (an idle wait of 120
+  seconds), at most 3 per session for the plugin lifetime, and only a message the host
+  accepted counts. The turn it causes is reviewed normally; it gets its own proposal but
+  never another delivery. The legacy `mode` and `max_attempts` keys are accepted with a
+  warning code and change nothing. No apply path, no retry or forced re-evaluation, and no
+  other parent injection.
   Claude Code exception (ADR 0014, 2026-10-14): when the user enables remediation in
   their own config file (never in the repository), the in-session mod drafts the same
   strategy-only proposal with one `$.model.complete` call and shows it in a panel only
   the user sees. With the user's explicit `delivery: agent` it may also submit the
   framed proposal to the agent through `$.prompt.submit` (never as the user), at most
   once per user-initiated unit and three times per session; the resulting turn is reviewed
-  normally and never triggers another automatic delivery. No other parent injection, no
+  normally and never triggers another automatic delivery. The message carries the same
+  findings and strategy (findings alone when the model call failed). No other parent injection, no
   apply path, no retry or forced re-evaluation, and the request file that carries the
   task and patch stays private, blanked on read and removed by the worker.
 - For local use, API credentials come from `jevguard login` and the OS credential
@@ -152,6 +172,8 @@ the current repository diff when host attribution fails.
   child-session proposal in `plugin` with fakes.
 - Test threshold boundaries exactly.
 - Add regression coverage for every corrected defect.
+- `tools/evidence-parity` is the only place allowed to import both host adapters; it
+  pins byte-identical patch reconstruction between OpenCode and Claude Code.
 
 ## Validation
 
@@ -168,8 +190,10 @@ Until the workspace exists, state explicitly which commands could not be run.
 
 ## Documentation
 
-`SPEC.md`, `CONTEXT.md`, `docs/adr/`, and `docs/tasks/` are local planning records
-and must never be committed. Update `SPEC.md` only when changing a normative MVP
+`SPEC.md`, `CONTEXT.md`, `docs/tasks/`, and `PLUGIN-FLOW.md` are local planning
+records and must never be committed. `docs/adr/` is published in the repository; ADRs
+must not link to the local files, and must not contain secrets, personal data, or
+local paths. Update `SPEC.md` only when changing a normative MVP
 contract or an approved roadmap direction. Update `CONTEXT.md` when canonical
 vocabulary changes. Add an ADR only for hard-to-reverse architectural decisions
 with meaningful alternatives.
