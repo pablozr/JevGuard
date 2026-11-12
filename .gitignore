@@ -23,7 +23,6 @@ yarn-error.log*
 # Local planning and product-design workspace
 /SPEC.md
 /CONTEXT.md
-/docs/adr/
 /docs/tasks/
 /PLUGIN-FLOW.md
 
