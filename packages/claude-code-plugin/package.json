@@ -14,6 +14,10 @@
     "test": "vitest run --root ../.. packages/claude-code-plugin"
   },
   "dependencies": {
-    "@jevguard/claude-code-adapter": "workspace:*"
+    "@jevguard/claude-code-adapter": "workspace:*",
+    "@jevguard/node-infra": "workspace:*"
+  },
+  "exports": {
+    "./cli": "./src/cli/index.ts"
   }
 }

@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
+import { MARKETPLACE_NAME, MARKETPLACE_SOURCE, PLUGIN_ID, PLUGIN_NAME } from "../src/cli/constants";
 
 const TEST_DIR = dirname(fileURLToPath(import.meta.url));
 const PACKAGE_DIR = resolve(TEST_DIR, "..");
@@ -69,5 +70,14 @@ describe("claude code marketplace catalog", () => {
 
   test("contains no credential material", () => {
     expect(catalogText).not.toMatch(FORBIDDEN_TEXT);
+  });
+
+  test("the CLI install constants name this catalog and this plugin", () => {
+    expect(MARKETPLACE_NAME).toBe(catalog.name);
+    expect(PLUGIN_NAME).toBe(entry?.name);
+    expect(PLUGIN_ID).toBe(`${entry?.name}@${catalog.name}`);
+    expect(readJson<{ repository?: string }>(join(TEMPLATE_DIR, "plugin.json")).repository).toBe(
+      `https://github.com/${MARKETPLACE_SOURCE}`,
+    );
   });
 });

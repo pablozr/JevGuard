@@ -257,6 +257,16 @@ describe("claude code artifact", () => {
     expect(worker).not.toMatch(WORKSPACE_IMPORT);
   });
 
+  test("the hook and the worker never carry the CLI plugin-install commands", () => {
+    const hook = readFileSync(join(DIST_DIR, "hook.js"), "utf8");
+    const worker = readFileSync(join(DIST_DIR, "worker.js"), "utf8");
+
+    for (const text of [hook, worker]) {
+      expect(text).not.toContain("plugin marketplace add");
+      expect(text).not.toContain('"marketplace"');
+    }
+  });
+
   test("the UI mod presents to the user and only the opt-in remediation reaches a model or the agent", () => {
     const mod = readFileSync(join(DIST_DIR, "hooks", "jevguard-ui.js"), "utf8");
 
