@@ -31,7 +31,9 @@ export const PROPOSER_PERMISSIONS = [{ action: "*", resource: "*", effect: "deny
 
 /**
  * Concrete proposal facade over the OpenCode 2.2.x session API. `originModel` reads
- * the originating session's model; `createChildSession` passes that model explicitly
+ * the originating session's model and, when the session uses the configured default
+ * (no model on the session), falls back to the model of its last assistant message;
+ * `createChildSession` passes that model explicitly
  * with the deny-all ruleset and no agent; `prompt` sends text only.
  */
 export function createOpenCodeProposalSessionFacade(
@@ -42,7 +44,11 @@ export function createOpenCodeProposalSessionFacade(
       const session = await context.session.get({ sessionID });
       const model = session.model;
 
-      return model === undefined ? null : { providerID: model.providerID, modelID: model.id };
+      if (model !== undefined) return { providerID: model.providerID, modelID: model.id };
+
+      const messages = await context.session.context({ sessionID });
+
+      return lastAssistantModel(messages);
     },
 
     async createChildSession(input): Promise<string> {
@@ -70,6 +76,16 @@ export function createOpenCodeProposalSessionFacade(
       await context.session.interrupt({ sessionID });
     },
   };
+}
+
+function lastAssistantModel(messages: readonly ContextMessage[]): ProposalModel | null {
+  for (const message of [...messages].reverse()) {
+    if (message.type === "assistant" && message.model !== undefined) {
+      return { providerID: message.model.providerID, modelID: message.model.id };
+    }
+  }
+
+  return null;
 }
 
 function lastAssistantText(messages: readonly ContextMessage[]): string | null {

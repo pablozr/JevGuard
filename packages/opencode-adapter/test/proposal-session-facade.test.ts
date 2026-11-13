@@ -21,7 +21,9 @@ interface RetryEvent {
 
 type RetryHandler = (retry: RetryEvent) => void;
 
-function fakeContext(options: { model?: unknown; fail?: boolean } = {}) {
+function fakeContext(
+  options: { model?: unknown; fail?: boolean; messages?: readonly unknown[] } = {},
+) {
   const calls: RecordedCall[] = [];
   const handlers: RetryHandler[] = [];
   const record = (method: string) => async (input: unknown) => {
@@ -36,6 +38,8 @@ function fakeContext(options: { model?: unknown; fail?: boolean } = {}) {
         return { id: "ses_1", ...(options.model === undefined ? {} : { model: options.model }) };
       case "create":
         return { id: "ses_child" };
+      case "context":
+        return options.messages ?? [];
       default:
         return undefined;
     }
@@ -45,6 +49,7 @@ function fakeContext(options: { model?: unknown; fail?: boolean } = {}) {
       get: record("get"),
       create: record("create"),
       prompt: record("prompt"),
+      context: record("context"),
       interrupt: record("interrupt"),
       hook: async (name: string, handler: RetryHandler) => {
         calls.push({ method: "hook", input: name });
@@ -72,7 +77,43 @@ describe("createOpenCodeProposalSessionFacade", () => {
     expect(calls).toEqual([{ method: "get", input: { sessionID: "ses_1" } }]);
   });
 
-  test("returns null when the origin session has no model", async () => {
+  test("falls back to the last assistant message model when the session has none", async () => {
+    const { context, calls } = fakeContext({
+      messages: [
+        { type: "user", text: "task" },
+        { type: "assistant", model: { providerID: "openai", id: "gpt-old" }, content: [] },
+        { type: "user", text: "next" },
+        {
+          type: "assistant",
+          model: { providerID: "anthropic", id: "claude-sonnet-5-5" },
+          content: [],
+        },
+      ],
+    });
+
+    await expect(
+      createOpenCodeProposalSessionFacade(context).originModel("ses_1"),
+    ).resolves.toEqual(MODEL);
+    expect(calls).toEqual([
+      { method: "get", input: { sessionID: "ses_1" } },
+      { method: "context", input: { sessionID: "ses_1" } },
+    ]);
+  });
+
+  test("returns null when the session has no model and no assistant message has one", async () => {
+    const { context } = fakeContext({
+      messages: [
+        { type: "user", text: "task" },
+        { type: "assistant", content: [] },
+      ],
+    });
+
+    await expect(
+      createOpenCodeProposalSessionFacade(context).originModel("ses_1"),
+    ).resolves.toBeNull();
+  });
+
+  test("returns null when the session has no model and no messages", async () => {
     const { context } = fakeContext();
 
     await expect(
