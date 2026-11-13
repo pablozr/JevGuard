@@ -1,7 +1,7 @@
 import { MAX_AGENT_DELIVERIES_PER_SESSION } from "@jevguard/core";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { createDeliveryLedger } from "../src/remediation/deliveries";
-import { createSessionIdleWaiter } from "../src/remediation/idle-waiter";
+import { createDeliveryLedger } from "../../src/runtime/remediation/deliveries";
+import { createSessionIdleWaiter } from "../../src/runtime/remediation/idle-waiter";
 
 describe("delivery ledger", () => {
   test("reserves up to the session limit and refuses the next one", () => {

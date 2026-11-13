@@ -8,7 +8,7 @@ import {
   type TurnReviewOutcome,
 } from "@jevguard/core";
 import { parsePolicyConfig } from "@jevguard/node-infra";
-import type { TurnDelivery } from "@jevguard/opencode-adapter";
+import type { TurnDelivery } from "../index";
 import { presentReview } from "./present";
 import { proposeForTurn } from "./remediation/propose";
 import { deliverOnce } from "./remediation/remediate";

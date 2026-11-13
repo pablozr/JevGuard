@@ -1,9 +1,5 @@
 import type { DeliveryFindings, RemediationProposalRequest, Turn } from "@jevguard/core";
-import type {
-  OperationalLogSink,
-  OriginSessionPromptFacade,
-  TurnDelivery,
-} from "@jevguard/opencode-adapter";
+import type { OperationalLogSink, OriginSessionPromptFacade, TurnDelivery } from "../../index";
 import type { ProposalDependencies } from "./propose";
 
 /**

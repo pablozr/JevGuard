@@ -1,5 +1,5 @@
 import type { JevEvaluationPort, PolicyLoader } from "@jevguard/core";
-import type { OperationalLogSink, ReviewPresenter, TurnTracker } from "@jevguard/opencode-adapter";
+import type { OperationalLogSink, ReviewPresenter, TurnTracker } from "../index";
 import type { ProposalDependencies } from "./remediation/propose";
 import type { RemediateSetup, SessionIdleWaiter } from "./remediation/types";
 

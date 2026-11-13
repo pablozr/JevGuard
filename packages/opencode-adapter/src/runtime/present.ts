@@ -1,5 +1,5 @@
 import type { TurnReview } from "@jevguard/core";
-import type { ReviewPresenter } from "@jevguard/opencode-adapter";
+import type { ReviewPresenter } from "../index";
 
 /**
  * Delivers one aggregate turn review without letting a presentation failure reject

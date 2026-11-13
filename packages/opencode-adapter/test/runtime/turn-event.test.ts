@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { parseTurnEvent, TURN_EVENT_TYPES } from "../src/turn-event";
+import { parseTurnEvent, TURN_EVENT_TYPES } from "../../src/runtime/turn-event";
 
 describe("parseTurnEvent", () => {
   test("reads started and succeeded executions from the data payload", () => {

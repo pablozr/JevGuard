@@ -1,5 +1,5 @@
 import { decideAgentDelivery, formatAgentDelivery } from "@jevguard/core";
-import type { OperationalEvent } from "@jevguard/opencode-adapter";
+import type { OperationalEvent } from "../../index";
 import { contain, proposeForTurn, proposeStrategy } from "./propose";
 import type { RemediateDependencies, ReviewedTurn } from "./types";
 

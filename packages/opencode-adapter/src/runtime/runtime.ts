@@ -1,5 +1,5 @@
 import { unavailableReview } from "@jevguard/core";
-import type { OperationalEvent, OperationalLogSink } from "@jevguard/opencode-adapter";
+import type { OperationalEvent, OperationalLogSink } from "../index";
 import { presentReview } from "./present";
 import { createSessionIdleWaiter } from "./remediation/idle-waiter";
 import { reviewAttributedTurn } from "./review";

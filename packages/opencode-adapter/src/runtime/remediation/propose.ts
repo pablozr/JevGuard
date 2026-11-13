@@ -12,7 +12,7 @@ import type {
   ProposalSessionNavigator,
   RemediationFailureLogSink,
   RemediationNotifier,
-} from "@jevguard/opencode-adapter";
+} from "../../index";
 import type { ChildExecutionWatcher } from "./child-executions";
 
 const PROPOSAL_SESSION_TITLE = "JevGuard remediation proposal";

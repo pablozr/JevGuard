@@ -2,9 +2,7 @@ import {
   createUserRemediationSettings,
   type RemediationUserSettingsResult,
 } from "@jevguard/node-infra";
-
-/** The user's OpenCode file, `<config>/jevguard/opencode.yaml`; it has no `model` key. */
-export const OPENCODE_CONFIG_FILE_NAME = "opencode.yaml";
+import { OPENCODE_CONFIG_FILE_NAME } from "../../opencode-config/constants";
 
 /**
  * Reads the user's remediation opt-in for one project from the process environment. Only

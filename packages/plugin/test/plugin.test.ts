@@ -53,13 +53,17 @@ import type { Plugin } from "@opencode/plugin";
 import { describe, expect, test, vi } from "vitest";
 import plugin from "../src/index";
 import { createPluginDependencies, startPlugin } from "../src/plugin";
-import { createChildExecutionWatcher } from "../src/remediation/child-executions";
-import { createDeliveryLedger } from "../src/remediation/deliveries";
-import { DELIVERY_IDLE_WAIT_MS } from "../src/remediation/remediate";
-import type { DeliveryLedger } from "../src/remediation/types";
-import { type ProposalDependencies, proposeForTurn } from "../src/remediation/propose";
-import { createPluginRuntime } from "../src/runtime";
-import type { PluginRuntime, PluginRuntimeDependencies } from "../src/types";
+import {
+  createChildExecutionWatcher,
+  createDeliveryLedger,
+  createPluginRuntime,
+  DELIVERY_IDLE_WAIT_MS,
+  type DeliveryLedger,
+  type PluginRuntime,
+  type PluginRuntimeDependencies,
+  type ProposalDependencies,
+  proposeForTurn,
+} from "@jevguard/opencode-adapter/runtime";
 import {
   assistantMessage,
   type ContextMessage,

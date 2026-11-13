@@ -1,5 +1,6 @@
 import { createRemediationProposalStore } from "@jevguard/core";
 import {
+  createDefaultJevPort,
   createLocalReviewHistory,
   createMirroredReviewLogSink,
   createNodePolicyFileSystem,
@@ -26,18 +27,21 @@ import {
   registerProposalRetryGuard,
   writtenPaths,
 } from "@jevguard/opencode-adapter";
+import {
+  createChildExecutionWatcher,
+  createDeliveryLedger,
+  createOpenCodeRemediationSettings,
+  createPluginRuntime,
+  PROPOSAL_TIMEOUT_MS,
+  type PluginRuntime,
+  type PluginRuntimeDependencies,
+  type RemediateSetup,
+  TURN_EVENT_TYPES,
+} from "@jevguard/opencode-adapter/runtime";
 import type { Plugin } from "@opencode/plugin";
-import { createDefaultJevPort } from "./jev-port";
-import { createChildExecutionWatcher } from "./remediation/child-executions";
-import { createDeliveryLedger } from "./remediation/deliveries";
-import { PROPOSAL_TIMEOUT_MS } from "./remediation/propose";
-import type { RemediateSetup } from "./remediation/types";
-import { createOpenCodeRemediationSettings } from "./remediation/user-settings";
-import { createPluginRuntime } from "./runtime";
+
 import { readBundledSkills, registerSkills } from "./skills/register-skills";
 import { resolveInstalledSkillDirectories } from "./skills/skill-directory";
-import { TURN_EVENT_TYPES } from "./turn-event";
-import type { PluginRuntime, PluginRuntimeDependencies } from "./types";
 
 const PLUGIN_ID = "jevguard";
 const SHUTDOWN_DRAIN_MS = 2_000;
