@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 
 const SOURCE_ROOT = join(import.meta.dirname, "..", "src");
-const FORBIDDEN_SPECIFIER = /^(@jevguard\/|node:|yaml$|@opencode-ai\/|@typesafe-ai\/|bun($|:))/;
+const FORBIDDEN_SPECIFIER = /^(@jevguard\/|node:|yaml$|@opencode(-ai)?\/|@typesafe-ai\/|bun($|:))/;
 const IMPORT_SPECIFIER = /\bfrom\s+["']([^"']+)["']|\bimport\s*\(\s*["']([^"']+)["']\s*\)/g;
 
 function sourceFiles(directory: string): readonly string[] {
@@ -36,5 +36,10 @@ describe("core package boundary", () => {
 
     expect(files.length).toBeGreaterThan(0);
     expect(violations).toEqual([]);
+  });
+
+  test("forbids the real OpenCode SDK specifier", () => {
+    expect(FORBIDDEN_SPECIFIER.test("@opencode/plugin")).toBe(true);
+    expect(FORBIDDEN_SPECIFIER.test("@opencode-ai/sdk")).toBe(true);
   });
 });

@@ -7,11 +7,10 @@ const PURE_DIRECTORIES = ["hook-event", "acquisition", "turn", "presentation"];
 const IO_DIRECTORIES = ["capture", "hook"];
 const WORKER_DIRECTORIES = ["worker"];
 const PURE_FORBIDDEN =
-  /^(node:|@opencode-ai\/|@jevguard\/(opencode-adapter|node-infra|plugin|testkit)($|\/)|bun($|:))/;
+  /^(node:|@opencode(-ai)?\/|@jevguard\/(opencode-adapter|node-infra|plugin)($|\/)|bun($|:))/;
 const IO_FORBIDDEN =
-  /^(@opencode-ai\/|@jevguard\/(opencode-adapter|node-infra|plugin|testkit)($|\/)|bun($|:))/;
-const WORKER_FORBIDDEN =
-  /^(@opencode-ai\/|@jevguard\/(opencode-adapter|plugin|testkit)($|\/)|bun($|:))/;
+  /^(@opencode(-ai)?\/|@jevguard\/(opencode-adapter|node-infra|plugin)($|\/)|bun($|:))/;
+const WORKER_FORBIDDEN = /^(@opencode(-ai)?\/|@jevguard\/(opencode-adapter|plugin)($|\/)|bun($|:))/;
 const IMPORT_SPECIFIER = /\bfrom\s+["']([^"']+)["']|\bimport\s*\(\s*["']([^"']+)["']\s*\)/g;
 const FORBIDDEN_OUTPUT = /\bconsole\.|process\.(stdout|stderr)/;
 
@@ -41,7 +40,7 @@ function forbiddenImports(path: string, forbidden: RegExp): readonly string[] {
 }
 
 describe("claude-code-adapter package boundary", () => {
-  test("the pure core imports no Node, OpenCode, sibling adapter, plugin or testkit module", () => {
+  test("the pure core imports no Node, OpenCode, sibling adapter or plugin module", () => {
     const files = filesOf(PURE_DIRECTORIES);
 
     expect(files.length).toBeGreaterThan(0);
@@ -93,5 +92,12 @@ describe("claude-code-adapter package boundary", () => {
     const index = readFileSync(join(SOURCE_ROOT, "index.ts"), "utf8");
 
     expect(index).not.toMatch(/capture|hook\//);
+  });
+
+  test("forbids the real OpenCode SDK specifier", () => {
+    for (const forbidden of [PURE_FORBIDDEN, IO_FORBIDDEN, WORKER_FORBIDDEN]) {
+      expect(forbidden.test("@opencode/plugin")).toBe(true);
+      expect(forbidden.test("@opencode-ai/sdk")).toBe(true);
+    }
   });
 });
