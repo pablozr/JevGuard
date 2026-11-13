@@ -1,6 +1,6 @@
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import type { ConfirmationPrompt, ConfirmationResult } from "@jevguard/node-infra";
 import {
@@ -16,7 +16,7 @@ import type { ConfigFileSystem, InstallDependencies, InstallTarget } from "../sr
 
 const CWD = join("C:", "repo");
 const HOME = join("C:", "home");
-const XDG = join("D:", "xdg");
+const XDG = resolve("/xdg");
 
 const GLOBAL_PATH = join(HOME, ".config", "opencode", "opencode.json");
 const XDG_PATH = join(XDG, "opencode", "opencode.json");

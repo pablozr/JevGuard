@@ -1,11 +1,11 @@
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { describe, expect, test } from "vitest";
 import { inspectInstall, JEVGUARD_PLUGIN_ENTRY } from "../src/index";
 import type { InspectInstallDependencies, InstallTarget } from "../src/index";
 
 const CWD = join("C:", "repo");
 const HOME = join("C:", "home");
-const XDG = join("D:", "xdg");
+const XDG = resolve("/xdg");
 
 const GLOBAL_PATH = join(HOME, ".config", "opencode", "opencode.json");
 const XDG_PATH = join(XDG, "opencode", "opencode.json");

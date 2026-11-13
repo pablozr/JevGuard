@@ -1,6 +1,6 @@
 import { mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { describe, expect, test } from "vitest";
 import type {
   DeliveryStatus,
@@ -63,8 +63,8 @@ describe("local review history path", () => {
   });
 
   test("uses an absolute XDG_DATA_HOME", () => {
-    expect(resolveHistoryFilePath(context({ xdg: "D:/data" }))).toBe(
-      join("D:/data", "jevguard", "reviews.jsonl"),
+    expect(resolveHistoryFilePath(context({ xdg: resolve("/data") }))).toBe(
+      join(resolve("/data"), "jevguard", "reviews.jsonl"),
     );
   });
 
