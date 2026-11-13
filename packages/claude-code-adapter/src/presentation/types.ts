@@ -127,3 +127,8 @@ export interface WatchTick {
   readonly status: string | null;
   readonly stop: boolean;
 }
+
+/** The structural slice of the user-settings rules Claude Code supplies. */
+export interface ClaudeSettingsRules {
+  readonly isModel: (value: string) => boolean;
+}

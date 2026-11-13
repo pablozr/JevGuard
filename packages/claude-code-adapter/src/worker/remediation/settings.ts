@@ -1,21 +1,12 @@
 import {
   loadRemediationUserSettings,
-  type RemediationUserSettingsRules,
   resolveRemediationUserSettings,
   type UserConfigEnvironment,
   type UserConfigLoadInput,
   userConfigFileOf as userConfigFileFor,
 } from "@jevguard/node-infra";
-import { CLAUDE_MODEL_PATTERN } from "../../presentation";
+import { CLAUDE_CONFIG_FILE_NAME, CLAUDE_SETTINGS_RULES } from "../../presentation";
 import type { ClaudeRemediationSettingsResult } from "./types";
-
-/** The user's Claude Code file under `jevguard/`. */
-export const CLAUDE_CONFIG_FILE_NAME = "claude-code.yaml";
-
-/** Claude Code accepts a `model` key: a Claude alias or id, never translated. */
-export const CLAUDE_SETTINGS_RULES: RemediationUserSettingsRules = {
-  isModel: (value) => CLAUDE_MODEL_PATTERN.test(value),
-};
 
 /** Validates the user's Claude Code remediation file; see `resolveRemediationUserSettings`. */
 export function resolveClaudeRemediationSettings(value: unknown): ClaudeRemediationSettingsResult {

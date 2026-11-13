@@ -1,5 +1,5 @@
 import { createUserRemediationSettings as createUserSettings } from "@jevguard/node-infra";
-import { CLAUDE_CONFIG_FILE_NAME, CLAUDE_SETTINGS_RULES } from "./settings";
+import { CLAUDE_CONFIG_FILE_NAME, CLAUDE_SETTINGS_RULES } from "../../presentation";
 import type { ClaudeRemediationSettingsResult } from "./types";
 
 /**

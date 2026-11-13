@@ -6,6 +6,7 @@ export {
   userBaseOf,
 } from "./feed-path";
 export { toFeedRecorded, toFeedStarted } from "./feed-record";
+export { CLAUDE_CONFIG_FILE_NAME, CLAUDE_SETTINGS_RULES } from "./user-settings";
 export { hasKeys, isRecord, type JsonRecord } from "./json-record";
 export { parseReviewFeed } from "./parse-feed";
 export {
@@ -41,6 +42,7 @@ export {
 } from "./proposal-path";
 export { sessionTurnPrefixOf, TURN_ID_PREFIX } from "./turn-id";
 export type {
+  ClaudeSettingsRules,
   FeedEnvironment,
   FeedWatch,
   ProposalDelivery,
