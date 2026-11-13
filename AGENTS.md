@@ -17,11 +17,11 @@ repository. The V0.1 specification is normative.
 packages/
 ├── claude-code-adapter/
 ├── claude-code-plugin/
+├── cli/
 ├── core/
 ├── node-infra/
 ├── opencode-adapter/
-├── plugin/
-└── testkit/
+└── plugin/
 ```
 
 Dependencies only point inward:
@@ -31,7 +31,9 @@ plugin → opencode-adapter → node-infra → core
 plugin ────────────────────→ node-infra
 claude-code-plugin → claude-code-adapter → node-infra → core
 claude-code-adapter ─────────→ node-infra → core
-testkit ──────────────────────────────→ core
+cli → opencode-adapter/cli ──→ node-infra → core
+cli → claude-code-plugin/cli → node-infra → core
+cli ─────────────────────────→ node-infra → core
 ```
 
 - `core` owns domain types, rules/config validation, scope filtering, evidence
@@ -42,8 +44,10 @@ testkit ────────────────────────
   the OS credential store, the `TYPESAFE_API_KEY` override and `jevguard login`
   primitives, the TypeSafe Jev transport, fixed-path `.jev` policy loading and strict
   YAML config parsing, the review-log allowlist projection, and the bounded local
-  review history. It never imports a host SDK or TUI API; host adapters never depend
-  on each other.
+  review history. It also owns the host-neutral CLI ports (`HostCliExtension`, the
+  process runner, the confirmation prompt, the text file port) and the user-level
+  `delivery: agent` writer. It never imports a host SDK or TUI API; host adapters never
+  depend on each other.
 - `opencode-adapter` owns OpenCode execution-event handling, task/diff attribution,
   OpenCode-specific infrastructure, structured logging, the proposal child session,
   the origin-session prompt facade for the opt-in delivery, and the safe remediation notifier
@@ -74,14 +78,25 @@ testkit ────────────────────────
   `jevguard-rules` and `jev-init` skills through `skill.transform`; there is no command
   hook and no apply path. In `observe` (the default) a `FAIL` prepares one strategy-only
   proposal in a deny-all child session. Only when the user's own `opencode.yaml` opts
-  into `delivery: agent` does `plugin/src/remediation` also queue one visible message
+  into `delivery: agent` does `opencode-adapter/src/runtime/remediation` also queue one visible message
   (the failing findings and the strategy) into the source session per reviewed unit,
   never while the session is busy and never for a turn that came from a delivery. The
-  repository can only veto it.
-- `testkit` provides fixtures and fakes; never make production packages depend on it.
+  repository can only veto it. The event runtime (turn queue, review, presentation and
+  remediation) lives in `opencode-adapter/src/runtime`, exported as
+  `@jevguard/opencode-adapter/runtime`; `plugin` only wires it. The package ships no
+  `bin`.
+- `cli` is the host-neutral command line (`@pablozrrrr/jevguard-cli`, bin `jevguard`,
+  runs on Node): `login`, `report`, `feedback`, `rules check`, `doctor`, `install` and
+  `setup`. Host-specific behavior (detect, install, doctor checks, the user config file)
+  lives behind `HostCliExtension`: `opencode-adapter/src/cli` and
+  `claude-code-plugin/src/cli` each export one extension, and `cli` imports them only
+  through their `./cli` subpaths. `cli` never imports a host SDK, `plugin`,
+  `claude-code-adapter`, or the review hot path; `setup` plans first, writes only after a
+  yes, stores a missing key through the `login` prompt, offers `delivery: agent`
+  (default No) and never creates `.jev/` without `--init`.
 
-The credential CLI and OS credential-store integration are `node-infra`
-concerns. Core code receives a credential through an explicit port and never reads
+The credential primitives and OS credential-store integration are `node-infra`
+concerns; the `jevguard login` command is dispatched by `cli`. Core code receives a credential through an explicit port and never reads
 the environment or a system credential store directly.
 
 Host adapters must provide complete, attributed turn evidence. Do not substitute

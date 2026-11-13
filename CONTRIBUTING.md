@@ -34,8 +34,8 @@ pnpm typecheck
 pnpm test
 ```
 
-`pnpm check` runs the same sequence in one command. The CLI (`jevguard login`) and
-the OpenCode plugin run under the Bun runtime; Bun is not the workspace package
+`pnpm check` runs the same sequence in one command. The CLI (`packages/cli`) runs on Node;
+the OpenCode plugin runs under the Bun runtime. Bun is not the workspace package
 manager.
 
 ## Architecture and debugging guide
@@ -48,7 +48,6 @@ This is a working map for locating and fixing behavior. The local `SPEC.md` and
 ```text
 plugin → opencode-adapter → node-infra → core
 plugin ────────────────────→ node-infra
-testkit ──────────────────────────────→ core
 ```
 
 - `core` is pure domain logic: rules, scope, evidence policy, gates, Jev ports,
@@ -62,7 +61,6 @@ testkit ────────────────────────
   attribution, logging sinks, toasts, and the proposal child session.
 - `plugin` is composition only: it constructs dependencies and exposes the OpenCode
   entrypoint. No policy logic belongs here.
-- `testkit` provides fixtures and fakes; production packages must never import it.
 
 When a bug crosses a boundary, fix it in the layer that owns that concern. A
 presentation symptom with an attribution cause belongs in `opencode-adapter`, not
@@ -212,9 +210,11 @@ server idle evaluation — there is no separate verifier and no automatic apply.
   - `packages/core/src/ports/types.ts` — the Jev port contract.
   - `packages/node-infra/src/credentials/provider.ts` — override/store precedence.
   - `.../credentials/environment.ts`, `.../credentials/keyring-store.ts` — stores.
-  - `packages/plugin/src/cli/` — `jevguard login` dispatch and messages.
+  - `packages/cli/src/` — command dispatch (`login`, `report`, `feedback`, `rules check`,
+    `doctor`, `install`, `setup`); host-specific install and doctor checks live in each
+    host's `cli/` extension.
 - Presentation
-  - `packages/plugin/src/present.ts` — non-throwing delivery.
+  - `packages/opencode-adapter/src/runtime/present.ts` — non-throwing delivery.
   - `packages/core/src/review/unavailable.ts` — synthetic pre-evaluation `UNAVAILABLE`.
   - `packages/opencode-adapter/src/presentation/opencode.ts` — SDK log/toast sinks.
   - `.../presentation/display.ts`, `.../presentation/log.ts`, `.../presentation/toast.ts`
@@ -298,7 +298,7 @@ pnpm test packages/plugin
 
 Cover threshold boundaries exactly and add a regression test for every corrected
 defect. Contract-test attribution and presentation behavior in the adapter with
-fakes from `testkit`; unit-test pure parsing, scope, evidence safety, gates, and
+fakes; unit-test pure parsing, scope, evidence safety, gates, and
 orchestration in `core`.
 
 ## Contribution expectations

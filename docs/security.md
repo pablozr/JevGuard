@@ -242,23 +242,37 @@ legacy `plugin` key. It only edits a `plugins` array of package strings or
 `{ "package": "..." }` objects; for any other shape the installer leaves the file
 unchanged and prints the manual snippet instead.
 
+## Setup and host installation
+
+`jevguard setup` plans first and writes only after a yes. It prints what it would do
+(install the plugin per detected host, optionally enable `delivery: agent` in your
+user-level host file, optionally create a starter `.jev/rules.md`) and, without `--yes`
+and without a terminal, changes nothing. `--yes` alone never creates `.jev/`; that needs
+`--init`. `delivery: agent` is asked interactively (default No) or given with
+`--agent-delivery`, and written only into the user config home, never into the repository, and a file that does not validate is left
+untouched. For Claude Code, the host steps run `claude plugin marketplace add` and
+`claude plugin install` with fixed arguments after an interactive yes; no user-provided
+text reaches a process. When no key is stored, setup runs the same masked prompt as
+`jevguard login`; the key is never an argument, a log line or an output, and without a
+terminal setup skips the prompt and says to run `jevguard login`.
+
 ## Credentials
 
 For normal local use, run the login command with the published package:
 
 ```sh
-bunx --package @pablozrrrr/jevguard jevguard login
+npx @pablozrrrr/jevguard-cli login
 ```
 
-Or install it globally so `jevguard` is on `PATH`:
+Or install the CLI globally so `jevguard` is on `PATH`:
 
 ```sh
-bun install --global @pablozrrrr/jevguard
+npm install --global @pablozrrrr/jevguard-cli
 jevguard login
 ```
 
-Adding the plugin to `opencode.json` does not put `jevguard` on `PATH`. Install the
-package globally — or run it through `bunx` — to run `jevguard login`.
+Adding a plugin to a host does not put `jevguard` on `PATH`. Install the CLI package
+globally, or run it through `npx`, to run `jevguard login`.
 
 The CLI reads the key using a masked terminal prompt and stores it in the native
 operating-system credential store:

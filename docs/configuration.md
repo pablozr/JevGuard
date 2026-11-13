@@ -386,6 +386,27 @@ Two CLI commands work from the terminal, outside any agent turn. Both resolve th
 project root as the first ancestor of the current directory that contains `.git` (a
 file or a directory), or the current directory when none does.
 
+### `jevguard setup [--host <id>] [--project] [--init] [--yes] [--agent-delivery]`
+
+Sets everything up in one command, in this order: the Jev API key, the plugin on each
+supported host, `delivery: agent`, and an optional starter policy. It prints the plan and
+asks before each change. `--host opencode` or `--host claude-code` narrows the hosts and
+`--project` installs at project scope.
+
+- API key: if none is found (OS credential store or the `TYPESAFE_API_KEY` override),
+  setup runs the same hidden prompt as `jevguard login`. Without a terminal it cannot
+  prompt: the other steps still run, setup exits 1 and tells you to run `jevguard login`
+  in a terminal. The key is never printed.
+- `delivery: agent`: asked per host ("Let Claude Code deliver JevGuard findings and the
+  fix strategy to the agent automatically ..."), default No, written only to your
+  user-level host file under `jevguard/` and never to the repository. `--agent-delivery`
+  answers yes without asking.
+- `.jev/rules.md`: a starter file is offered interactively and never overwrites an
+  existing one. `--init` creates it without asking.
+- `--yes` applies the plan without asking, but never turns on `delivery: agent` or
+  creates `.jev/` unless `--agent-delivery` or `--init` is also given. Without `--yes`
+  and without a terminal, setup prints the plan, changes nothing and exits 1.
+
 ### `jevguard doctor [--json]`
 
 A local diagnosis: no network, no Jev transport, no writes. Checks, in order:

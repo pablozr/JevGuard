@@ -24,16 +24,22 @@ your local deterministic gate to return `PASS`, `WARN`, or `FAIL`.
 ## Quick start
 
 ```sh
-# 1. Store your Jev key in the OS credential store (shared by both hosts)
-bunx --package @pablozrrrr/jevguard jevguard login
+# 1. Install the plugin on every supported host found on this machine
+#    (prints the plan first; --yes applies it without asking)
+npx @pablozrrrr/jevguard-cli setup
 
-# 2a. OpenCode: register the plugin in opencode.json
-bunx --package @pablozrrrr/jevguard jevguard install
-
-# 2b. Claude Code: install from the marketplace
-claude plugin marketplace add pablozr/JevGuard
-claude plugin install jevguard@jevguard
+# Only the API key, if you skip setup (stored in the OS credential store, shared by both hosts)
+npx @pablozrrrr/jevguard-cli login
 ```
+
+`setup` stores your API key (hidden prompt), installs the plugin on each supported host and
+asks whether to enable `delivery: agent` (default No) and to create a starter
+`.jev/rules.md`. Flags: `--host <opencode|claude-code>`, `--project`, `--init`,
+`--agent-delivery` and `--yes`; `--yes` never enables `delivery: agent` or creates `.jev/`
+by itself. Without a terminal and without `--yes` it only prints the plan and changes
+nothing. The host-specific steps are also available on their own:
+`npx @pablozrrrr/jevguard-cli install --host claude-code` runs
+`claude plugin marketplace add` and `claude plugin install` for you.
 
 Then add your rules to `.jev/rules.md` (in OpenCode, the bundled `jev-init` skill can
 bootstrap them) and keep working with your agent as usual. Details are in
@@ -267,14 +273,14 @@ or secret is logged.
 Installing `@pablozrrrr/jevguard` does **not** register it with OpenCode by itself.
 OpenCode `2.2.x` only loads plugins listed in `plugins: [...]` in `opencode.json`.
 
-The installer is run from the installed CLI:
+The installer is run from the JevGuard CLI (`@pablozrrrr/jevguard-cli`, which runs on Node):
 
 ```sh
 # global config: ~/.config/opencode/opencode.json
-jevguard install
+npx @pablozrrrr/jevguard-cli install --host opencode
 
 # project config: ./opencode.json
-jevguard install --project
+npx @pablozrrrr/jevguard-cli install --host opencode --project
 ```
 
 The installer asks for confirmation, edits only the `plugins` array, and is
@@ -282,12 +288,9 @@ idempotent. It never writes the legacy `plugin` key, but an entry already there 
 as installed. It only edits a `plugins` array of package strings or
 `{ "package": "..." }` objects; any other shape is left unchanged and the installer
 prints the manual snippet instead. `jevguard doctor` also checks that
-`opencode --version` is in the supported range `>=2.2.2 <2.3`. If `jevguard` is not on
-`PATH`, run it through `bunx`:
-
-```sh
-bunx --package @pablozrrrr/jevguard jevguard install
-```
+`opencode --version` is in the supported range `>=2.2.2 <2.3`. The plugin package no
+longer ships a `jevguard` binary; every command below runs through the CLI package, as
+`npx @pablozrrrr/jevguard-cli <command>` or, once installed globally, as `jevguard <command>`.
 
 The manual alternative is one entry in `opencode.json`:
 
@@ -409,7 +412,7 @@ Loading the plugin does not expose the `jevguard` binary on `PATH`. Run the logi
 command without a global install:
 
 ```sh
-bunx --package @pablozrrrr/jevguard jevguard login
+npx @pablozrrrr/jevguard-cli login
 ```
 
 Or install the package globally so `jevguard` is on `PATH`:
@@ -471,7 +474,7 @@ Loading the plugin does not put `jevguard` on `PATH`. If it is not installed
 globally, run the one-line login instead:
 
 ```sh
-bunx --package @pablozrrrr/jevguard jevguard login
+npx @pablozrrrr/jevguard-cli login
 ```
 
 JevGuard stores the key in your operating system's credential store instead of a
@@ -685,13 +688,11 @@ packages/
 ├── claude-code-plugin/   Claude Code plugin composition and artifact
 ├── node-infra/           shared Node infra: credentials, Jev transport, policy, history
 ├── opencode-adapter/     OpenCode attribution and presentation
-├── plugin/               OpenCode composition root and CLI
-└── testkit/              fixtures and contract helpers
+└── plugin/               OpenCode composition root and CLI
 
 plugin → opencode-adapter → node-infra → core
 plugin ────────────────────→ node-infra
 claude-code-plugin → claude-code-adapter → node-infra → core
-testkit ──────────────────────────────→ core
 ```
 
 ## Status
