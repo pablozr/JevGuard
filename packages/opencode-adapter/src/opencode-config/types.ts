@@ -1,3 +1,5 @@
+import type { ConfirmationPrompt } from "@jevguard/node-infra";
+
 export type InstallTarget = "global" | "project";
 
 export type InstallFailureReason =
@@ -34,19 +36,6 @@ export type InstallOutcome =
       readonly path: string;
       readonly reason: InstallFailureReason;
     };
-
-export type ConfirmationResult =
-  | { readonly status: "CONFIRMED" }
-  | { readonly status: "DECLINED" }
-  | { readonly status: "FAILED"; readonly reason: "NOT_A_TTY" };
-
-/**
- * Interactive confirmation port. Implementations default to declining when they
- * cannot ask, so a missing terminal never turns into a write.
- */
-export interface ConfirmationPrompt {
-  confirm(message: string): Promise<ConfirmationResult>;
-}
 
 /**
  * Read/write port over the target `opencode.json`. Absence is `null` rather than a

@@ -1,0 +1,1 @@
+export { createOpenCodeCliExtension } from "./extension";

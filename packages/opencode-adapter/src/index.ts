@@ -1,3 +1,4 @@
+export { OPENCODE_CONFIG_FILE_NAME } from "./opencode-config/constants";
 export type {
   AttributionContext,
   AttributionFailureReason,
@@ -33,8 +34,6 @@ export {
 } from "./attribution";
 export type {
   ConfigFileSystem,
-  ConfirmationPrompt,
-  ConfirmationResult,
   InspectInstallDependencies,
   InstallDependencies,
   InstallFailureReason,
@@ -49,14 +48,13 @@ export type {
 export {
   addPluginEntry,
   checkOpenCodeVersion,
-  createConfirmationPrompt,
+  createConfigFileSystem,
   createDefaultConfigDocument,
   createNodeConfigFileSystem,
   inspectInstall,
   install,
   JEVGUARD_PLUGIN_ENTRY,
   OPENCODE_ENGINE_RANGE,
-  readInstalledOpenCodeVersion,
   resolveConfigPath,
 } from "./opencode-config";
 export type {

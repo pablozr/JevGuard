@@ -6,7 +6,9 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./attribution": "./src/attribution/index.ts"
+    "./attribution": "./src/attribution/index.ts",
+    "./cli": "./src/cli/index.ts",
+    "./runtime": "./src/runtime/index.ts"
   },
   "scripts": {
     "format": "biome format --write .",

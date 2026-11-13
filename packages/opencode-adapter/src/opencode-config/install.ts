@@ -1,9 +1,9 @@
+import type { ConfirmationPrompt } from "@jevguard/node-infra";
 import { addPluginEntry, JEVGUARD_PLUGIN_ENTRY } from "./entry";
 import { resolveConfigPath } from "./paths";
 import { readConfigDocument } from "./read-document";
 import type {
   ConfigFileSystem,
-  ConfirmationPrompt,
   InstallDependencies,
   InstallFailureReason,
   InstallOutcome,

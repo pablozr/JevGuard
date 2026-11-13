@@ -2,23 +2,17 @@ import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
+import type { ConfirmationPrompt, ConfirmationResult } from "@jevguard/node-infra";
 import {
   addPluginEntry,
   checkOpenCodeVersion,
-  createConfirmationPrompt,
   createNodeConfigFileSystem,
   install,
   JEVGUARD_PLUGIN_ENTRY,
   OPENCODE_ENGINE_RANGE,
   resolveConfigPath,
 } from "../src/index";
-import type {
-  ConfigFileSystem,
-  ConfirmationPrompt,
-  ConfirmationResult,
-  InstallDependencies,
-  InstallTarget,
-} from "../src/index";
+import type { ConfigFileSystem, InstallDependencies, InstallTarget } from "../src/index";
 
 const CWD = join("C:", "repo");
 const HOME = join("C:", "home");
@@ -480,23 +474,5 @@ describe("node config file system", () => {
 
     expect(outcome.path).toBe(expectedPath);
     expect(await readFile(expectedPath, "utf8")).toBe(DEFAULT_DOCUMENT);
-  });
-});
-
-describe("node confirmation prompt", () => {
-  test("refuses off a TTY", async () => {
-    const original = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
-
-    Object.defineProperty(process.stdin, "isTTY", { value: false, configurable: true });
-
-    try {
-      const result = await createConfirmationPrompt().confirm("Proceed?");
-
-      expect(result).toEqual({ status: "FAILED", reason: "NOT_A_TTY" });
-    } finally {
-      if (original !== undefined) {
-        Object.defineProperty(process.stdin, "isTTY", original);
-      }
-    }
   });
 });
