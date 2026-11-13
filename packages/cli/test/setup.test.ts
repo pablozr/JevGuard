@@ -13,6 +13,7 @@ import type {
 } from "@jevguard/node-infra";
 import { policyFilePaths } from "@jevguard/node-infra";
 import { describe, expect, test } from "vitest";
+import { normalize } from "node:path";
 import { parseSetupArguments } from "../src/setup/arguments";
 import { runSetup } from "../src/setup/run-setup";
 import { STARTER_RULES } from "../src/setup/scaffold";
@@ -408,7 +409,7 @@ describe("runSetup agent delivery step", () => {
     await runSetup(ports, REQUEST);
 
     expect(questions).toContain(
-      `Let OpenCode deliver JevGuard findings and the fix strategy to the agent automatically (delivery: agent, written to ${OPENCODE_CONFIG})?`,
+      `Let OpenCode deliver JevGuard findings and the fix strategy to the agent automatically (delivery: agent, written to ${normalize(OPENCODE_CONFIG)})?`,
     );
     expect(memory.store.get(OPENCODE_CONFIG)).toContain("delivery: agent");
   });

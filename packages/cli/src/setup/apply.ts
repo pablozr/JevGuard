@@ -7,7 +7,7 @@ import {
 } from "@jevguard/node-infra";
 import { describeLoginFailure, LOGIN_ABORTED_MESSAGE, LOGIN_SAVED_MESSAGE } from "../messages";
 import { agentDeliveryInputOf } from "./agent-delivery-input";
-import { CREDENTIAL_LOGIN_HINT, describeStep } from "./messages";
+import { CREDENTIAL_LOGIN_HINT, describeStep, displayPath } from "./messages";
 import { scaffoldRules } from "./scaffold";
 import type { AgentDeliveryStep, InstallStep, SetupPorts, SetupStep } from "./types";
 
@@ -52,7 +52,7 @@ function describeDeliveryResult(step: AgentDeliveryStep, result: AgentDeliveryRe
   const name = step.extension.displayName;
 
   return result.status === "ENABLED" || result.status === "ALREADY_ENABLED"
-    ? `${name}: \`delivery: agent\` is enabled in ${result.path}.`
+    ? `${name}: \`delivery: agent\` is enabled in ${displayPath(result.path)}.`
     : `${name}: could not enable \`delivery: agent\` (${result.status}).`;
 }
 

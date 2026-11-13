@@ -1,3 +1,4 @@
+import { normalize } from "node:path";
 import type { CredentialSource } from "@jevguard/core";
 import type {
   AgentDeliveryInspection,
@@ -53,13 +54,13 @@ function describeDelivery(
 
   switch (inspection.status) {
     case "WOULD_ENABLE":
-      return `${name}: enable \`delivery: agent\` in ${inspection.path}`;
+      return `${name}: enable \`delivery: agent\` in ${displayPath(inspection.path)}`;
     case "ALREADY_ENABLED":
       return `${name}: \`delivery: agent\` is already enabled`;
     case "INVALID_EXISTING":
-      return `${name}: ${inspection.path} is not valid, left untouched`;
+      return `${name}: ${displayPath(inspection.path)} is not valid, left untouched`;
     case "INSIDE_PROJECT":
-      return `${name}: ${inspection.path} lies inside the project, left untouched`;
+      return `${name}: ${displayPath(inspection.path)} lies inside the project, left untouched`;
     case "NO_CONFIG_HOME":
       return `${name}: no user config home was found, \`delivery: agent\` not enabled`;
   }
@@ -120,7 +121,8 @@ export function describeStep(step: SetupStep): string {
 /** The y/N question asked for a step that is offered rather than requested. */
 export function questionOf(step: SetupStep): string {
   if (step.kind === "AGENT_DELIVERY") {
-    const target = step.inspection.path === null ? "your user config" : step.inspection.path;
+    const target =
+      step.inspection.path === null ? "your user config" : displayPath(step.inspection.path);
 
     return `Let ${step.extension.displayName} deliver JevGuard findings and the fix strategy to the agent automatically (delivery: agent, written to ${target})?`;
   }
@@ -130,4 +132,9 @@ export function questionOf(step: SetupStep): string {
 
 export function describePlan(plan: SetupPlan): readonly string[] {
   return ["JevGuard setup plan", ...plan.steps.map(describeStep)];
+}
+
+/** A host path as the OS writes it, or a neutral name when there is none. */
+export function displayPath(path: string | null): string {
+  return path === null ? "the user config file" : normalize(path);
 }

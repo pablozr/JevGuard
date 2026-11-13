@@ -1,4 +1,10 @@
-import { type ChildProcess, spawn } from "node:child_process";
+import {
+  type ChildProcess,
+  type ChildProcessByStdio,
+  type SpawnOptionsWithStdioTuple,
+  spawn,
+} from "node:child_process";
+import type { Readable } from "node:stream";
 import { StringDecoder } from "node:string_decoder";
 import type { ProcessRequest, ProcessResult, ProcessRunner } from "./types";
 
@@ -65,6 +71,23 @@ function terminate(child: ChildProcess): void {
   child.stderr?.destroy();
 }
 
+/**
+ * On Windows the allowlisted tokens are joined into one shell command line, so Node
+ * never concatenates an argument array under `shell: true` itself (DEP0190).
+ */
+function spawnHostCommand(request: ProcessRequest): ChildProcessByStdio<null, Readable, Readable> {
+  const options: SpawnOptionsWithStdioTuple<"ignore", "pipe", "pipe"> = {
+    windowsHide: true,
+    stdio: ["ignore", "pipe", "pipe"],
+  };
+
+  if (process.platform !== "win32") return spawn(request.command, [...request.args], options);
+
+  const commandLine = [request.command, ...request.args].join(" ");
+
+  return spawn(commandLine, { ...options, shell: true });
+}
+
 function spawnProcess(request: ProcessRequest): Promise<ProcessResult> {
   return new Promise((resolve) => {
     let settled = false;
@@ -79,11 +102,7 @@ function spawnProcess(request: ProcessRequest): Promise<ProcessResult> {
       resolve(result);
     }
 
-    const child = spawn(request.command, [...request.args], {
-      shell: process.platform === "win32",
-      windowsHide: true,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    const child = spawnHostCommand(request);
     const timer = setTimeout(() => {
       terminate(child);
       settle({ kind: "TIMED_OUT" });
