@@ -49,3 +49,6 @@ jobs:
 
       - name: Build the Claude Code artifact
         run: pnpm claude-artifact:build
+
+      - name: Build the CLI artifact
+        run: pnpm cli-artifact:build

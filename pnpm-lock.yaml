@@ -50,6 +50,36 @@ importers:
       '@jevguard/claude-code-adapter':
         specifier: workspace:*
         version: link:../claude-code-adapter
+      '@jevguard/node-infra':
+        specifier: workspace:*
+        version: link:../node-infra
+
+  packages/cli:
+    dependencies:
+      '@inquirer/password':
+        specifier: ^5.2.2
+        version: 5.2.2(@types/node@22.20.4)
+      '@jevguard/claude-code-plugin':
+        specifier: workspace:*
+        version: link:../claude-code-plugin
+      '@jevguard/core':
+        specifier: workspace:*
+        version: link:../core
+      '@jevguard/node-infra':
+        specifier: workspace:*
+        version: link:../node-infra
+      '@jevguard/opencode-adapter':
+        specifier: workspace:*
+        version: link:../opencode-adapter
+      '@napi-rs/keyring':
+        specifier: 2.1.0
+        version: 2.1.0
+      '@typesafe-ai/sdk':
+        specifier: 0.6.0
+        version: 0.6.0
+      yaml:
+        specifier: 2.9.1
+        version: 2.9.1
 
   packages/core: {}
 

@@ -5,22 +5,27 @@ import {
   type FeedbackRecord,
   type ReviewReport,
 } from "@jevguard/core";
-import type { LoginOutcome, ReviewHistoryRecord } from "@jevguard/node-infra";
-import type { InstallOutcome, InstallTarget } from "@jevguard/opencode-adapter";
+import type {
+  HostId,
+  HostInstallOutcome,
+  HostInstallScope,
+  LoginOutcome,
+  ReviewHistoryRecord,
+} from "@jevguard/node-infra";
 import { describe, expect, test } from "vitest";
-import type { DoctorReport } from "../src/cli/doctor/types";
+import type { DoctorReport, DoctorRun } from "../src/doctor/types";
 import type {
   FeedbackListResult,
   FeedbackMarkRequest,
   FeedbackMarkResult,
-} from "../src/cli/feedback/types";
-import type { RulesCheckRequest, RulesCheckResult } from "../src/cli/rules-check/types";
-import { runCli } from "../src/cli/run-cli";
-import type { CliDependencies, CliIO } from "../src/cli/types";
+} from "../src/feedback/types";
+import type { RulesCheckRequest, RulesCheckResult } from "../src/rules-check/types";
+import { runCli } from "../src/run-cli";
+import type { SetupRequest, SetupResult } from "../src/setup/types";
+import type { CliDependencies, CliIO } from "../src/types";
 
 const GLOBAL_PATH = "C:/home/.config/opencode/opencode.json";
 const PROJECT_PATH = "C:/repo/opencode.json";
-const MANUAL_SNIPPET = '{ "plugins": ["@pablozrrrr/jevguard"] }';
 
 const PATH_SENTINEL = "src/SECRET_PATH_SENTINEL.ts";
 
@@ -48,25 +53,30 @@ function reportFixture(feedback: readonly FeedbackRecord[] = []): ReviewReport {
   return aggregateReviewHistory([record], 0, feedback);
 }
 
-function doctorFixture(status: DoctorReport["status"]): DoctorReport {
-  return {
-    version: 1,
-    projectRoot: "C:/repo",
-    status,
-    checks: [
-      status === "FAIL"
-        ? { id: "credential", status: "FAIL", code: "MISSING_CREDENTIAL" }
-        : { id: "credential", status: "OK", code: "CREDENTIAL_STORE" },
-      {
-        id: "opencode-plugin",
-        status: status === "WARN" ? "WARN" : "OK",
-        code: status === "WARN" ? "NOT_REGISTERED" : "REGISTERED",
-        targets: [
-          { status: "NOT_REGISTERED", target: "global", path: GLOBAL_PATH },
-          { status: "NOT_REGISTERED", target: "project", path: PROJECT_PATH },
-        ],
-      },
+function doctorFixture(status: DoctorReport["status"]): DoctorRun {
+  const plugin = {
+    id: "opencode-plugin",
+    status: status === "WARN" ? "WARN" : "OK",
+    code: status === "WARN" ? "NOT_REGISTERED" : "REGISTERED",
+    targets: [
+      { status: "NOT_REGISTERED", target: "global", path: GLOBAL_PATH },
+      { status: "NOT_REGISTERED", target: "project", path: PROJECT_PATH },
     ],
+  } as const;
+
+  return {
+    report: {
+      version: 1,
+      projectRoot: "C:/repo",
+      status,
+      checks: [
+        status === "FAIL"
+          ? { id: "credential", status: "FAIL", code: "MISSING_CREDENTIAL" }
+          : { id: "credential", status: "OK", code: "CREDENTIAL_STORE" },
+        plugin,
+      ],
+    },
+    hostChecks: [{ json: plugin, message: "OpenCode plugin line.", annotation: null }],
   };
 }
 
@@ -104,17 +114,18 @@ class StubDependencies implements CliDependencies {
   loginCalls = 0;
   loginOutcome: LoginOutcome = { status: "SAVED" };
   installCalls = 0;
-  readonly installTargets: InstallTarget[] = [];
-  installOutcome: InstallOutcome = {
-    status: "INSTALLED",
-    target: "global",
-    path: GLOBAL_PATH,
+  readonly installRequests: { host: HostId; scope: HostInstallScope }[] = [];
+  installOutcome: HostInstallOutcome = {
+    status: "CHANGED",
+    code: "INSTALLED",
+    lines: [`Registered JevGuard in ${GLOBAL_PATH}.`],
   };
   reportCalls = 0;
   reportResult: ReviewReport = aggregateReviewHistory([], 0, []);
   doctorCalls = 0;
   doctorError: Error | null = null;
-  doctorResult: DoctorReport = doctorFixture("OK");
+  doctorResult: DoctorRun = doctorFixture("OK");
+  readonly doctorHosts: (readonly HostId[])[] = [];
   feedbackError: Error | null = null;
   readonly feedbackMarkRequests: FeedbackMarkRequest[] = [];
   feedbackListResult: FeedbackListResult = {
@@ -139,6 +150,8 @@ class StubDependencies implements CliDependencies {
     timestamp: new Date(Date.now() - 3 * 3_600_000).toISOString(),
     violationProbability: 0.91,
   };
+  readonly setupRequests: SetupRequest[] = [];
+  setupResult: SetupResult = { status: "APPLIED", lines: ["setup done"] };
   rulesCheckCalls = 0;
   rulesCheckError: Error | null = null;
   readonly rulesCheckRequests: RulesCheckRequest[] = [];
@@ -152,9 +165,9 @@ class StubDependencies implements CliDependencies {
     return Promise.resolve(this.loginOutcome);
   }
 
-  install(target: InstallTarget): Promise<InstallOutcome> {
+  install(host: HostId, scope: HostInstallScope): Promise<HostInstallOutcome> {
     this.installCalls += 1;
-    this.installTargets.push(target);
+    this.installRequests.push({ host, scope });
     return Promise.resolve(this.installOutcome);
   }
 
@@ -163,8 +176,9 @@ class StubDependencies implements CliDependencies {
     return Promise.resolve(this.reportResult);
   }
 
-  doctor(): Promise<DoctorReport> {
+  doctor(hosts: readonly HostId[]): Promise<DoctorRun> {
     this.doctorCalls += 1;
+    this.doctorHosts.push(hosts);
 
     return this.doctorError === null
       ? Promise.resolve(this.doctorResult)
@@ -183,6 +197,12 @@ class StubDependencies implements CliDependencies {
     return this.feedbackError === null
       ? Promise.resolve(this.feedbackMarkResult)
       : Promise.reject(this.feedbackError);
+  }
+
+  setup(request: SetupRequest): Promise<SetupResult> {
+    this.setupRequests.push(request);
+
+    return Promise.resolve(this.setupResult);
   }
 
   rulesCheck(request: RulesCheckRequest): Promise<RulesCheckResult> {
@@ -275,38 +295,56 @@ describe("runCli dispatch", () => {
     expect(io.err.join("\n")).not.toContain("test-key");
   });
 
-  test("dispatches install to the global target and reports success", async () => {
+  test("dispatches install to the global OpenCode target and reports success", async () => {
     const { io, dependencies } = harness();
 
     const exitCode = await runCli(["install"], io, dependencies);
 
     expect(exitCode).toBe(0);
-    expect(dependencies.installTargets).toEqual(["global"]);
+    expect(dependencies.installRequests).toEqual([{ host: "opencode", scope: "global" }]);
     expect(io.out.join("\n")).toContain(GLOBAL_PATH);
     expect(io.err).toEqual([]);
   });
 
   test("dispatches install --project to the project target", async () => {
     const { io, dependencies } = harness();
-    dependencies.installOutcome = {
-      status: "INSTALLED",
-      target: "project",
-      path: PROJECT_PATH,
-    };
 
     const exitCode = await runCli(["install", "--project"], io, dependencies);
 
     expect(exitCode).toBe(0);
-    expect(dependencies.installTargets).toEqual(["project"]);
-    expect(io.out.join("\n")).toContain(PROJECT_PATH);
+    expect(dependencies.installRequests).toEqual([{ host: "opencode", scope: "project" }]);
   });
 
-  test("reports an already-installed plugin as success without rewriting", async () => {
+  test("passes an explicit --host through, in either flag order", async () => {
+    const { io, dependencies } = harness();
+
+    await runCli(["install", "--host", "opencode", "--project"], io, dependencies);
+    await runCli(["install", "--project", "--host", "opencode"], io, dependencies);
+
+    expect(dependencies.installRequests).toEqual([
+      { host: "opencode", scope: "project" },
+      { host: "opencode", scope: "project" },
+    ]);
+  });
+
+  test("passes the claude-code host and scope through", async () => {
+    const { io, dependencies } = harness();
+
+    await runCli(["install", "--host", "claude-code"], io, dependencies);
+    await runCli(["install", "--project", "--host", "claude-code"], io, dependencies);
+
+    expect(dependencies.installRequests).toEqual([
+      { host: "claude-code", scope: "global" },
+      { host: "claude-code", scope: "project" },
+    ]);
+  });
+
+  test("reports an unchanged install as success without writing to stderr", async () => {
     const { io, dependencies } = harness();
     dependencies.installOutcome = {
-      status: "ALREADY_INSTALLED",
-      target: "global",
-      path: GLOBAL_PATH,
+      status: "UNCHANGED",
+      code: "ALREADY_INSTALLED",
+      lines: ["already registered"],
     };
 
     const exitCode = await runCli(["install"], io, dependencies);
@@ -326,6 +364,23 @@ describe("runCli dispatch", () => {
     expect(io.err.join("\n")).toContain("Usage: jevguard login");
   });
 
+  test.each([
+    [["install", "--host"]],
+    [["install", "--host", "SECRET_HOST"]],
+    [["install", "--host", "opencode", "--host", "opencode"]],
+    [["install", "--project", "--project"]],
+    [["install", "--json"]],
+  ])("rejects the install arguments %j without calling the dependency", async (argv) => {
+    const { io, dependencies } = harness();
+
+    const exitCode = await runCli(argv, io, dependencies);
+
+    expect(exitCode).toBe(1);
+    expect(dependencies.installCalls).toBe(0);
+    expect(io.err.join("\n")).toContain("Usage: jevguard login");
+    expect(io.err.join("\n")).not.toContain("SECRET_HOST");
+  });
+
   test("rejects install with an extra argument and never echoes it", async () => {
     const { io, dependencies } = harness();
 
@@ -337,45 +392,59 @@ describe("runCli dispatch", () => {
     expect(io.err.join("\n")).not.toContain("test-key");
   });
 
-  test("reports an aborted install without a success message", async () => {
+  test.each([
+    ["DECLINED", "ABORTED"],
+    ["FAILED", "NOT_A_TTY"],
+  ] as const)("sends a %s install outcome to stderr with exit 1", async (status, code) => {
     const { io, dependencies } = harness();
-    dependencies.installOutcome = { status: "ABORTED", target: "global", path: GLOBAL_PATH };
+    dependencies.installOutcome = { status, code, lines: ["first line", "second line"] };
 
     const exitCode = await runCli(["install"], io, dependencies);
 
     expect(exitCode).toBe(1);
     expect(io.out).toEqual([]);
-    expect(io.err.join("\n")).toContain("Install cancelled");
+    expect(io.err).toEqual(["first line\nsecond line"]);
+  });
+});
+
+describe("runCli setup", () => {
+  test("passes the parsed request to setup and prints the result on stdout", async () => {
+    const { io, dependencies } = harness();
+
+    const exitCode = await runCli(
+      ["setup", "--host", "claude-code", "--project", "--init", "--yes", "--agent-delivery"],
+      io,
+      dependencies,
+    );
+
+    expect(exitCode).toBe(0);
+    expect(dependencies.setupRequests).toEqual([
+      { host: "claude-code", scope: "project", init: true, yes: true, agentDelivery: true },
+    ]);
+    expect(io.out.join("\n")).toContain("setup done");
+    expect(io.err).toEqual([]);
   });
 
-  test("prints the manual snippet when the install cannot confirm off a TTY", async () => {
+  test("reports a setup that changed nothing on stderr with exit 1", async () => {
     const { io, dependencies } = harness();
-    dependencies.installOutcome = {
-      status: "FAILED",
-      target: "global",
-      path: GLOBAL_PATH,
-      reason: "NOT_A_TTY",
-    };
+    dependencies.setupResult = { status: "NOT_CONFIRMED", lines: ["plan", "Nothing was changed."] };
 
-    const exitCode = await runCli(["install"], io, dependencies);
+    const exitCode = await runCli(["setup"], io, dependencies);
 
     expect(exitCode).toBe(1);
-    expect(io.err.join("\n")).toContain(MANUAL_SNIPPET);
+    expect(io.out).toEqual([]);
+    expect(io.err.join("\n")).toBe("plan\nNothing was changed.");
   });
 
-  test("prints the manual snippet when a JSONC config blocks the install", async () => {
+  test("prints usage for invalid setup arguments without echoing them", async () => {
     const { io, dependencies } = harness();
-    dependencies.installOutcome = {
-      status: "FAILED",
-      target: "global",
-      path: GLOBAL_PATH,
-      reason: "UNSUPPORTED_JSONC",
-    };
 
-    const exitCode = await runCli(["install"], io, dependencies);
+    const exitCode = await runCli(["setup", "--host", "sk-secret-value"], io, dependencies);
 
     expect(exitCode).toBe(1);
-    expect(io.err.join("\n")).toContain(MANUAL_SNIPPET);
+    expect(dependencies.setupRequests).toEqual([]);
+    expect(io.err.join("\n")).toContain("jevguard setup");
+    expect(io.err.join("\n")).not.toContain("sk-secret-value");
   });
 });
 
@@ -475,7 +544,42 @@ describe("runCli doctor", () => {
     const exitCode = await runCli(["doctor", "--json"], io, dependencies);
 
     expect(exitCode).toBe(0);
-    expect(JSON.parse(io.out.join("\n"))).toEqual(dependencies.doctorResult);
+    expect(JSON.parse(io.out.join("\n"))).toEqual(dependencies.doctorResult.report);
+  });
+
+  test("checks OpenCode by default and the selected host with --host", async () => {
+    const { io, dependencies } = harness();
+
+    await runCli(["doctor"], io, dependencies);
+    await runCli(["doctor", "--host", "opencode", "--json"], io, dependencies);
+
+    expect(dependencies.doctorHosts).toEqual([["opencode"], ["opencode"]]);
+  });
+
+  test("checks the claude-code host when asked", async () => {
+    const { io, dependencies } = harness();
+
+    await runCli(["doctor", "--host", "claude-code"], io, dependencies);
+
+    expect(dependencies.doctorHosts).toEqual([["claude-code"]]);
+  });
+
+  test("prints the host line supplied by the extension", async () => {
+    const { io, dependencies } = harness();
+
+    await runCli(["doctor"], io, dependencies);
+
+    expect(io.out.join("\n")).toContain("OpenCode plugin line.");
+  });
+
+  test("rejects an unknown host without echoing it", async () => {
+    const { io, dependencies } = harness();
+
+    const exitCode = await runCli(["doctor", "--host", "SECRET_HOST"], io, dependencies);
+
+    expect(exitCode).toBe(1);
+    expect(dependencies.doctorCalls).toBe(0);
+    expect(io.err.join("\n")).not.toContain("SECRET_HOST");
   });
 
   test("reports a generic failure when the diagnosis throws", async () => {
@@ -808,13 +912,13 @@ describe("package bin wiring", () => {
       readFileSync(new URL("../package.json", import.meta.url), "utf8"),
     ) as { bin?: Record<string, string> };
 
-    expect(manifest.bin?.jevguard).toBe("./src/cli/main.ts");
-    expect(existsSync(new URL("../src/cli/main.ts", import.meta.url))).toBe(true);
+    expect(manifest.bin?.jevguard).toBe("./src/main.ts");
+    expect(existsSync(new URL("../src/main.ts", import.meta.url))).toBe(true);
   });
 
-  test("runs the CLI entry file under the Bun runtime", () => {
-    const entry = readFileSync(new URL("../src/cli/main.ts", import.meta.url), "utf8");
+  test("runs the CLI entry file under the Node runtime", () => {
+    const entry = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
 
-    expect(entry.startsWith("#!/usr/bin/env bun")).toBe(true);
+    expect(entry.startsWith("#!/usr/bin/env node")).toBe(true);
   });
 });

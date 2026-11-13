@@ -1,9 +1,14 @@
 import type { ReviewReport } from "@jevguard/core";
-import type { LoginOutcome } from "@jevguard/node-infra";
-import type { InstallOutcome, InstallTarget } from "@jevguard/opencode-adapter";
-import type { DoctorReport } from "./doctor/types";
+import type {
+  HostId,
+  HostInstallOutcome,
+  HostInstallScope,
+  LoginOutcome,
+} from "@jevguard/node-infra";
+import type { DoctorRun } from "./doctor/types";
 import type { FeedbackListResult, FeedbackMarkRequest, FeedbackMarkResult } from "./feedback/types";
 import type { RulesCheckRequest, RulesCheckResult } from "./rules-check/types";
+import type { SetupRequest, SetupResult } from "./setup/types";
 
 export interface CliIO {
   readonly writeOut: (message: string) => void;
@@ -12,10 +17,18 @@ export interface CliIO {
 
 export interface CliDependencies {
   readonly login: () => Promise<LoginOutcome>;
-  readonly install: (target: InstallTarget) => Promise<InstallOutcome>;
+  readonly install: (host: HostId, scope: HostInstallScope) => Promise<HostInstallOutcome>;
+  readonly setup: (request: SetupRequest) => Promise<SetupResult>;
   readonly report: () => Promise<ReviewReport>;
-  readonly doctor: () => Promise<DoctorReport>;
+  readonly doctor: (hosts: readonly HostId[]) => Promise<DoctorRun>;
   readonly rulesCheck: (request: RulesCheckRequest) => Promise<RulesCheckResult>;
   readonly feedbackList: () => Promise<FeedbackListResult>;
   readonly feedbackMark: (request: FeedbackMarkRequest) => Promise<FeedbackMarkResult>;
+}
+
+/** Flags shared by `install` and `doctor`; `host` falls back to the default host. */
+export interface HostCommandArguments {
+  readonly host: HostId;
+  readonly scope: HostInstallScope;
+  readonly json: boolean;
 }

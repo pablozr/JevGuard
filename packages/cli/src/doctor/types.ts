@@ -4,7 +4,7 @@ import type {
   PolicyLoader,
   RuleParseErrorCode,
 } from "@jevguard/core";
-import type { InstallInspection, InstallTarget } from "@jevguard/opencode-adapter";
+import type { HostDoctorCheck, HostDoctorCheckJson } from "@jevguard/node-infra";
 
 export type DoctorStatus = "OK" | "WARN" | "FAIL";
 
@@ -29,13 +29,6 @@ export type ConfigCheckCode =
   | "REMEDIATION_INVALID"
   | "CONFIG_READ_FAILURE"
   | "CONFIG_NOT_CHECKED";
-
-export type OpenCodeCheckCode = "REGISTERED" | "NOT_REGISTERED" | "INSPECTION_FAILED";
-
-export type OpenCodeVersionCheckCode =
-  | "VERSION_SUPPORTED"
-  | "VERSION_UNSUPPORTED"
-  | "VERSION_UNKNOWN";
 
 export interface InvalidRuleSummary {
   readonly ruleId: string | null;
@@ -64,34 +57,17 @@ export type ConfigCheck = {
   readonly path: string;
 };
 
-export type OpenCodeCheck = {
-  readonly id: "opencode-plugin";
-  readonly status: DoctorStatus;
-  readonly code: OpenCodeCheckCode;
-  readonly targets: readonly InstallInspection[];
-};
+export type DoctorCheck = CredentialCheck | RulesCheck | ConfigCheck;
 
-export type OpenCodeVersionCheck = {
-  readonly id: "opencode-version";
-  readonly status: DoctorStatus;
-  readonly code: OpenCodeVersionCheckCode;
-  /** The version `opencode --version` reported, or `null` when none could be read. */
-  readonly version: string | null;
-};
-
-export type DoctorCheck =
-  | CredentialCheck
-  | RulesCheck
-  | ConfigCheck
-  | OpenCodeCheck
-  | OpenCodeVersionCheck;
+/** A shared check or one a host extension contributed; both are plain JSON. */
+export type DoctorReportCheck = DoctorCheck | HostDoctorCheckJson;
 
 /** Local, network-free diagnosis. It carries typed codes and paths only, never a credential. */
 export interface DoctorReport {
   readonly version: 1;
   readonly projectRoot: string;
   readonly status: DoctorStatus;
-  readonly checks: readonly DoctorCheck[];
+  readonly checks: readonly DoctorReportCheck[];
 }
 
 export interface DoctorDependencies {
@@ -99,7 +75,12 @@ export interface DoctorDependencies {
   readonly credentials: CredentialProvider;
   readonly policy: PolicyLoader;
   readonly parseConfig: PolicyConfigParser;
-  readonly inspectOpenCode: (target: InstallTarget) => Promise<InstallInspection>;
-  /** Output of `opencode --version`, or `null` when it could not run. */
-  readonly readOpenCodeVersion: () => string | null;
+  /** Checks already produced by the selected host extensions, in report order. */
+  readonly hostChecks: readonly HostDoctorCheck[];
+}
+
+/** The report plus the human text of the host checks, which JSON output leaves out. */
+export interface DoctorRun {
+  readonly report: DoctorReport;
+  readonly hostChecks: readonly HostDoctorCheck[];
 }

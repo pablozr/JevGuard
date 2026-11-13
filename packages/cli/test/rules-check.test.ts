@@ -11,21 +11,21 @@ import type {
 import { aggregateReview } from "@jevguard/core";
 import { parsePolicyConfig, toReviewLogEntry } from "@jevguard/node-infra";
 import { describe, expect, test } from "vitest";
-import { parseRulesCheckArguments } from "../src/cli/rules-check/arguments";
-import { executeRulesCheck, RULES_CHECK_DEFAULT_TASK } from "../src/cli/rules-check/execute";
-import { rulesCheckExitCode } from "../src/cli/rules-check/exit-code";
+import { parseRulesCheckArguments } from "../src/rules-check/arguments";
+import { executeRulesCheck, RULES_CHECK_DEFAULT_TASK } from "../src/rules-check/execute";
+import { rulesCheckExitCode } from "../src/rules-check/exit-code";
 import {
   describeDiffInputFailure,
   describeRulesCheck,
   serializeRulesCheck,
-} from "../src/cli/rules-check/messages";
+} from "../src/rules-check/messages";
 import type {
   DiffRead,
   DiffReadFailureReason,
   RulesCheckDependencies,
   RulesCheckRequest,
   RulesCheckResult,
-} from "../src/cli/rules-check/types";
+} from "../src/rules-check/types";
 
 const TASK_SENTINEL = "TASK-SENTINEL-TEXT";
 const SECRET_LINE = "+SECRET_LINE_SENTINEL";

@@ -5,18 +5,17 @@ import type {
   PolicyLoader,
   PolicyLoadResult,
 } from "@jevguard/core";
-import { parsePolicyConfig } from "@jevguard/node-infra";
-import type { InstallInspection, InstallTarget } from "@jevguard/opencode-adapter";
+import { type HostDoctorCheck, parsePolicyConfig } from "@jevguard/node-infra";
 import { describe, expect, test } from "vitest";
-import { diagnose } from "../src/cli/doctor/diagnose";
-import { describeDoctorReport, serializeDoctorReport } from "../src/cli/doctor/messages";
-import type { DoctorCheck, DoctorReport } from "../src/cli/doctor/types";
+import { diagnose } from "../src/doctor/diagnose";
+import { describeDoctorReport, serializeDoctorReport } from "../src/doctor/messages";
+import type { DoctorCheck, DoctorRun } from "../src/doctor/types";
 
 const ROOT = join("C:", "repo");
 const KEY_SENTINEL = "sk-DOCTOR-SENTINEL";
 const DESCRIPTION_SENTINEL = "DESCRIPTION-SENTINEL-TEXT";
-const GLOBAL_PATH = join("C:", "home", ".config", "opencode", "opencode.json");
-const PROJECT_PATH = join(ROOT, "opencode.json");
+const HOST_MESSAGE = "HOST-SENTINEL-MESSAGE";
+const HOST_ANNOTATION = "hint: HOST-SENTINEL-ANNOTATION";
 
 class FakeCredentials implements CredentialProvider {
   constructor(private readonly outcome: CredentialResolution | Error) {}
@@ -64,42 +63,37 @@ function loaded(rules: string | null, config: string | null = null): PolicyLoadR
   return { status: "LOADED", source: { rules, config } };
 }
 
-function registration(
-  global: InstallInspection["status"],
-  project: InstallInspection["status"] = "NOT_REGISTERED",
-): (target: InstallTarget) => Promise<InstallInspection> {
-  return async (target) => {
-    const path = target === "global" ? GLOBAL_PATH : PROJECT_PATH;
-    const status = target === "global" ? global : project;
-
-    return status === "FAILED"
-      ? { status, target, path, reason: "INVALID_JSON" }
-      : { status, target, path };
+function hostCheck(status: HostDoctorCheck["json"]["status"] = "OK"): HostDoctorCheck {
+  return {
+    json: { id: "host-check", status, code: "HOST_CODE", detail: { nested: true } },
+    message: HOST_MESSAGE,
+    annotation: HOST_ANNOTATION,
   };
 }
 
 interface Overrides {
   credentials?: CredentialResolution | Error;
   policy?: PolicyLoadResult | Error;
-  inspect?: (target: InstallTarget) => Promise<InstallInspection>;
-  version?: string | null;
+  hostChecks?: readonly HostDoctorCheck[];
 }
 
-function run(overrides: Overrides = {}): Promise<DoctorReport> {
-  return diagnose({
+async function run(overrides: Overrides = {}): Promise<DoctorRun> {
+  const hostChecks = overrides.hostChecks ?? [hostCheck()];
+  const report = await diagnose({
     projectRoot: ROOT,
     credentials: new FakeCredentials(
       overrides.credentials ?? { status: "AVAILABLE", source: "STORE", apiKey: KEY_SENTINEL },
     ),
     policy: new FakePolicy(overrides.policy ?? loaded(validRule("ARCH-001"))),
     parseConfig: parsePolicyConfig,
-    inspectOpenCode: overrides.inspect ?? registration("REGISTERED"),
-    readOpenCodeVersion: () => (overrides.version === undefined ? "2.2.2\n" : overrides.version),
+    hostChecks,
   });
+
+  return { report, hostChecks };
 }
 
 function check<Id extends DoctorCheck["id"]>(
-  report: DoctorReport,
+  { report }: DoctorRun,
   id: Id,
 ): Extract<DoctorCheck, { id: Id }> {
   const found = report.checks.find(
@@ -149,7 +143,7 @@ describe("doctor credential check", () => {
   test("never exposes the key or any part of it in either output", async () => {
     const report = await run();
 
-    for (const output of [describeDoctorReport(report), serializeDoctorReport(report)]) {
+    for (const output of [describeDoctorReport(report), serializeDoctorReport(report.report)]) {
       expect(output).not.toContain(KEY_SENTINEL);
       expect(output).not.toContain("sk-");
     }
@@ -159,7 +153,7 @@ describe("doctor credential check", () => {
     const report = await run({ credentials: new Error(KEY_SENTINEL) });
 
     expect(describeDoctorReport(report)).not.toContain(KEY_SENTINEL);
-    expect(serializeDoctorReport(report)).not.toContain(KEY_SENTINEL);
+    expect(serializeDoctorReport(report.report)).not.toContain(KEY_SENTINEL);
   });
 });
 
@@ -220,7 +214,7 @@ describe("doctor rules check", () => {
     const report = await run();
 
     expect(describeDoctorReport(report)).not.toContain(DESCRIPTION_SENTINEL);
-    expect(serializeDoctorReport(report)).not.toContain(DESCRIPTION_SENTINEL);
+    expect(serializeDoctorReport(report.report)).not.toContain(DESCRIPTION_SENTINEL);
   });
 });
 
@@ -261,57 +255,40 @@ describe("doctor config check", () => {
   });
 });
 
-describe("doctor OpenCode check", () => {
-  test("is OK when either target is registered", async () => {
-    const report = await run({ inspect: registration("NOT_REGISTERED", "REGISTERED") });
+describe("doctor host checks", () => {
+  test("appends each host check after the shared ones and keeps its JSON verbatim", async () => {
+    const report = await run({ hostChecks: [hostCheck(), hostCheck("WARN")] });
 
-    expect(check(report, "opencode-plugin")).toMatchObject({ status: "OK", code: "REGISTERED" });
-  });
-
-  test("warns when no target is registered and shows both paths", async () => {
-    const report = await run({ inspect: registration("NOT_REGISTERED") });
-
-    expect(check(report, "opencode-plugin")).toMatchObject({
-      status: "WARN",
-      code: "NOT_REGISTERED",
-    });
-    expect(describeDoctorReport(report)).toContain(`${GLOBAL_PATH} or ${PROJECT_PATH}`);
-  });
-
-  test("warns when a target cannot be inspected", async () => {
-    const report = await run({ inspect: registration("REGISTERED", "FAILED") });
-
-    expect(check(report, "opencode-plugin")).toMatchObject({
-      status: "WARN",
-      code: "INSPECTION_FAILED",
-    });
-    expect(describeDoctorReport(report)).toContain(PROJECT_PATH);
-  });
-});
-
-describe("doctor OpenCode version check", () => {
-  test.each([
-    ["2.2.2\n", "OK", "VERSION_SUPPORTED", "2.2.2"],
-    ["2.2.7", "OK", "VERSION_SUPPORTED", "2.2.7"],
-    ["2.1.1", "FAIL", "VERSION_UNSUPPORTED", "2.1.1"],
-    ["2.3.0", "FAIL", "VERSION_UNSUPPORTED", "2.3.0"],
-    [null, "WARN", "VERSION_UNKNOWN", null],
-  ] as const)("classifies %j", async (version, status, code, reported) => {
-    const report = await run({ version });
-
-    expect(check(report, "opencode-version")).toEqual({
-      id: "opencode-version",
-      status,
-      code,
-      version: reported,
+    expect(report.report.checks.map((entry) => entry.id)).toEqual([
+      "credential",
+      "rules",
+      "config",
+      "host-check",
+      "host-check",
+    ]);
+    expect(report.report.checks[3]).toEqual({
+      id: "host-check",
+      status: "OK",
+      code: "HOST_CODE",
+      detail: { nested: true },
     });
   });
 
-  test("names the supported range when the version is unsupported", async () => {
-    const report = await run({ version: "2.1.1" });
+  test("prints the message and annotation the extension supplied", async () => {
+    const text = describeDoctorReport(await run());
 
-    expect(describeDoctorReport(report)).toContain("OpenCode 2.1.1 is not supported.");
-    expect(describeDoctorReport(report)).toContain(">=2.2.2 <2.3");
+    expect(text).toContain(`[OK]   host-check       ${HOST_MESSAGE}`);
+    expect(text).toContain(`       ${HOST_ANNOTATION}`);
+  });
+
+  test("keeps the shared checks when no host contributes one", async () => {
+    const report = await run({ hostChecks: [] });
+
+    expect(report.report.checks.map((entry) => entry.id)).toEqual([
+      "credential",
+      "rules",
+      "config",
+    ]);
   });
 });
 
@@ -319,31 +296,39 @@ describe("doctor aggregate status", () => {
   test("is OK when every check is OK", async () => {
     const report = await run();
 
-    expect(report.status).toBe("OK");
+    expect(report.report.status).toBe("OK");
     expect(describeDoctorReport(report)).toContain("Result: OK (0 fail, 0 warn)");
   });
 
   test("is WARN when only warnings exist", async () => {
-    const report = await run({ inspect: registration("NOT_REGISTERED") });
+    const report = await run({ hostChecks: [hostCheck("WARN")] });
 
-    expect(report.status).toBe("WARN");
+    expect(report.report.status).toBe("WARN");
+  });
+
+  test("a failing host check fails the report", async () => {
+    const report = await run({ hostChecks: [hostCheck("FAIL")] });
+
+    expect(report.report.status).toBe("FAIL");
   });
 
   test("is FAIL when any check fails and counts both kinds", async () => {
     const report = await run({
       credentials: { status: "UNAVAILABLE", reason: "MISSING_CREDENTIAL" },
-      inspect: registration("NOT_REGISTERED"),
+      hostChecks: [hostCheck("WARN")],
     });
 
-    expect(report.status).toBe("FAIL");
+    expect(report.report.status).toBe("FAIL");
     expect(describeDoctorReport(report)).toContain("Result: FAIL (1 fail, 1 warn)");
   });
 
   test("the JSON form round-trips the report", async () => {
     const report = await run({ policy: loaded(null) });
 
-    expect(JSON.parse(serializeDoctorReport(report))).toEqual(JSON.parse(JSON.stringify(report)));
-    expect(report.version).toBe(1);
-    expect(report.projectRoot).toBe(ROOT);
+    expect(JSON.parse(serializeDoctorReport(report.report))).toEqual(
+      JSON.parse(JSON.stringify(report.report)),
+    );
+    expect(report.report.version).toBe(1);
+    expect(report.report.projectRoot).toBe(ROOT);
   });
 });

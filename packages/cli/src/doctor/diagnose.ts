@@ -7,24 +7,17 @@ import {
   type RuleParseResults,
 } from "@jevguard/core";
 import { policyFilePaths } from "@jevguard/node-infra";
-import {
-  checkOpenCodeVersion,
-  type InstallInspection,
-  type OpenCodeVersionVerdict,
-} from "@jevguard/opencode-adapter";
+import { resolveCredentialSafely } from "../credential";
 import type {
   ConfigCheck,
   ConfigCheckCode,
   CredentialCheck,
   CredentialCheckCode,
-  DoctorCheck,
   DoctorDependencies,
   DoctorReport,
+  DoctorReportCheck,
   DoctorStatus,
   InvalidRuleSummary,
-  OpenCodeCheck,
-  OpenCodeCheckCode,
-  OpenCodeVersionCheck,
   RulesCheck,
 } from "./types";
 
@@ -38,7 +31,8 @@ const CONFIG_CODES: Record<PolicyConfigCode, ConfigCheckCode> = {
 
 /**
  * Diagnoses the local JevGuard setup without network access or side effects: the
- * credential source, the fixed `.jev` policy files, and the OpenCode registration.
+ * credential source, the fixed `.jev` policy files, and the checks the host extensions
+ * already produced.
  * A resolved API key is mapped to a source code immediately and never leaves this
  * module.
  */
@@ -48,9 +42,12 @@ export async function diagnose(dependencies: DoctorDependencies): Promise<Doctor
   const paths = policyFilePaths(dependencies.projectRoot);
   const rules = checkRules(paths.rules, loaded);
   const config = checkConfig(dependencies, paths.config, loaded);
-  const openCode = await checkOpenCode(dependencies);
-  const version = checkVersion(dependencies);
-  const checks = [credential, rules, config, openCode, version];
+  const checks: readonly DoctorReportCheck[] = [
+    credential,
+    rules,
+    config,
+    ...dependencies.hostChecks.map((check) => check.json),
+  ];
 
   return {
     version: 1,
@@ -71,17 +68,13 @@ async function checkCredential(dependencies: DoctorDependencies): Promise<Creden
 async function resolveCredentialCode(
   dependencies: DoctorDependencies,
 ): Promise<CredentialCheckCode> {
-  try {
-    const resolution = await dependencies.credentials.resolve();
+  const resolution = await resolveCredentialSafely(dependencies.credentials);
 
-    if (resolution.status === "AVAILABLE") {
-      return resolution.source === "STORE" ? "CREDENTIAL_STORE" : "CREDENTIAL_ENVIRONMENT";
-    }
-
-    return resolution.reason;
-  } catch {
-    return "STORE_READ_FAILURE";
+  if (resolution.status === "AVAILABLE") {
+    return resolution.source === "STORE" ? "CREDENTIAL_STORE" : "CREDENTIAL_ENVIRONMENT";
   }
+
+  return resolution.reason;
 }
 
 function isRulesReadFailure(loaded: PolicyLoadResult | null): boolean {
@@ -162,49 +155,7 @@ function configCheck(status: DoctorStatus, code: ConfigCheckCode, path: string):
   return { id: "config", status, code, path };
 }
 
-async function checkOpenCode(dependencies: DoctorDependencies): Promise<OpenCodeCheck> {
-  const targets = await Promise.all([
-    dependencies.inspectOpenCode("global"),
-    dependencies.inspectOpenCode("project"),
-  ]);
-  const code = openCodeCode(targets);
-  const status: DoctorStatus = code === "REGISTERED" ? "OK" : "WARN";
-
-  return { id: "opencode-plugin", status, code, targets };
-}
-
-function openCodeCode(targets: readonly InstallInspection[]): OpenCodeCheckCode {
-  if (targets.some((target) => target.status === "FAILED")) {
-    return "INSPECTION_FAILED";
-  }
-
-  if (targets.some((target) => target.status === "REGISTERED")) {
-    return "REGISTERED";
-  }
-
-  return "NOT_REGISTERED";
-}
-
-const VERSION_CHECKS = {
-  SUPPORTED: { status: "OK", code: "VERSION_SUPPORTED" },
-  UNSUPPORTED: { status: "FAIL", code: "VERSION_UNSUPPORTED" },
-  UNKNOWN: { status: "WARN", code: "VERSION_UNKNOWN" },
-} as const satisfies Record<
-  OpenCodeVersionVerdict["status"],
-  Pick<OpenCodeVersionCheck, "status" | "code">
->;
-
-function checkVersion(dependencies: DoctorDependencies): OpenCodeVersionCheck {
-  const result = checkOpenCodeVersion(dependencies.readOpenCodeVersion());
-
-  return {
-    id: "opencode-version",
-    ...VERSION_CHECKS[result.status],
-    version: result.status === "UNKNOWN" ? null : result.version,
-  };
-}
-
-function aggregateStatus(checks: readonly DoctorCheck[]): DoctorStatus {
+function aggregateStatus(checks: readonly DoctorReportCheck[]): DoctorStatus {
   if (checks.some((check) => check.status === "FAIL")) {
     return "FAIL";
   }

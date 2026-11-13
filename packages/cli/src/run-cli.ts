@@ -1,4 +1,5 @@
-import type { InstallOutcome, InstallTarget } from "@jevguard/opencode-adapter";
+import type { HostInstallOutcome } from "@jevguard/node-infra";
+import { parseHostCommandArguments } from "./arguments";
 import {
   DOCTOR_FAILURE_MESSAGE,
   describeDoctorReport,
@@ -17,10 +18,6 @@ import {
 } from "./feedback/messages";
 import type { FeedbackListResult, FeedbackMarkRequest } from "./feedback/types";
 import {
-  describeInstallAborted,
-  describeInstallAlreadyInstalled,
-  describeInstallFailure,
-  describeInstallInstalled,
   describeLoginFailure,
   describeReport,
   LOGIN_ABORTED_MESSAGE,
@@ -40,11 +37,14 @@ import {
   serializeRulesCheck,
 } from "./rules-check/messages";
 import type { RulesCheckArguments, RulesCheckResult } from "./rules-check/types";
+import { parseSetupArguments } from "./setup/arguments";
+import type { SetupResult } from "./setup/types";
 import type { CliDependencies, CliIO } from "./types";
 
 /**
- * Dispatches the `jevguard` CLI: `login`, `install [--project]`, `report [--json]`,
- * `doctor [--json]`, `feedback [--json]`, `feedback <number> <right|wrong>`, and
+ * Dispatches the `jevguard` CLI: `login`, `install [--project] [--host <id>]`,
+ * `setup [--host <id>] [--project] [--init] [--yes] [--agent-delivery]`, `report [--json]`,
+ * `doctor [--json] [--host <id>]`, `feedback [--json]`, `feedback <number> <right|wrong>`, and
  * `rules check --diff <file|-> ...`. Any other command,
  * argument, or secret-looking argument yields usage and a nonzero exit, and no
  * argument value is ever echoed. `rules check` exits 0 (clean), 1 (a rule failed),
@@ -60,12 +60,12 @@ export async function runCli(
     return runLogin(io, dependencies);
   }
 
-  if (argv.length === 1 && argv[0] === "install") {
-    return runInstall(io, dependencies, "global");
+  if (argv[0] === "install") {
+    return runInstall(argv.slice(1), io, dependencies);
   }
 
-  if (argv.length === 2 && argv[0] === "install" && argv[1] === "--project") {
-    return runInstall(io, dependencies, "project");
+  if (argv[0] === "setup") {
+    return runSetupCommand(argv.slice(1), io, dependencies);
   }
 
   if (argv.length === 1 && argv[0] === "report") {
@@ -76,12 +76,8 @@ export async function runCli(
     return runReport(io, dependencies, true);
   }
 
-  if (argv.length === 1 && argv[0] === "doctor") {
-    return runDoctor(io, dependencies, false);
-  }
-
-  if (argv.length === 2 && argv[0] === "doctor" && argv[1] === "--json") {
-    return runDoctor(io, dependencies, true);
+  if (argv[0] === "doctor") {
+    return runDoctor(argv.slice(1), io, dependencies);
   }
 
   if (argv[0] === "rules" && argv[1] === "check") {
@@ -179,32 +175,62 @@ async function runLogin(io: CliIO, dependencies: CliDependencies): Promise<numbe
 }
 
 async function runInstall(
+  args: readonly string[],
   io: CliIO,
   dependencies: CliDependencies,
-  target: InstallTarget,
 ): Promise<number> {
-  const outcome = await dependencies.install(target);
+  const parsed = parseHostCommandArguments(args, { project: true, json: false });
 
-  return reportInstall(io, outcome);
-}
+  if (parsed === null) {
+    io.writeErr(USAGE);
 
-function reportInstall(io: CliIO, outcome: InstallOutcome): number {
-  if (outcome.status === "INSTALLED") {
-    io.writeOut(describeInstallInstalled(outcome.target, outcome.path));
-    return 0;
-  }
-
-  if (outcome.status === "ALREADY_INSTALLED") {
-    io.writeOut(describeInstallAlreadyInstalled(outcome.target, outcome.path));
-    return 0;
-  }
-
-  if (outcome.status === "ABORTED") {
-    io.writeErr(describeInstallAborted(outcome.path));
     return 1;
   }
 
-  io.writeErr(describeInstallFailure(outcome.reason, outcome.path));
+  return reportInstall(io, await dependencies.install(parsed.host, parsed.scope));
+}
+
+function reportInstall(io: CliIO, outcome: HostInstallOutcome): number {
+  const message = outcome.lines.join("\n");
+
+  if (outcome.status === "CHANGED" || outcome.status === "UNCHANGED") {
+    io.writeOut(message);
+
+    return 0;
+  }
+
+  io.writeErr(message);
+
+  return 1;
+}
+
+async function runSetupCommand(
+  args: readonly string[],
+  io: CliIO,
+  dependencies: CliDependencies,
+): Promise<number> {
+  const request = parseSetupArguments(args);
+
+  if (request === null) {
+    io.writeErr(USAGE);
+
+    return 1;
+  }
+
+  return reportSetup(io, await dependencies.setup(request));
+}
+
+function reportSetup(io: CliIO, result: SetupResult): number {
+  const message = result.lines.join("\n");
+
+  if (result.status === "APPLIED" || result.status === "NOTHING_TO_DO") {
+    io.writeOut(message);
+
+    return 0;
+  }
+
+  io.writeErr(message);
+
   return 1;
 }
 
@@ -222,13 +248,25 @@ async function runReport(io: CliIO, dependencies: CliDependencies, json: boolean
   }
 }
 
-async function runDoctor(io: CliIO, dependencies: CliDependencies, json: boolean): Promise<number> {
+async function runDoctor(
+  args: readonly string[],
+  io: CliIO,
+  dependencies: CliDependencies,
+): Promise<number> {
+  const parsed = parseHostCommandArguments(args, { project: false, json: true });
+
+  if (parsed === null) {
+    io.writeErr(USAGE);
+
+    return 1;
+  }
+
   try {
-    const report = await dependencies.doctor();
+    const run = await dependencies.doctor([parsed.host]);
 
-    io.writeOut(json ? serializeDoctorReport(report) : describeDoctorReport(report));
+    io.writeOut(parsed.json ? serializeDoctorReport(run.report) : describeDoctorReport(run));
 
-    return report.status === "FAIL" ? 1 : 0;
+    return run.report.status === "FAIL" ? 1 : 0;
   } catch {
     io.writeErr(DOCTOR_FAILURE_MESSAGE);
 

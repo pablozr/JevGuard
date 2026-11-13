@@ -1,0 +1,40 @@
+{
+  "name": "@pablozrrrr/jevguard-cli",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Host-neutral JevGuard command line: login, report, feedback, rules check, doctor, install and setup.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "jevguard": "./src/main.ts"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pablozr/JevGuard.git",
+    "directory": "packages/cli"
+  },
+  "homepage": "https://github.com/pablozr/JevGuard#readme",
+  "bugs": {
+    "url": "https://github.com/pablozr/JevGuard/issues"
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "format": "biome format --write .",
+    "lint": "biome lint .",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run --root ../.. packages/cli",
+    "build": "bun scripts/build-artifact.ts"
+  },
+  "dependencies": {
+    "@inquirer/password": "^5.2.2",
+    "@jevguard/claude-code-plugin": "workspace:*",
+    "@jevguard/core": "workspace:*",
+    "@jevguard/node-infra": "workspace:*",
+    "@jevguard/opencode-adapter": "workspace:*",
+    "@napi-rs/keyring": "2.1.0",
+    "@typesafe-ai/sdk": "0.6.0",
+    "yaml": "2.9.1"
+  }
+}

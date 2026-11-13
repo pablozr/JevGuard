@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 import { performDoctor } from "./doctor/perform";
 import { performFeedbackList, performFeedbackMark } from "./feedback/perform";
 import { performInstall } from "./install";
@@ -6,6 +6,7 @@ import { performLogin } from "./login";
 import { performReport } from "./report";
 import { performRulesCheck } from "./rules-check/perform";
 import { runCli } from "./run-cli";
+import { performSetup } from "./setup/perform";
 import type { CliIO } from "./types";
 
 const io: CliIO = {
@@ -16,6 +17,7 @@ const io: CliIO = {
 const exitCode = await runCli(process.argv.slice(2), io, {
   login: performLogin,
   install: performInstall,
+  setup: performSetup,
   report: performReport,
   doctor: performDoctor,
   rulesCheck: performRulesCheck,

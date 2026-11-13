@@ -1,9 +1,10 @@
 import {
+  createDefaultJevPort,
   createNodePolicyFileSystem,
   createPolicyFileLoader,
   parsePolicyConfig,
 } from "@jevguard/node-infra";
-import { createDefaultJevPort } from "../../jev-port";
+
 import { resolveProjectRoot } from "../project-root";
 import { executeRulesCheck } from "./execute";
 import { createNodeDiffReader } from "./read-diff";

@@ -7,10 +7,10 @@ import type {
   ReviewHistoryRecord,
 } from "@jevguard/node-infra";
 import { describe, expect, test } from "vitest";
-import { parseFeedbackArguments } from "../src/cli/feedback/arguments";
-import { listFeedback, markFeedback } from "../src/cli/feedback/execute";
-import { describeAge, describeFeedbackMark } from "../src/cli/feedback/messages";
-import type { FeedbackDependencies } from "../src/cli/feedback/types";
+import { parseFeedbackArguments } from "../src/feedback/arguments";
+import { listFeedback, markFeedback } from "../src/feedback/execute";
+import { describeAge, describeFeedbackMark } from "../src/feedback/messages";
+import type { FeedbackDependencies } from "../src/feedback/types";
 
 const NOW = new Date("2026-03-01T12:00:00.000Z");
 

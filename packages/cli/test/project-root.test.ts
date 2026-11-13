@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
-import { resolveProjectRoot } from "../src/cli/project-root";
+import { resolveProjectRoot } from "../src/project-root";
 
 const ROOT = join(process.cwd(), "workspace");
 const NESTED = join(ROOT, "packages", "app");

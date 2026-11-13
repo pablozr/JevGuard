@@ -33,7 +33,6 @@ function skillDistPrefix(skill: BundledSkill): string {
  */
 const ARTIFACT_FILES: readonly string[] = [
   "index.js",
-  "cli/main.js",
   "README.md",
   "LICENSE",
   ...BUNDLED_SKILLS.flatMap((skill) => [
@@ -47,7 +46,6 @@ const ARTIFACT_FILES: readonly string[] = [
  * Internal workspace packages are bundled, so no `workspace:` specifier survives.
  */
 const RUNTIME_DEPENDENCIES: Readonly<Record<string, string>> = {
-  "@inquirer/password": "^5.2.2",
   "@napi-rs/keyring": "2.1.0",
   "@typesafe-ai/sdk": "0.6.0",
   yaml: "2.9.1",
@@ -83,7 +81,6 @@ async function bundleEntries(source: SourceManifest): Promise<void> {
   const result = await Bun.build({
     entrypoints: [
       join(SOURCE_DIR, "index.ts"),
-      join(SOURCE_DIR, "cli/main.ts"),
       ...BUNDLED_SKILLS.map((skill) =>
         join(SOURCE_DIR, "skills", skill.name, `${skill.validator}.ts`),
       ),
@@ -118,7 +115,6 @@ async function writeArtifactManifest(source: SourceManifest): Promise<void> {
     type: "module",
     main: "./index.js",
     exports: { ".": "./index.js" },
-    bin: { jevguard: "cli/main.js" },
     files: [...ARTIFACT_FILES],
     engines: source.engines,
     repository: source.repository,

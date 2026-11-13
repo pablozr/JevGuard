@@ -24,13 +24,12 @@ const BUILD_SENTINEL_VARIABLE = "JEVGUARD_ARTIFACT_BUILD_SENTINEL";
 const BUILD_SENTINEL_VALUE = "JEVGUARD_ARTIFACT_BUILD_SENTINEL_7f3c9d2a";
 
 const PLUGIN_PACKAGE_NAME = "@pablozrrrr/jevguard";
-const PLUGIN_VERSION = "0.3.1";
+const PLUGIN_VERSION = "0.4.0";
 const RULES_SKILL_PREFIX = "skills/jevguard-rules";
 const INIT_SKILL_PREFIX = "skills/jev-init";
 const EXPECTED_DIST_FILES = [
   "LICENSE",
   "README.md",
-  "cli/main.js",
   "index.js",
   "package.json",
   `${INIT_SKILL_PREFIX}/SKILL.md`,
@@ -41,7 +40,6 @@ const EXPECTED_DIST_FILES = [
 const EXPECTED_ARCHIVE_FILES = EXPECTED_DIST_FILES.map((file) => `package/${file}`).sort();
 const EXPECTED_PACKED_FILES = [
   "index.js",
-  "cli/main.js",
   "README.md",
   "LICENSE",
   `${RULES_SKILL_PREFIX}/SKILL.md`,
@@ -51,7 +49,6 @@ const EXPECTED_PACKED_FILES = [
 ];
 const EXPECTED_EXPORTS = { ".": "./index.js" };
 const EXPECTED_RUNTIME_DEPENDENCIES = {
-  "@inquirer/password": "^5.2.2",
   "@napi-rs/keyring": "2.1.0",
   "@typesafe-ai/sdk": "0.6.0",
   yaml: "2.9.1",
@@ -460,7 +457,7 @@ describe("local package artifact", () => {
     expect(manifest.license).toBe("MIT");
     expect(manifest.main).toBe("./index.js");
     expect(manifest.exports).toEqual(EXPECTED_EXPORTS);
-    expect(manifest.bin).toEqual({ jevguard: "cli/main.js" });
+    expect(manifest.bin).toBeUndefined();
     expect(manifest.files).toEqual(EXPECTED_PACKED_FILES);
     expect(manifest.engines).toEqual(EXPECTED_ENGINES);
     expect(manifest.repository).toEqual(EXPECTED_REPOSITORY);
@@ -486,20 +483,15 @@ describe("local package artifact", () => {
     }
   });
 
-  test("keeps the Bun shebang on the generated CLI entry", () => {
-    const generated = readFileSync(join(DIST_DIR, "cli", "main.js"), "utf8");
-    const packed = readFileSync(join(extractedDir, "package", "cli", "main.js"), "utf8");
-
-    expect(generated.startsWith("#!/usr/bin/env bun")).toBe(true);
-    expect(packed.startsWith("#!/usr/bin/env bun")).toBe(true);
+  test("ships no CLI entry", () => {
+    expect(existsSync(join(DIST_DIR, "cli"))).toBe(false);
+    expect(existsSync(join(extractedDir, "package", "cli"))).toBe(false);
   });
 
   test("does not embed build-process environment values", () => {
     const bundled = [
       readFileSync(join(DIST_DIR, "index.js"), "utf8"),
-      readFileSync(join(DIST_DIR, "cli", "main.js"), "utf8"),
       readFileSync(join(extractedDir, "package", "index.js"), "utf8"),
-      readFileSync(join(extractedDir, "package", "cli", "main.js"), "utf8"),
     ];
 
     for (const content of bundled) {
@@ -540,14 +532,6 @@ describe("local package artifact", () => {
     expect(result.names).toEqual(["default"]);
     expect(result.id).toBe("jevguard");
     expect(result.setup).toBe("function");
-  });
-
-  test("runs the installed CLI through the Bun bin mapping from .opencode", () => {
-    const result = spawnSync("bun", ["run", "jevguard"], { cwd: opencodeDir, encoding: "utf8" });
-
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain("Usage: jevguard login");
-    expect(result.stderr).not.toMatch(/Cannot find (module|package)|ERR_MODULE_NOT_FOUND/);
   });
 
   test("validates the dist with npm publish --dry-run without publishing", () => {
