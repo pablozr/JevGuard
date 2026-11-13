@@ -1,3 +1,4 @@
+export { createDefaultCredentialProvider, createDefaultJevPort } from "./default-port";
 export {
   buildTypeSafeClientConfig,
   createJevTransport,

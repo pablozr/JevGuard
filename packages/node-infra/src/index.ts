@@ -23,6 +23,39 @@ export {
   login,
 } from "./credentials";
 export type {
+  ConfirmationPrompt,
+  ConfirmationResult,
+  HostCheckStatus,
+  HostCliContext,
+  HostCliExtension,
+  DescribedCheck,
+  HostDetection,
+  HostDoctorCheck,
+  HostDoctorCheckJson,
+  HostId,
+  HostVersionCheckLabels,
+  HostVersionProbe,
+  HostInstallInspection,
+  HostInstallOutcome,
+  HostInstallScope,
+  HostInstallState,
+  ProcessRequest,
+  ProcessResult,
+  ProcessRunner,
+  TextFileSystem,
+} from "./host-cli";
+export {
+  checkHint,
+  checkLine,
+  createConfirmationPrompt,
+  createNodeProcessRunner,
+  createNodeTextFileSystem,
+  detectHostVersion,
+  parseVersion,
+  satisfiesRange,
+  versionDoctorCheck,
+} from "./host-cli";
+export type {
   FeedbackReadResult,
   FeedbackSelectionReadResult,
   FeedbackWriteStatus,
@@ -67,6 +100,8 @@ export type {
 } from "./jev";
 export {
   buildTypeSafeClientConfig,
+  createDefaultCredentialProvider,
+  createDefaultJevPort,
   createJevTransport,
   createTypeSafeJevTransport,
   createTypeSafeSystemOneClient,
@@ -81,6 +116,13 @@ export {
   policyFilePaths,
 } from "./policy";
 export type {
+  AgentDeliveryBlock,
+  AgentDeliveryFiles,
+  AgentDeliveryInput,
+  AgentDeliveryInspection,
+  AgentDeliveryInspectionStatus,
+  AgentDeliveryResult,
+  AgentDeliveryStatus,
   LegacyRemediationKey,
   ProjectProbe,
   RemediationDelivery,
@@ -95,6 +137,8 @@ export type {
 } from "./remediation";
 export {
   createNodeProjectProbe,
+  enableAgentDelivery,
+  inspectAgentDelivery,
   createUserRemediationSettings,
   isInsidePath,
   isInsideProject,
@@ -104,6 +148,7 @@ export {
   parentOf,
   realPathOfNearest,
   resolveRemediationUserSettings,
+  userConfigEnvironmentOf,
   userConfigFileOf,
 } from "./remediation";
 export type {

@@ -1,3 +1,4 @@
+export { enableAgentDelivery, inspectAgentDelivery } from "./agent-delivery";
 export {
   createNodeProjectProbe,
   isInsidePath,
@@ -8,6 +9,13 @@ export {
   realPathOfNearest,
 } from "./containment";
 export type {
+  AgentDeliveryBlock,
+  AgentDeliveryFiles,
+  AgentDeliveryInput,
+  AgentDeliveryInspection,
+  AgentDeliveryInspectionStatus,
+  AgentDeliveryResult,
+  AgentDeliveryStatus,
   LegacyRemediationKey,
   ProjectProbe,
   RemediationDelivery,
@@ -23,6 +31,8 @@ export type { UserRemediationSettingsDependencies } from "./user-settings";
 export {
   createUserRemediationSettings,
   loadRemediationUserSettings,
+  isRecord,
   resolveRemediationUserSettings,
+  userConfigEnvironmentOf,
   userConfigFileOf,
 } from "./user-settings";

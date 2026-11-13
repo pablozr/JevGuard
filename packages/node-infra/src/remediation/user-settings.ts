@@ -32,7 +32,8 @@ const INVALID: RemediationUserSettingsResult = {
 
 type JsonRecord = Record<string, unknown>;
 
-function isRecord(value: unknown): value is JsonRecord {
+/** `true` for a plain object: not `null`, not an array. */
+export function isRecord(value: unknown): value is JsonRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -184,6 +185,17 @@ export interface UserRemediationSettingsDependencies {
   readonly rules?: RemediationUserSettingsRules;
 }
 
+/** Reads the variables the user config location derives from through `environment.get`. */
+export function userConfigEnvironmentOf(environment: {
+  get(name: string): string | undefined;
+}): UserConfigEnvironment {
+  return {
+    xdgConfigHome: environment.get("XDG_CONFIG_HOME"),
+    userProfile: environment.get("USERPROFILE"),
+    home: environment.get("HOME"),
+  };
+}
+
 /**
  * Resolves the user's remediation settings for one project from the real file system.
  * The answer is remembered per project for the life of the process.
@@ -191,13 +203,8 @@ export interface UserRemediationSettingsDependencies {
 export function createUserRemediationSettings(
   dependencies: UserRemediationSettingsDependencies,
 ): (projectRoot: string) => RemediationUserSettingsResult {
-  const { environment } = dependencies;
   const file = userConfigFileOf(
-    {
-      xdgConfigHome: environment.get("XDG_CONFIG_HOME"),
-      userProfile: environment.get("USERPROFILE"),
-      home: environment.get("HOME"),
-    },
+    userConfigEnvironmentOf(dependencies.environment),
     dependencies.fileName,
   );
   const probe = createNodeProjectProbe();
