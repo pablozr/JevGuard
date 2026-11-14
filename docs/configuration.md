@@ -418,6 +418,10 @@ A local diagnosis: no network, no Jev transport, no writes. Checks, in order:
 | `config` | `CONFIG_DEFAULTS`, `CONFIG_VALID`, `CONFIG_PARSE_INVALID`, `CONFIG_INVALID`, `REMEDIATION_INVALID`, `CONFIG_READ_FAILURE`, `CONFIG_NOT_CHECKED` |
 | `opencode-plugin` | `REGISTERED`, `NOT_REGISTERED`, `INSPECTION_FAILED` |
 | `opencode-version` | `VERSION_SUPPORTED`, `VERSION_UNSUPPORTED`, `VERSION_UNKNOWN` |
+| `claude-plugin` | `INSTALLED`, `DISABLED`, `NOT_INSTALLED`, `INSPECTION_FAILED` |
+| `claude-version` | `VERSION_SUPPORTED`, `VERSION_UNSUPPORTED`, `VERSION_UNKNOWN` |
+| `claude-config` | `CONFIG_DIR_OVERRIDE`, `CONFIG_DIR_DEFAULT` |
+| `claude-node` | `VERSION_SUPPORTED`, `VERSION_UNSUPPORTED`, `VERSION_UNKNOWN` |
 
 A missing credential, missing or invalid rules, an invalid or unreadable config, and an
 OpenCode version outside `>=2.2.2 <2.3` (pre-releases included) are `FAIL`. An
@@ -427,7 +431,19 @@ policy file could not be read. The overall status is the worst check. The OpenCo
 check inspects the global `opencode.json` and the `opencode.json` in the current
 directory, and passes when either registers the plugin in its `plugins` list (or the
 legacy `plugin` list). The version check runs the `opencode` on `PATH` locally.
-Claude Code installs are not diagnosed yet.
+
+The Claude Code checks run `claude plugin list --json`, `claude --version` and
+`node --version`, which inherit the environment, so they see the plugins of the config
+directory in use: `CLAUDE_CONFIG_DIR` when set and non-empty, otherwise `~/.claude`.
+`claude-config` reports that path (`configDir` in `--json`) and nothing inside it, and
+the plugin line names it too. `claude-plugin` is `OK` when JevGuard is installed and
+enabled in the user or project scope, `WARN` when it is installed but disabled
+(`claude plugin enable jevguard@jevguard`), not installed, or the list is unreadable.
+`claude-node` needs Node `>=22.13.0` on `PATH` (the hook and the worker run with it):
+an older Node is `FAIL`, a missing or unreadable one is `WARN`. `jevguard install` and
+`setup` run the same `claude plugin` commands, so with `CLAUDE_CONFIG_DIR` set they
+install into that directory and leave `~/.claude` alone; their prompt and result name
+the directory.
 
 Exit codes: `0` when no check is `FAIL` (warnings included), `1` when any check is
 `FAIL`, and `1` with the usage text for invalid arguments.

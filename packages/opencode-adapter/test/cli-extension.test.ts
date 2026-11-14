@@ -71,6 +71,7 @@ function contextOf(options: ContextOptions = {}): HostCliContext {
     projectRoot: CWD,
     homedir: HOME,
     environment: { xdgConfigHome: undefined, userProfile: undefined, home: HOME },
+    variable: () => undefined,
     processes: options.processes ?? new FakeProcesses(exited("2.2.2\n")),
     files: options.files ?? new FakeFiles(),
     confirmation: options.confirmation ?? confirmationOf("CONFIRMED"),

@@ -2,7 +2,16 @@ import type { HostInstallScope, HostInstallState } from "@jevguard/node-infra";
 
 export type ClaudePluginScope = "user" | "project";
 
-export type ClaudePluginCheckCode = "INSTALLED" | "NOT_INSTALLED" | "INSPECTION_FAILED";
+export type ClaudePluginCheckCode =
+  | "INSTALLED"
+  | "DISABLED"
+  | "NOT_INSTALLED"
+  | "INSPECTION_FAILED";
+
+export interface ClaudeConfigDir {
+  readonly dir: string;
+  readonly source: "CLAUDE_CONFIG_DIR" | "DEFAULT";
+}
 
 export type ClaudeInstallFailureCode =
   | "CLAUDE_NOT_FOUND"

@@ -18,15 +18,24 @@ export const SETUP_NOT_CONFIRMED_MESSAGE =
 
 export const CREDENTIAL_LOGIN_HINT = "Run `jevguard login` in a terminal to store your API key.";
 
-const DOCTOR_HINT = "Next: run `jevguard doctor` to check the setup.";
+/** `jevguard doctor` checks one host (OpenCode by default), so the hint names each set-up host. */
+function doctorCommands(hostIds: readonly string[]): string {
+  return hostIds.map((id) => `\`jevguard doctor --host ${id}\``).join(" and ");
+}
 
-/** Suggests `jevguard login` only while the credential is still missing. */
-export function nextSteps(credentialMissing: boolean): readonly string[] {
+/**
+ * Suggests `jevguard login` only while the credential is still missing, and the doctor
+ * command of every host the setup covered.
+ */
+export function nextSteps(
+  credentialMissing: boolean,
+  hostIds: readonly string[],
+): readonly string[] {
+  const doctor = doctorCommands(hostIds);
+
   return credentialMissing
-    ? [
-        "Next: run `jevguard login` to store your API key, then `jevguard doctor` to check the setup.",
-      ]
-    : [DOCTOR_HINT];
+    ? [`Next: run \`jevguard login\` to store your API key, then ${doctor} to check the setup.`]
+    : [`Next: run ${doctor} to check the setup.`];
 }
 
 const MARKERS = { PENDING: "[todo]", DONE: "[done]", SKIPPED: "[skip]" } as const;

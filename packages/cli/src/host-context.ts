@@ -17,6 +17,7 @@ export function createHostContext(): HostCliContext {
     projectRoot: resolveProjectRoot(cwd),
     homedir: homedir(),
     environment: userConfigEnvironmentOf({ get: (name) => process.env[name] }),
+    variable: (name) => process.env[name],
     processes: createNodeProcessRunner(),
     files: createNodeTextFileSystem(),
     confirmation: createConfirmationPrompt(),

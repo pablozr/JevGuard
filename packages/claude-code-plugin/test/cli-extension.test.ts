@@ -6,6 +6,7 @@ import type {
   ProcessRunner,
   TextFileSystem,
 } from "@jevguard/node-infra";
+import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { createClaudeCodeCliExtension } from "../src/cli";
 
@@ -44,19 +45,23 @@ function confirmationOf(status: "CONFIRMED" | "DECLINED" | "NOT_A_TTY"): Confirm
 const unusedFiles: TextFileSystem = {
   readText: async () => null,
   exists: async () => false,
-  writeTextAtomic: async () => {},
+  writeTextAtomic: async () => {
+    throw new Error("the Claude Code extension must not write files itself");
+  },
   makeDirectory: async () => {},
 };
 
 function contextOf(
   processes: ProcessRunner,
   confirmation: ConfirmationPrompt = confirmationOf("CONFIRMED"),
+  variables: Readonly<Record<string, string>> = {},
 ): HostCliContext {
   return {
     cwd: "C:/repo",
     projectRoot: "C:/repo",
     homedir: "C:/home",
     environment: { xdgConfigHome: undefined, userProfile: undefined, home: "C:/home" },
+    variable: (name) => variables[name],
     processes,
     files: unusedFiles,
     confirmation,
@@ -65,7 +70,8 @@ function contextOf(
 
 interface Machine {
   version?: string;
-  plugins?: readonly { id: string; scope: string }[];
+  node?: string;
+  plugins?: readonly { id: string; scope: string; enabled?: boolean }[];
   marketplaces?: readonly { name: string }[];
   failing?: readonly string[];
 }
@@ -73,6 +79,7 @@ interface Machine {
 function machine(options: Machine = {}): FakeProcesses {
   const {
     version = "2.1.322 (Claude Code)",
+    node = "v22.14.0",
     plugins = [],
     marketplaces = [],
     failing = [],
@@ -80,6 +87,8 @@ function machine(options: Machine = {}): FakeProcesses {
 
   return new FakeProcesses((request) => {
     const command = request.args.join(" ");
+
+    if (request.command === "node") return exited(`${node}\n`);
 
     if (failing.some((prefix) => command.startsWith(prefix))) return exited("", 1);
 
@@ -183,6 +192,46 @@ describe("Claude Code CLI extension install", () => {
     ]);
   });
 
+  test("names the default config dir without CLAUDE_CONFIG_DIR", async () => {
+    const questions: string[] = [];
+    const confirmation: ConfirmationPrompt = {
+      confirm: async (message) => {
+        questions.push(message);
+
+        return { status: "CONFIRMED" };
+      },
+    };
+
+    const outcome = await extension.install(contextOf(machine(), confirmation), "global");
+
+    expect(questions.join("\n")).toContain(join("C:/home", ".claude"));
+    expect(outcome.lines.join("\n")).toContain(join("C:/home", ".claude"));
+  });
+
+  test("with CLAUDE_CONFIG_DIR it installs for that dir, names it and writes no file itself", async () => {
+    const dir = "C:/agents/accounts/one";
+    const questions: string[] = [];
+    const confirmation: ConfirmationPrompt = {
+      confirm: async (message) => {
+        questions.push(message);
+
+        return { status: "CONFIRMED" };
+      },
+    };
+    const processes = machine();
+
+    const outcome = await extension.install(
+      contextOf(processes, confirmation, { CLAUDE_CONFIG_DIR: dir }),
+      "global",
+    );
+
+    expect(outcome).toMatchObject({ status: "CHANGED", code: "INSTALLED" });
+    expect(questions.join("\n")).toContain(dir);
+    expect(outcome.lines.join("\n")).toContain(dir);
+    expect(outcome.lines.join("\n")).not.toContain(".claude");
+    expect(processes.commands().slice(-1)).toEqual([`plugin install ${PLUGIN_ID} --scope user`]);
+  });
+
   test("uses the project scope for --project", async () => {
     const processes = machine();
 
@@ -264,7 +313,12 @@ describe("Claude Code CLI extension doctor", () => {
 
     const checks = await extension.doctor(contextOf(processes));
 
-    expect(checks.map((check) => check.json.id)).toEqual(["claude-plugin", "claude-version"]);
+    expect(checks.map((check) => check.json.id)).toEqual([
+      "claude-plugin",
+      "claude-version",
+      "claude-config",
+      "claude-node",
+    ]);
     expect(Object.keys(checks[0]?.json ?? {})).toEqual(["id", "status", "code", "scopes"]);
     expect(checks[0]?.json).toEqual({
       id: "claude-plugin",
@@ -281,6 +335,86 @@ describe("Claude Code CLI extension doctor", () => {
       code: "VERSION_SUPPORTED",
       version: "2.1.322",
     });
+  });
+
+  test("reports the default config dir and the Node version", async () => {
+    const [, , config, node] = await extension.doctor(contextOf(machine()));
+
+    expect(config?.json).toEqual({
+      id: "claude-config",
+      status: "OK",
+      code: "CONFIG_DIR_DEFAULT",
+      configDir: join("C:/home", ".claude"),
+    });
+    expect(node?.json).toEqual({
+      id: "claude-node",
+      status: "OK",
+      code: "VERSION_SUPPORTED",
+      version: "22.14.0",
+    });
+  });
+
+  test("names the CLAUDE_CONFIG_DIR in use in the plugin and config checks", async () => {
+    const dir = "C:/agents/accounts/one";
+    const processes = machine({ plugins: [{ id: PLUGIN_ID, scope: "user" }] });
+
+    const [plugin, , config] = await extension.doctor(
+      contextOf(processes, confirmationOf("CONFIRMED"), { CLAUDE_CONFIG_DIR: dir }),
+    );
+
+    expect(plugin?.message).toContain(dir);
+    expect(plugin?.json).toMatchObject({ status: "OK", code: "INSTALLED" });
+    expect(config?.json).toMatchObject({ code: "CONFIG_DIR_OVERRIDE", configDir: dir });
+    expect(config?.message).toContain("from CLAUDE_CONFIG_DIR");
+  });
+
+  test("an empty CLAUDE_CONFIG_DIR falls back to the default", async () => {
+    const [, , config] = await extension.doctor(
+      contextOf(machine(), confirmationOf("CONFIRMED"), { CLAUDE_CONFIG_DIR: "  " }),
+    );
+
+    expect(config?.json).toMatchObject({ code: "CONFIG_DIR_DEFAULT" });
+  });
+
+  test("warns when the plugin is installed but disabled", async () => {
+    const processes = machine({ plugins: [{ id: PLUGIN_ID, scope: "user", enabled: false }] });
+
+    const [plugin] = await extension.doctor(contextOf(processes));
+
+    expect(plugin?.json).toMatchObject({ status: "WARN", code: "DISABLED" });
+    expect(plugin?.annotation).toContain(`claude plugin enable ${PLUGIN_ID}`);
+  });
+
+  test.each([
+    ["v22.13.0", "OK", "VERSION_SUPPORTED"],
+    ["v22.12.9", "FAIL", "VERSION_UNSUPPORTED"],
+    ["v20.11.1", "FAIL", "VERSION_UNSUPPORTED"],
+  ] as const)("classifies the Node version %s", async (node, status, code) => {
+    const [, , , check] = await extension.doctor(contextOf(machine({ node })));
+
+    expect(check?.json).toMatchObject({ id: "claude-node", status, code });
+  });
+
+  test("a missing Node is a warning with the range", async () => {
+    const processes = new FakeProcesses((request) =>
+      request.command === "node" ? { kind: "NOT_FOUND" } : exited("2.1.322 (Claude Code)\n"),
+    );
+
+    const [, , , check] = await extension.doctor(contextOf(processes));
+
+    expect(check?.json).toMatchObject({ id: "claude-node", status: "WARN" });
+  });
+
+  test("never prints settings content or a credential", async () => {
+    const processes = machine({ plugins: [{ id: PLUGIN_ID, scope: "user" }] });
+    const checks = await extension.doctor(
+      contextOf(processes, confirmationOf("CONFIRMED"), {
+        CLAUDE_CONFIG_DIR: "C:/cfg",
+        TYPESAFE_API_KEY: "tsk_SECRET_VALUE",
+      }),
+    );
+
+    expect(JSON.stringify(checks)).not.toContain("tsk_SECRET_VALUE");
   });
 
   test("warns and names the install command when the plugin is absent", async () => {

@@ -50,6 +50,8 @@ export interface HostCliContext {
   readonly projectRoot: string;
   readonly homedir: string;
   readonly environment: UserConfigEnvironment;
+  /** Reads one process environment variable (a host's own config-dir override, for example). */
+  readonly variable: (name: string) => string | undefined;
   readonly processes: ProcessRunner;
   readonly files: TextFileSystem;
   readonly confirmation: ConfirmationPrompt;

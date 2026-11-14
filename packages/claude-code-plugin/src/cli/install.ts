@@ -1,4 +1,5 @@
 import type { HostCliContext, HostInstallOutcome, HostInstallScope } from "@jevguard/node-infra";
+import { claudeConfigDirOf } from "./config-dir";
 import {
   CLAUDE_COMMAND,
   CLAUDE_INSTALL_TIMEOUT_MS,
@@ -49,11 +50,12 @@ async function preflight(
 }
 
 async function confirmInstall(
+  configDir: string,
   context: HostCliContext,
   scope: ClaudePluginScope,
 ): Promise<HostInstallOutcome | null> {
   const confirmation = await context.confirmation.confirm(
-    `Install the JevGuard plugin for Claude Code (${scope} scope)?`,
+    `Install the JevGuard plugin for Claude Code (${scope} scope, config dir ${configDir})?`,
   );
 
   if (confirmation.status === "DECLINED") {
@@ -72,6 +74,9 @@ export async function installClaudePlugin(
   hostScope: HostInstallScope,
 ): Promise<HostInstallOutcome> {
   const scope = pluginScopeOf(hostScope);
+  // `claude plugin ...` inherits the environment, so it reads and writes the plugins of
+  // `CLAUDE_CONFIG_DIR` when set and never touches `~/.claude` then.
+  const { dir: configDir } = claudeConfigDirOf(context);
   const blocked = await preflight(context, scope);
 
   if (blocked !== null) return blocked;
@@ -80,11 +85,11 @@ export async function installClaudePlugin(
     return {
       status: "UNCHANGED",
       code: "ALREADY_INSTALLED",
-      lines: [describeInstallAlreadyInstalled(scope)],
+      lines: [describeInstallAlreadyInstalled(scope, configDir)],
     };
   }
 
-  const refused = await confirmInstall(context, scope);
+  const refused = await confirmInstall(configDir, context, scope);
 
   if (refused !== null) return refused;
 
@@ -94,5 +99,9 @@ export async function installClaudePlugin(
     return failed("INSTALL_FAILED", scope);
   }
 
-  return { status: "CHANGED", code: "INSTALLED", lines: [describeInstallInstalled(scope)] };
+  return {
+    status: "CHANGED",
+    code: "INSTALLED",
+    lines: [describeInstallInstalled(scope, configDir)],
+  };
 }

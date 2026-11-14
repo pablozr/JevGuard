@@ -48,6 +48,13 @@ function hasHost(steps: readonly SetupStep[]): boolean {
   return steps.some((step) => step.kind === "INSTALL");
 }
 
+/** The hosts the plan installs into, once each, in plan order. */
+function hostIdsOf(steps: readonly SetupStep[]): readonly string[] {
+  const ids = steps.flatMap((step) => (step.kind === "INSTALL" ? [step.extension.id] : []));
+
+  return [...new Set(ids)];
+}
+
 async function resolve(
   ports: SetupPorts,
   request: SetupRequest,
@@ -88,7 +95,10 @@ export async function runSetup(ports: SetupPorts, request: SetupRequest): Promis
   const pending = plan.steps.filter((step) => step.status === "PENDING");
 
   if (pending.length === 0) {
-    return { status: "NOTHING_TO_DO", lines: [...lines, "Nothing to do.", ...nextSteps(false)] };
+    return {
+      status: "NOTHING_TO_DO",
+      lines: [...lines, "Nothing to do.", ...nextSteps(false, hostIdsOf(plan.steps))],
+    };
   }
 
   const records: StepRecord[] = [];
@@ -110,7 +120,7 @@ export async function runSetup(ports: SetupPorts, request: SetupRequest): Promis
     lines: [
       ...lines,
       ...records.flatMap((record) => record.outcome.lines),
-      ...nextSteps(isCredentialMissing(records)),
+      ...nextSteps(isCredentialMissing(records), hostIdsOf(plan.steps)),
     ],
   };
 }
