@@ -163,13 +163,13 @@ describe("resolveAcquisition", () => {
 
   test("any other UNAVAILABLE cause maps to MISSING_ATTRIBUTED_DIFF and keeps the causes", () => {
     const result = resolveAcquisition(
-      new Scenario().prompt().powershell().tool("MCP", "mcp__a__b").stop().acquire(),
+      new Scenario().prompt().powershell().tool("UNKNOWN", "Weird").stop().acquire(),
     );
 
     expect(result).toEqual({
       status: "UNAVAILABLE",
       reason: "MISSING_ATTRIBUTED_DIFF",
-      causes: ["SHELL_GIT_DIFF_UNAVAILABLE", "MCP_TOOL"],
+      causes: ["SHELL_GIT_DIFF_UNAVAILABLE", "UNKNOWN_TOOL"],
     });
   });
 
@@ -178,7 +178,7 @@ describe("resolveAcquisition", () => {
       new Scenario()
         .prompt()
         .edit(".env", "a", "b")
-        .tool("MCP", "mcp__a__b")
+        .tool("UNKNOWN", "Weird")
         .stopFailure()
         .acquire(),
     );

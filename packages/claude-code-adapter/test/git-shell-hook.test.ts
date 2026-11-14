@@ -29,7 +29,7 @@ function shellFiles(world: HookWorld): readonly string[] {
 // Real Git processes are slow under a loaded parallel run; keep these from timing out spuriously.
 vi.setConfig({ testTimeout: 20_000 });
 
-describe.each(["Bash", "PowerShell"])("%s through the hook", (tool) => {
+describe.each(["Bash", "PowerShell", "mcp__agentes__send"])("%s through the hook", (tool) => {
   let world: HookWorld;
 
   beforeEach(() => {

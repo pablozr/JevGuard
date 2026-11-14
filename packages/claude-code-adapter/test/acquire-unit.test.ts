@@ -215,10 +215,10 @@ describe("acquireUnit universe and shell rules", () => {
   });
 
   test("subagent MCP and PowerShell follow the main rules", () => {
-    const mcp = scenario().tool("MCP", "mcp__x__y", { agent: "sub1" }).stop().acquire();
+    const mcp = scenario().mcp({ agent: "sub1" }).stop().acquire();
     const shell = scenario().powershell({ agent: "sub1" }).stop().acquire();
 
-    expect(reasonsOf(mcp)).toEqual(["MCP_TOOL"]);
+    expect(reasonsOf(mcp)).toEqual(["SHELL_GIT_DIFF_UNAVAILABLE"]);
     expect(reasonsOf(shell)).toEqual(["SHELL_GIT_DIFF_UNAVAILABLE"]);
   });
 
@@ -235,8 +235,7 @@ describe("acquireUnit universe and shell rules", () => {
     expect(result).toEqual({ status: "SKIPPED", reason: "NO_ATTRIBUTED_PATCH" });
   });
 
-  test("MCP and unknown tools are unavailable", () => {
-    expect(reasonsOf(scenario().tool("MCP", "mcp__a__b").stop().acquire())).toEqual(["MCP_TOOL"]);
+  test("unknown tools are unavailable", () => {
     expect(reasonsOf(scenario().tool("UNKNOWN", "Weird").stop().acquire())).toEqual([
       "UNKNOWN_TOOL",
     ]);
@@ -309,6 +308,67 @@ describe("acquireUnit shell via Git diff", () => {
       .acquire();
 
     expect(reasonsOf(result)).toEqual(["BLOCKED_PATH"]);
+  });
+});
+
+describe("acquireUnit MCP via Git diff (ADR 0017)", () => {
+  test("an MCP call with a clean Git diff does not make the unit unavailable", () => {
+    const result = scenario().edit("src/a.ts", "a", "b").mcp({ git: git() }).stop().acquire();
+
+    expect(result.status).toBe("READY");
+    expect(scenario().mcp({ git: git() }).stop().acquire()).toEqual({
+      status: "SKIPPED",
+      reason: "NO_ATTRIBUTED_PATCH",
+    });
+  });
+
+  test("a file changed by an MCP call enters the patch with its pre-call content", () => {
+    const result = scenario()
+      .mcp({ git: git(dirtyChange("src/x.ts", "before", "changed")) })
+      .stop()
+      .acquire();
+
+    expect(result).toMatchObject({
+      status: "READY",
+      unit: { files: [{ path: "src/x.ts", before: image("before"), after: image("changed") }] },
+    });
+  });
+
+  test("a missing, failed or over-limit snapshot keeps the unit unavailable", () => {
+    const missing = scenario().mcp().stop().acquire();
+    const unproven = scenario()
+      .mcp({ git: { status: "FAILED", cause: "UNPROVEN" } })
+      .stop()
+      .acquire();
+    const limit = scenario()
+      .mcp({ git: { status: "FAILED", cause: "LIMIT_EXCEEDED" } })
+      .stop()
+      .acquire();
+
+    expect(reasonsOf(missing)).toEqual(["SHELL_GIT_DIFF_UNAVAILABLE"]);
+    expect(reasonsOf(unproven)).toEqual(["SHELL_GIT_DIFF_UNAVAILABLE"]);
+    expect(reasonsOf(limit)).toEqual(["SHELL_DIFF_LIMIT_EXCEEDED"]);
+  });
+
+  test("a blocked path changed by an MCP call is BLOCKED_PATH", () => {
+    const result = scenario()
+      .mcp({ git: git(cleanChange(".env", "A=1", "A=2")) })
+      .stop()
+      .acquire();
+
+    expect(reasonsOf(result)).toEqual(["BLOCKED_PATH"]);
+  });
+
+  test("an MCP call without its Post event is PAIRING_BROKEN", () => {
+    const run = scenario().mcp({ git: git() });
+    const events = run.events.filter((event) => event.name !== "PostToolUse");
+    const unit = splitQuiescentUnits([...events, ...new Scenario().stop().events]).closed[0];
+
+    if (unit === undefined) throw new Error("unit did not close");
+
+    const result = acquireUnit({ unit, capture: run.capture(), resolveRepoPath });
+
+    expect(reasonsOf(result)).toContain("PAIRING_BROKEN");
   });
 });
 
@@ -479,7 +539,7 @@ describe("acquireUnit closure", () => {
   test("reasons accumulate in a stable order", () => {
     const result = scenario()
       .edit(".env", "a", "b")
-      .tool("MCP", "mcp__a__b")
+      .tool("UNKNOWN", "Weird")
       .powershell()
       .powershell({ git: { status: "FAILED", cause: "LIMIT_EXCEEDED" } })
       .stopFailure()
@@ -490,7 +550,7 @@ describe("acquireUnit closure", () => {
       "BLOCKED_PATH",
       "SHELL_GIT_DIFF_UNAVAILABLE",
       "SHELL_DIFF_LIMIT_EXCEEDED",
-      "MCP_TOOL",
+      "UNKNOWN_TOOL",
     ]);
   });
 });

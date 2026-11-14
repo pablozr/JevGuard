@@ -147,7 +147,15 @@ export class Scenario {
     return this.shell("POWERSHELL", "PowerShell", options);
   }
 
-  private shell(category: "BASH" | "POWERSHELL", toolName: string, options: ShellOptions): this {
+  mcp(options: ShellOptions = {}): this {
+    return this.shell("MCP", "mcp__x__y", options);
+  }
+
+  private shell(
+    category: "BASH" | "POWERSHELL" | "MCP",
+    toolName: string,
+    options: ShellOptions,
+  ): this {
     const id = this.nextId();
     const tool = {
       toolName,
