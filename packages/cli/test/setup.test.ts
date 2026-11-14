@@ -373,7 +373,32 @@ describe("runSetup credential step", () => {
     expect(questions).toEqual([]);
     expect(logins).toHaveLength(1);
     expect(result.status).toBe("APPLIED");
-    expect(result.lines.at(-1)).toBe("Next: run `jevguard doctor` to check the setup.");
+    expect(result.lines.at(-1)).toBe(
+      "Next: run `jevguard doctor --host opencode` to check the setup.",
+    );
+  });
+
+  test("the doctor hint names the Claude Code host, since a bare doctor checks OpenCode", async () => {
+    const claude = fakeHost({ id: "claude-code", fileName: "claude-code.yaml" });
+    const { ports } = scenario({ hosts: [claude.extension] });
+
+    const result = await runSetup(ports, { ...REQUEST, host: "claude-code", yes: true });
+
+    expect(result.lines.at(-1)).toBe(
+      "Next: run `jevguard doctor --host claude-code` to check the setup.",
+    );
+  });
+
+  test("the doctor hint covers every host set up", async () => {
+    const opencode = fakeHost({ id: "opencode", fileName: "opencode.yaml" });
+    const claude = fakeHost({ id: "claude-code", fileName: "claude-code.yaml" });
+    const { ports } = scenario({ hosts: [opencode.extension, claude.extension] });
+
+    const result = await runSetup(ports, { ...REQUEST, yes: true });
+
+    expect(result.lines.at(-1)).toBe(
+      "Next: run `jevguard doctor --host opencode` and `jevguard doctor --host claude-code` to check the setup.",
+    );
   });
 
   test("without a terminal the other steps still run and setup fails with a login hint", async () => {
