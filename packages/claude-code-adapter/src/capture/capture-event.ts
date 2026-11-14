@@ -58,8 +58,11 @@ function isEnabledShellDiff(context: CaptureContext): boolean {
   return context.environment.get(SHELL_GIT_DIFF_SWITCH) !== "0";
 }
 
+/** Shell and MCP calls are fenced by the same Git snapshot (ADR 0017). */
 function isShellTool(event: { readonly tool: { readonly category: string } }): boolean {
-  return event.tool.category === "BASH" || event.tool.category === "POWERSHELL";
+  const { category } = event.tool;
+
+  return category === "BASH" || category === "POWERSHELL" || category === "MCP";
 }
 
 function readableRepoPath(rawPath: string, cwd: string, context: CaptureContext): string | null {
@@ -131,9 +134,7 @@ function isWriteCapable(event: HookEvent): string | null {
     case "PostToolUseFailure": {
       const { category } = event.tool;
 
-      return category === "EDIT" || category === "BASH" || category === "POWERSHELL"
-        ? event.tool.toolUseId
-        : null;
+      return category === "EDIT" || isShellTool(event) ? event.tool.toolUseId : null;
     }
     default:
       return null;

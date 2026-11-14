@@ -74,7 +74,8 @@ adapter:
 
 The unit is `UNAVAILABLE` (typed acquisition reason) when it contains, from any
 agent: a shell call without a valid Git status diff, run in background, or whose
-changed file's pre-call content could not be kept (see the 2026-10-17 update); MCP or unknown tools that may write;
+changed file's pre-call content could not be kept (see the 2026-10-17 update); unknown tools that may write (MCP calls are fenced like the shell since
+[ADR 0017](0017-mcp-calls-fenced-by-git-snapshot.md));
 prompts with content not represented as text; missing hook events or broken
 Pre/Post pairing; a blocked path; an unreadable background-task state at the
 closing `Stop`. Coordination tools that do not write files (`SendMessage`,

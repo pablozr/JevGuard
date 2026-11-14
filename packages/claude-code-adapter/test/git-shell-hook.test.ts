@@ -29,11 +29,24 @@ function shellFiles(world: HookWorld): readonly string[] {
 // Real Git processes are slow under a loaded parallel run; keep these from timing out spuriously.
 vi.setConfig({ testTimeout: 20_000 });
 
-describe.each(["Bash", "PowerShell"])("%s through the hook", (tool) => {
+/**
+ * The product limits (2 s per Git call, 3 s per snapshot) are real wall-clock budgets: on a
+ * loaded Windows runner a spawn can exceed them and the unit turns UNAVAILABLE for a reason
+ * unrelated to what the test checks (#72). Only the time limits are relaxed here; every
+ * size limit stays at its product value.
+ */
+const LOADED_MACHINE_LIMITS = {
+  ...DEFAULT_SHELL_DIFF_LIMITS,
+  gitCallTimeoutMs: 60_000,
+  timeMs: 60_000,
+};
+
+describe.each(["Bash", "PowerShell", "mcp__agentes__send"])("%s through the hook", (tool) => {
   let world: HookWorld;
 
   beforeEach(() => {
     world = new HookWorld();
+    world.shellDiffLimits = LOADED_MACHINE_LIMITS;
     initRepository(world.projectRoot);
   });
 
@@ -254,7 +267,7 @@ describe("shell diff limits through the hook", () => {
     world = new HookWorld();
     gitCalls = [];
     initRepository(world.projectRoot);
-    world.shellDiffLimits = { ...DEFAULT_SHELL_DIFF_LIMITS, maxStatusEntries: 2 };
+    world.shellDiffLimits = { ...LOADED_MACHINE_LIMITS, maxStatusEntries: 2 };
     world.gitRunner = (args, cwd, options) => {
       gitCalls.push(args.find((arg) => !arg.startsWith("--")) ?? "");
 
@@ -306,7 +319,7 @@ describe("shell diff limits through the hook", () => {
     const id = world.nextToolId();
     const input = { command: "write" };
 
-    world.shellDiffLimits = { ...DEFAULT_SHELL_DIFF_LIMITS, maxContentBytes: 20 };
+    world.shellDiffLimits = { ...LOADED_MACHINE_LIMITS, maxContentBytes: 20 };
     world.write("a.ts", `${SECRET_CONTENT}\n`);
     world.prompt("rewrite the dirty file");
     world.preTool("Bash", id, input);
@@ -346,6 +359,7 @@ describe("Bash host diff cross-check", () => {
 
   beforeEach(() => {
     world = new HookWorld();
+    world.shellDiffLimits = LOADED_MACHINE_LIMITS;
     initRepository(world.projectRoot);
   });
 

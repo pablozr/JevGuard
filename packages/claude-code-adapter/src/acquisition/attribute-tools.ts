@@ -14,12 +14,16 @@ import type {
   UnitAttribution,
 } from "./types";
 
-function isShell(tool: ToolCall): boolean {
-  return tool.category === "BASH" || tool.category === "POWERSHELL";
+/**
+ * Calls whose file effects are proven only by the Git snapshot taken right before and
+ * after them: the shell and any MCP tool (ADR 0017). The tool name decides nothing.
+ */
+function isBracketed(tool: ToolCall): boolean {
+  return tool.category === "BASH" || tool.category === "POWERSHELL" || tool.category === "MCP";
 }
 
 function isWriteCapable(tool: ToolCall): boolean {
-  return tool.category === "EDIT" || isShell(tool);
+  return tool.category === "EDIT" || isBracketed(tool);
 }
 
 function toolOf(event: HookEvent): ToolCall | null {
@@ -34,9 +38,8 @@ function toolOf(event: HookEvent): ToolCall | null {
 }
 
 function flagToolReasons(tool: ToolCall, state: UnitAttribution): void {
-  if (tool.category === "MCP") state.reasons.add("MCP_TOOL");
   if (tool.category === "UNKNOWN") state.reasons.add("UNKNOWN_TOOL");
-  if (isShell(tool) && tool.runInBackground) state.reasons.add("SHELL_BACKGROUND");
+  if (isBracketed(tool) && tool.runInBackground) state.reasons.add("SHELL_BACKGROUND");
 }
 
 function flagPairing(events: readonly HookEvent[], state: UnitAttribution): void {
@@ -97,7 +100,7 @@ function onPreToolUse(
   input: AcquireUnitInput,
   state: UnitAttribution,
 ): void {
-  if (isShell(event.tool)) {
+  if (isBracketed(event.tool)) {
     state.universeAtShellStart.set(event.tool.toolUseId, new Set(state.universe));
     return;
   }
@@ -227,6 +230,7 @@ function onPostToolUse(
       return;
     case "BASH":
     case "POWERSHELL":
+    case "MCP":
       onShellFinished(event, input, state);
       return;
     default:
@@ -259,7 +263,7 @@ export function attributeToolEvents(input: AcquireUnitInput): UnitAttribution {
     if (event.name === "PostToolUse") onPostToolUse(event, input, state);
     if (event.name !== "PostToolUseFailure") continue;
 
-    if (isShell(event.tool)) onShellFinished(event, input, state);
+    if (isBracketed(event.tool)) onShellFinished(event, input, state);
     if (event.tool.category === "EDIT") onEditFailed(event, input, state);
   }
 

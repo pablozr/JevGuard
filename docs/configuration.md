@@ -712,7 +712,9 @@ reviews a smaller set of work that it can prove:
   calls (including those of subagents), plus files a shell command changed. The patch
   is each file's net change from its state before the unit to its final state. No
   repository-wide diff is ever used.
-- **Shell.** Each foreground shell call (Bash or PowerShell) is bracketed by a
+- **Shell and MCP.** Each foreground shell call (Bash or PowerShell) and each MCP
+  tool call (`mcp__*`, [ADR 0017](./adr/0017-mcp-calls-fenced-by-git-snapshot.md)) is
+  bracketed by a
   read-only Git picture of the working tree. Before the call the hook records the HEAD
   commit and keeps the content of every file that is already modified; the call's
   change is the difference in file content between before and after. A file
@@ -722,8 +724,9 @@ reviews a smaller set of work that it can prove:
   they change, as the agent's change. A file already modified before the unit that a
   shell command then changes (a formatter, `git checkout --`) is reviewed against its
   content right before that command. A Git-ignored file written by a shell command is
-  outside the evidence, by design. Set `JEVGUARD_CLAUDE_SHELL_GIT_DIFF=0` to turn this
-  capture off; shell calls then make the unit `UNAVAILABLE`.
+  outside the evidence, by design, and so is a file an MCP server writes there. An MCP
+  call that changes no file adds nothing. Set `JEVGUARD_CLAUDE_SHELL_GIT_DIFF=0` to turn
+  this capture off; shell and MCP calls then make the unit `UNAVAILABLE`.
   The diff has fixed limits per hook call: 2000 dirty entries (and 2000 paths changed
   between the two HEADs), 16 MiB of read content, 40 Git object reads (two per file
   unmodified before the call that the call changes), 16 MiB of Git output, 2 s per Git
@@ -734,7 +737,8 @@ reviews a smaller set of work that it can prove:
 - **Refused evidence.** A blocked path (see the [security model](./security.md)), a
   link, a file that is not UTF-8 text without NUL, or a file over 1 MiB makes the unit
   `UNAVAILABLE`, and its content is never read or stored.
-- **Not provable.** A shell call in the background, an MCP or unknown tool that may
+- **Not provable.** A shell call in the background, a shell or MCP call without its Pre/Post pair,
+  an MCP call whose Git snapshot fails or exceeds a limit, an unknown tool that may
   write, a prompt
   that is not text, or a write by a process that is not attributed to the unit all make
   the unit `UNAVAILABLE`. A unit with no changed file and no write-capable tool is
