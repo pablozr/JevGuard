@@ -30,8 +30,10 @@ An MCP call is treated exactly like a shell call:
 - Everything that makes a shell call unprovable makes an MCP call unprovable, with the
   same reasons: a failed or missing snapshot (`SHELL_GIT_DIFF_UNAVAILABLE`), a limit
   exceeded (`SHELL_DIFF_LIMIT_EXCEEDED`), a concurrent write-capable call in the window,
-  a blocked or unreadable path, a Pre without its Post (`PAIRING_BROKEN`) and a call in
-  the background (`SHELL_BACKGROUND`).
+  a blocked or unreadable path, a Pre without its Post (`PAIRING_BROKEN`). Only a shell
+  call can run in the background (`SHELL_BACKGROUND`): `run_in_background` is read for
+  shell tools only and the hook decoder rejects it on any other tool, so an MCP call is
+  never a background call and has no such reason.
 - `JEVGUARD_CLAUDE_SHELL_GIT_DIFF=0` turns the capture off for both; MCP and shell calls
   are then `UNAVAILABLE`.
 - `MCP_TOOL` is no longer produced. It stays a valid reason only so handoffs written

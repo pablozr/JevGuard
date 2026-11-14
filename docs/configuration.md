@@ -737,7 +737,7 @@ reviews a smaller set of work that it can prove:
 - **Refused evidence.** A blocked path (see the [security model](./security.md)), a
   link, a file that is not UTF-8 text without NUL, or a file over 1 MiB makes the unit
   `UNAVAILABLE`, and its content is never read or stored.
-- **Not provable.** A shell or MCP call in the background or without its Pre/Post pair,
+- **Not provable.** A shell call in the background, a shell or MCP call without its Pre/Post pair,
   an MCP call whose Git snapshot fails or exceeds a limit, an unknown tool that may
   write, a prompt
   that is not text, or a write by a process that is not attributed to the unit all make
