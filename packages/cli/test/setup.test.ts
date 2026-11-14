@@ -106,6 +106,7 @@ function contextOf(
     projectRoot: PROJECT_ROOT,
     homedir: "/home/user",
     environment: { xdgConfigHome: CONFIG_HOME, userProfile: undefined, home: undefined },
+    variable: () => undefined,
     processes: { run: async () => ({ kind: "FAILED" }) },
     files,
     confirmation: {

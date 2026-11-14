@@ -61,6 +61,20 @@ export function inspectScope(
   return { state: installed ? "INSTALLED" : "NOT_INSTALLED", target };
 }
 
+/** Whether an installed JevGuard entry in this scope is switched on (absent means on). */
+export function isScopeEnabled(
+  entries: readonly unknown[] | null,
+  scope: HostInstallScope,
+): boolean {
+  return (entries ?? []).some(
+    (entry) =>
+      isRecord(entry) &&
+      entry.id === PLUGIN_ID &&
+      entry.scope === pluginScopeOf(scope) &&
+      entry.enabled !== false,
+  );
+}
+
 /** Whether the JevGuard plugin is installed in one Claude Code scope; `UNKNOWN` when unreadable. */
 export async function inspectPlugin(
   context: HostCliContext,

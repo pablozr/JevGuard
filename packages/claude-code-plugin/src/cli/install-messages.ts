@@ -8,12 +8,15 @@ export function manualInstallCommands(scope: ClaudePluginScope): readonly string
   ];
 }
 
-export function describeInstallInstalled(scope: ClaudePluginScope): string {
-  return `Installed JevGuard for Claude Code (${scope} scope). Start a new Claude Code session to load it.`;
+export function describeInstallInstalled(scope: ClaudePluginScope, configDir: string): string {
+  return `Installed JevGuard for Claude Code (${scope} scope, config dir ${configDir}). Start a new Claude Code session to load it.`;
 }
 
-export function describeInstallAlreadyInstalled(scope: ClaudePluginScope): string {
-  return `JevGuard is already installed for Claude Code (${scope} scope).`;
+export function describeInstallAlreadyInstalled(
+  scope: ClaudePluginScope,
+  configDir: string,
+): string {
+  return `JevGuard is already installed for Claude Code (${scope} scope, config dir ${configDir}).`;
 }
 
 export function describeInstallAborted(): string {
