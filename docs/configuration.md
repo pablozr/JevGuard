@@ -867,6 +867,33 @@ proposals for the project, but a `remediation.model` there is ignored on Claude 
 `.jev/config.yaml`. There is no slash command to reopen the panel, because a command
 result is also read by the model.
 
+### Headless sessions (`claude -p` and the Agent SDK)
+
+Headless runs (`CLAUDE_CODE_ENTRYPOINT=sdk-cli`, `CLAUDE_CODE_SESSION_ATTENDED=0`) review
+work the same way as the terminal; only the presentation differs.
+
+- Hooks run as usual (every event in `hooks.json`: `SessionStart`, `UserPromptSubmit`,
+  `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `SubagentStart`, `SubagentStop`,
+  `Stop`, `StopFailure`, `SessionEnd`) with `CLAUDE_PLUGIN_DATA` and `CLAUDE_PROJECT_DIR`
+  set. A unit closes at a main-agent `Stop` with no active background task, or at a
+  `StopFailure` (recorded as `TURN_FAILED`), and the worker starts.
+- The worker is detached: it outlives the session process and records the review in the
+  feed and the local history about a second after the unit closes. It stops after at
+  most 15 minutes. On POSIX it also survives a kill of the session's process tree; on
+  Windows, killing the tree (for example `taskkill /T`) kills the worker too.
+- The UI module loads. `$.ui.log` and `$.ui.status` reach the SDK host as `system`
+  messages with subtype `ui_log` / `ui_status` and `plugin: "jevguard"`; the model never
+  sees them. Showing them is up to the host.
+- A one-shot run ends right after `Stop`, before the review finishes, so its result is
+  never emitted. Resuming the session later does not show it either: on resume the
+  module marks every recorded review as already seen, so a proposal recorded for that
+  unit is not run either. Remediation proposals and `delivery: agent` need the module
+  alive after the review, so they do not run in one-shot sessions.
+- Only `ui_log` and `ui_status` were measured. Long-lived SDK sessions, where the module
+  stays alive, and how a host handles `ui.toast` or `ui.open` (which falls back to
+  `ui.log` when the panel cannot open) were not.
+- `jevguard report` and the session's feed file remain the complete record.
+
 ### Local state
 
 The hook keeps bounded state under `${CLAUDE_PLUGIN_DATA}/claude-code/`, with
