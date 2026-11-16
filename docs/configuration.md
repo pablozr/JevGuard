@@ -884,7 +884,10 @@ unconsumed for 24 hours are removed, and ending a session deletes its open state
 Around each shell call the hook also keeps, until the call ends, the content of the
 allowed files that were already modified (at most 16 MiB). The
 hook and worker write only closed codes to `hook-log.jsonl` and `worker-log.jsonl`
-(each bounded to 256 KiB), never a task, patch, path, finding, or credential.
+(each bounded to 256 KiB), never a task, patch, path, finding, or credential. The one
+exception is the name of a tool the plugin's closed list does not know
+(`UNKNOWN_TOOL:<name>`, a bounded identifier and never the tool's input): it is there so
+a tool that should be on the list can be found in the log.
 
 `reviews.jsonl` is the local history. For the in-session display the worker also
 appends to a small per-session feed at

@@ -104,7 +104,25 @@ function trustedProjectRoot(scope: EventScope, unit: UnitState): string | null {
   return projectRoot;
 }
 
+/** A tool name is safe to log; anything unexpected about it is dropped, not escaped. */
+function loggedToolName(toolName: string): string {
+  return /^[A-Za-z0-9_.:-]{1,64}$/.test(toolName) ? toolName : "?";
+}
+
+/**
+ * Records the name of a tool the closed list does not know, so a missing read-only or
+ * coordination entry can be found from the log. Only the name goes to the log: no input,
+ * no path, no task text.
+ */
+function logUnknownTool(event: HookEvent, scope: EventScope): void {
+  if (!("tool" in event) || event.tool.category !== "UNKNOWN") return;
+
+  scope.log(`UNKNOWN_TOOL:${loggedToolName(event.tool.toolName)}`);
+}
+
 function recordEvent(event: HookEvent, scope: EventScope): void {
+  logUnknownTool(event, scope);
+
   const unit = openCurrentUnit(scope.stateDirectory, event.sessionId, scope.dependencies.now());
   const projectRoot = trustedProjectRoot(scope, unit);
   const context = projectRoot === null ? null : contextFor(scope, unit, projectRoot);
