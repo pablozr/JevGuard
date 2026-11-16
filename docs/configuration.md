@@ -744,7 +744,8 @@ reviews a smaller set of work that it can prove:
   call that changes no file adds nothing. MCP calls that overlap in time (a turn that
   starts several `mcp__*` calls together) are fenced as one batch: the picture is taken
   before the first and after the last of them, and their combined change is the unit's.
-  Their window cannot be shared with a shell call or an edit; when it is, the unit is
+  Their window cannot be shared with a shell call or an edit, and a call that starts
+  before the first picture is on disk comes before the fence; either way the unit is
   `UNAVAILABLE`. Set `JEVGUARD_CLAUDE_SHELL_GIT_DIFF=0` to turn
   this capture off; shell and MCP calls then make the unit `UNAVAILABLE`.
   The diff has fixed limits per hook call: 2000 dirty entries (and 2000 paths changed
@@ -759,7 +760,8 @@ reviews a smaller set of work that it can prove:
   `UNAVAILABLE`, and its content is never read or stored.
 - **Not provable.** A shell call in the background, a shell or MCP call without its Pre/Post pair,
   an MCP call whose Git snapshot fails or exceeds a limit, a batch of MCP calls whose window
-  a shell call or an edit shares, an unknown tool that may
+  a shell call or an edit shares or that a member joins before its first picture is taken,
+  an unknown tool that may
   write, a prompt
   that is not text, or a write by a process that is not attributed to the unit all make
   the unit `UNAVAILABLE`. A unit with no changed file and no write-capable tool is

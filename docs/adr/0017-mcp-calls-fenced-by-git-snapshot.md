@@ -88,6 +88,13 @@ What keeps a verdict honest:
   its own pre/post images, a shell has its own fence and its own cross-check against the
   host report, and one snapshot cannot separate them. The same holds for a member whose
   `PostToolUse` never arrives (`PAIRING_BROKEN`).
+- **A member that arrives before the base snapshot is on disk leaves no proof.** The hook
+  processes do not share a lock, so a second call can start while the first call's
+  snapshot is still being taken. Its server could write in that gap, and the write would
+  already be inside the base picture. A call therefore only joins the batch when the base
+  snapshot record is already written; otherwise the batch is marked and the unit is
+  `UNAVAILABLE`. Waiting for the snapshot instead was rejected: a hook cannot hold the
+  host's tool call open while it waits.
 - **The batch's pre-images are the ones before its first call**, so a file written and
   rewritten across the batch is reviewed as one net change from the state before the run.
 - **The cost is one fence per run**: two snapshots for a batch of any size, instead of two

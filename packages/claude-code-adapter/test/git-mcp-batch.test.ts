@@ -187,6 +187,80 @@ describe("MCP calls fired in parallel", () => {
     });
   });
 
+  test("a member that arrives before the base snapshot is on disk leaves no proof", () => {
+    const base = world.nextToolId();
+    const late = world.nextToolId();
+    const input = { command: "write" };
+    let injected = false;
+
+    // The hook processes share no lock: the second Pre runs while the first snapshot is
+    // still being taken, and its server writes before that picture is complete.
+    world.gitRunner = (args, cwd, options) => {
+      if (!injected && args.includes("status")) {
+        injected = true;
+        world.preTool("mcp__agentes__two", late, input);
+        world.write("keep.ts", "KEEP_BY_B\r\n");
+      }
+
+      if (args.includes("status")) snapshots.count += 1;
+
+      return runGit(args, cwd, options);
+    };
+
+    world.prompt("one server starts during the base picture");
+    world.preTool("mcp__agentes__one", base, input);
+    world.postTool("mcp__agentes__one", base, input);
+    world.postTool("mcp__agentes__two", late, input);
+    world.stop();
+
+    expect(causesOf(world.onlyHandoff())).toContain("SHELL_GIT_DIFF_UNAVAILABLE");
+  });
+
+  test("a member that fails still lets the batch close with the other's change", () => {
+    const failed = world.nextToolId();
+    const closing = world.nextToolId();
+    const input = { command: "write" };
+
+    world.prompt("one server fails, the other writes");
+    world.preTool("mcp__agentes__one", failed, input);
+    world.preTool("mcp__agentes__two", closing, input);
+    world.write("a.ts", "one\r\nTWO\r\n");
+    world.write("keep.ts", "KEEP\r\n");
+    world.failTool("mcp__agentes__one", failed, input);
+    world.postTool("mcp__agentes__two", closing, input);
+    world.stop();
+
+    const { resolution } = world.onlyHandoff();
+
+    expect(resolution.status).toBe("TURN");
+
+    if (resolution.status !== "TURN") return;
+
+    expect(resolution.turn.files.map((file) => file.path).sort()).toEqual(["a.ts", "keep.ts"]);
+  });
+
+  test("a batch whose last member fails still carries the batch's diff", () => {
+    const closing = world.nextToolId();
+    const failed = world.nextToolId();
+    const input = { command: "write" };
+
+    world.prompt("the closing server fails after writing");
+    world.preTool("mcp__agentes__one", closing, input);
+    world.preTool("mcp__agentes__two", failed, input);
+    world.write("a.ts", "one\r\nTWO\r\n");
+    world.postTool("mcp__agentes__one", closing, input);
+    world.failTool("mcp__agentes__two", failed, input);
+    world.stop();
+
+    const { resolution } = world.onlyHandoff();
+
+    expect(resolution.status).toBe("TURN");
+
+    if (resolution.status !== "TURN") return;
+
+    expect(resolution.turn.files.map((file) => file.path)).toEqual(["a.ts"]);
+  });
+
   test("a call that starts after the batch closed fences itself", () => {
     world.prompt("one after the other");
     parallel([mcp("mcp__agentes__one", () => world.write("a.ts", "one\r\nTWO\r\n"))]);

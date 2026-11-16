@@ -30,6 +30,9 @@ import type {
   StoredShellChange,
 } from "./types";
 import {
+  hasShellSnapshot,
+  isShellBatchUnproven,
+  markShellBatchUnproven,
   readStateLines,
   takeShellSnapshot,
   writeBlob,
@@ -317,7 +320,12 @@ function capturePostMcp(
 
   if (batch.openIds.some((id) => id !== event.tool.toolUseId)) return null;
 
-  return closingDiff(batch.baseId, overlapsForeignWriter(events, batch), event, context);
+  return closingDiff(
+    batch.baseId,
+    overlapsForeignWriter(events, batch) || isShellBatchUnproven(context.unit, batch.baseId),
+    event,
+    context,
+  );
 }
 
 /** Diffs the closing snapshot against the base one, or says why there is no proof. */
@@ -387,7 +395,10 @@ export function captureBeforeAppend(event: HookEvent, context: CaptureContext): 
 
 /**
  * `true` when this MCP call starts while another MCP call of the unit is still open, so
- * the open batch already fences it and the call must not fence itself.
+ * the open batch already fences it and the call must not fence itself. Hook processes do
+ * not share a lock: a member that arrives while the base snapshot is still being taken
+ * comes before the fence, and a write of its server can land inside that picture. The
+ * batch is then marked without proof instead of silently attributing less than happened.
  */
 function joinsOpenMcpBatch(event: PreToolUseEvent, context: CaptureContext): boolean {
   if (event.tool.category !== "MCP") return false;
@@ -395,7 +406,13 @@ function joinsOpenMcpBatch(event: PreToolUseEvent, context: CaptureContext): boo
   const events = stateEvents(context);
   const open = events === null ? null : openMcpBatch(events);
 
-  return open?.openIds.some((id) => id !== event.tool.toolUseId) ?? false;
+  if (open === null || !open.openIds.some((id) => id !== event.tool.toolUseId)) return false;
+
+  if (!hasShellSnapshot(context.unit, open.baseId)) {
+    markShellBatchUnproven(context.unit, open.baseId);
+  }
+
+  return true;
 }
 
 /**
