@@ -24,3 +24,4 @@ consequences; later records can supersede earlier ones. References to "SPEC" or
 | [0015](0015-single-agent-delivery.md) | One agent delivery per unit, no remediation chain | Accepted |
 | [0016](0016-host-neutral-cli.md) | A host-neutral CLI package with one extension per host | Accepted |
 | [0017](0017-mcp-calls-fenced-by-git-snapshot.md) | MCP calls are fenced by the same Git snapshot as the shell | Accepted |
+| [0018](0018-project-root-from-the-edited-repository.md) | A unit's project root is the repository its files belong to | Proposed |
