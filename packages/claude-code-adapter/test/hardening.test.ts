@@ -373,13 +373,11 @@ describe("Git snapshot never reads links or reads past its budgets", () => {
     expect(reads).toEqual([]);
   });
 
-  test("a cwd in another repository than the project is no proof", () => {
+  test("a cwd in another repository than the project is marked foreign", () => {
     const script = scriptedGit({ status: "", cwdToplevel: "/r/inner" });
+    const result = takenSnapshot(takeGitSnapshot(gitContext(script.runner, files), "/inner"));
 
-    expect(takeGitSnapshot(gitContext(script.runner, files), "/inner")).toEqual({
-      status: "FAILED",
-      failure: { kind: "UNPROVEN" },
-    });
+    expect(result).toHaveProperty("foreign", true);
   });
 });
 
@@ -674,7 +672,7 @@ describe("a Git timeout is never read as absence", () => {
 });
 
 describe("a nested repository", () => {
-  test("Bash run inside it is not proven by the project's Git", () => {
+  test("a call run inside it is not proven by the unit's own repository", () => {
     initRepository(world.projectRoot);
 
     const inner = world.path("inner");
@@ -685,6 +683,8 @@ describe("a nested repository", () => {
     const input = { command: "write" };
 
     world.prompt("work in the nested repository");
+    world.edit("a.ts", "the unit's own change\r\n");
+
     world.hook({
       hook_event_name: "PreToolUse",
       tool_name: "Bash",
@@ -702,7 +702,39 @@ describe("a nested repository", () => {
     });
     world.stop();
 
-    expect(causesOf(world.onlyHandoff())).toEqual(["SHELL_GIT_DIFF_UNAVAILABLE"]);
+    expect(causesOf(world.onlyHandoff())).toContain("MULTIPLE_REPOSITORIES");
+  });
+
+  test("the nested repository is the unit's root when its call comes first", () => {
+    initRepository(world.projectRoot);
+
+    const inner = world.path("inner");
+
+    initRepository(inner);
+
+    world.prompt("change the nested repository from inside it");
+
+    const id = world.nextToolId();
+    const input = { command: "write" };
+
+    world.hook({
+      hook_event_name: "PreToolUse",
+      tool_name: "Bash",
+      tool_use_id: id,
+      tool_input: input,
+      cwd: inner,
+    });
+    world.write("inner/a.ts", "changed");
+    world.hook({
+      hook_event_name: "PostToolUse",
+      tool_name: "Bash",
+      tool_use_id: id,
+      tool_input: input,
+      cwd: inner,
+    });
+    world.stop();
+
+    expect(world.onlyHandoff().resolution.status).toBe("TURN");
   });
 });
 
