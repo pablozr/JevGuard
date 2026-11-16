@@ -1,7 +1,7 @@
 import { mkdirSync, readdirSync, readFileSync, statSync, symlinkSync, utimesSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { Readable } from "node:stream";
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createBudget, UNLIMITED_BUDGET } from "../src/capture/budget";
 import {
   createRepoPathResolver,
@@ -33,6 +33,12 @@ import { causesOf, HookWorld, initRepository, SESSION, takenSnapshot } from "./h
 import { Scenario } from "./scenario";
 
 const SECRET = "SECRET_MARKER_9917";
+
+/**
+ * These tests fork real Git repositories, and a loaded runner can take longer than the
+ * default allowance for it (#72). Only the test timeout moves; no product limit does.
+ */
+vi.setConfig({ testTimeout: 20_000 });
 
 let world: HookWorld;
 
