@@ -19,6 +19,8 @@ const KNOWN_CAUSES: Record<ClaudeAcquisitionReason, true> = {
   SHELL_DIFF_LIMIT_EXCEEDED: true,
   MCP_TOOL: true,
   UNKNOWN_TOOL: true,
+  MULTIPLE_REPOSITORIES: true,
+  PROJECT_ROOT_UNRESOLVED: true,
   PAIRING_BROKEN: true,
   CAPTURE_FAILED: true,
   CONTENT_TOO_LARGE: true,

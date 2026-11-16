@@ -724,6 +724,19 @@ reviews a smaller set of work that it can prove:
   contain several prompts, and all of them are the task. Delegated subagents and
   background subagents count as part of the unit. Work interrupted without a closing
   `Stop` is not reviewed.
+- **Where the unit is judged.** The unit's repository is the Git work tree of its first
+  write-capable evidence — the file an edit names, or the folder a shell or MCP call is
+  run from when that folder is inside a work tree
+  ([ADR 0018](./adr/0018-project-root-from-the-edited-repository.md)). It is fixed once
+  per unit: a later edit or call in **another** work tree makes the unit `UNAVAILABLE`
+  (`MULTIPLE_REPOSITORIES`), and a shell or MCP call run from outside every work tree
+  before the unit's repository is known leaves no proof
+  (`PROJECT_ROOT_UNRESOLVED`). A call made from a folder that is not a work tree, after
+  the repository is known, is fenced at the unit's repository like any other. A session
+  that runs outside the repository it edits — an agent in its own folder changing a
+  repository by absolute path — is therefore reviewed normally, and `.jev/rules.md` is
+  read from that repository. A project that is not a Git work tree is still reviewed
+  from the files its edits name, and its shell calls have no Git proof, as before.
 - **Evidence.** Only files named by `Write`, `Edit`, `MultiEdit`, and `NotebookEdit`
   calls (including those of subagents), plus files a shell command changed. The patch
   is each file's net change from its state before the unit to its final state. No
@@ -763,7 +776,8 @@ reviews a smaller set of work that it can prove:
 - **Not provable.** A shell call in the background, a shell or MCP call without its Pre/Post pair,
   an MCP call whose Git snapshot fails or exceeds a limit, a batch of MCP calls whose window
   a shell call or an edit shares or that a member joins before its first picture is taken,
-  an unknown tool that may
+  a unit that spans two repositories, a shell or MCP call run from outside every work tree
+  before the unit's repository is known, an unknown tool that may
   write, a prompt
   that is not text, or a write by a process that is not attributed to the unit all make
   the unit `UNAVAILABLE`. A unit with no changed file and no write-capable tool is

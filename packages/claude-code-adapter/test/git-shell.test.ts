@@ -408,14 +408,14 @@ describe("Git shell diff", () => {
     });
   });
 
-  test("outside a repository there is no snapshot", () => {
+  test("a call from outside any repository is fenced at the project's own work tree", () => {
     const loose = join(base, "loose");
 
     mkdirSync(loose);
 
-    expect(takeGitSnapshot(context, loose)).toEqual({
-      status: "FAILED",
-      failure: { kind: "UNPROVEN" },
-    });
+    const result = takeGitSnapshot(context, loose);
+
+    expect(result.status).toBe("TAKEN");
+    expect(result).not.toHaveProperty("foreign");
   });
 });

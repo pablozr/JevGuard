@@ -66,7 +66,11 @@ export type ShellDiffFailure =
     };
 
 export type SnapshotResult =
-  | ({ readonly status: "TAKEN" } & TakenSnapshot)
+  | ({
+      readonly status: "TAKEN";
+      /** The call was made from another work tree: its picture is not this unit's proof. */
+      readonly foreign?: true;
+    } & TakenSnapshot)
   | { readonly status: "FAILED"; readonly failure: ShellDiffFailure };
 
 /** Pre-call snapshot as read back by the Post hook. */
@@ -164,10 +168,16 @@ export interface LineCapture {
   readonly problems?: readonly CaptureProblem[];
 }
 
+/**
+ * Why a unit cannot be trusted, written as its own line: capture broke, its evidence
+ * spans two repositories, or a write-capable call ran before the unit's root was known.
+ */
+export type TaintReason = "CAPTURE_FAILED" | "MULTIPLE_REPOSITORIES" | "PROJECT_ROOT_UNRESOLVED";
+
 /** One line of a unit's `events.jsonl`. */
 export type StateLine =
   | { readonly v: 1; readonly event: HookEvent; readonly capture?: LineCapture }
-  | { readonly v: 1; readonly taint: "CAPTURE_FAILED" };
+  | { readonly v: 1; readonly taint: TaintReason };
 
 /** First pre-image of a path in a unit; content lives in a digest-named blob. */
 export type PreRecord =

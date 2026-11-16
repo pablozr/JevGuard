@@ -24,6 +24,8 @@ const REASON_ORDER: readonly ClaudeAcquisitionReason[] = [
   "SHELL_DIFF_LIMIT_EXCEEDED",
   "MCP_TOOL",
   "UNKNOWN_TOOL",
+  "MULTIPLE_REPOSITORIES",
+  "PROJECT_ROOT_UNRESOLVED",
   "PAIRING_BROKEN",
   "CAPTURE_FAILED",
   "CONTENT_TOO_LARGE",
@@ -105,6 +107,7 @@ export function acquireUnit(input: AcquireUnitInput): UnitAcquisition {
     ...closingReasons(unit),
     ...attribution.reasons,
     ...input.capture.problems,
+    ...(input.capture.reasons ?? []),
   ]);
 
   if (prompts.status === "MISSING") reasons.add("MISSING_PROMPT");

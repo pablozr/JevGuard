@@ -25,6 +25,7 @@ import type {
   RemovePath,
   ShellPreSnapshot,
   StateLine,
+  TaintReason,
   TakenSnapshot,
   UnitState,
 } from "./types";
@@ -199,6 +200,20 @@ export function openCurrentUnit(stateDirectory: string, sessionId: string, now: 
 
 export function taintUnit(unit: UnitState): void {
   appendLine(unit, TAINT_LINE);
+}
+
+/** `true` when the unit already carries this taint, so a repeated cause adds no line. */
+export function isTaintedWith(unit: UnitState, reason: TaintReason): boolean {
+  const lines = readStateLines(unit);
+
+  return lines?.some((line) => "taint" in line && line.taint === reason) ?? false;
+}
+
+/** Marks the unit untrustworthy for a reason of its own, once. */
+export function taintUnitWith(unit: UnitState, reason: TaintReason): void {
+  if (isTaintedWith(unit, reason)) return;
+
+  appendLine(unit, { v: 1, taint: reason });
 }
 
 function markSessionTainted(stateDirectory: string, sessionId: string): void {

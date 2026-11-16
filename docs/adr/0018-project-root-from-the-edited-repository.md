@@ -1,7 +1,6 @@
 # ADR 0018: A unit's project root is the repository its files belong to
 
-Status: **proposed** — waiting for the owner's decision (issue #64). Nothing of this
-record may be implemented before it is accepted.
+Status: **accepted** — 2026-11-16, approved by the owner (issue #64).
 
 ## Context
 
