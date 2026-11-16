@@ -2,7 +2,8 @@
 
 Status: accepted — 2026-11-14, owner-approved direction (issue #63). Narrows
 [ADR 0014](0014-claude-code-tool-attributed-turn-profile.md): MCP tools no longer make a
-unit `UNAVAILABLE` by themselves.
+unit `UNAVAILABLE` by themselves. Amended 2026-11-16 (issue #73): MCP calls that overlap
+in time share one fence, as a batch — see the addendum at the end.
 
 ## Context
 
@@ -29,8 +30,9 @@ An MCP call is treated exactly like a shell call:
   patch.
 - Everything that makes a shell call unprovable makes an MCP call unprovable, with the
   same reasons: a failed or missing snapshot (`SHELL_GIT_DIFF_UNAVAILABLE`), a limit
-  exceeded (`SHELL_DIFF_LIMIT_EXCEEDED`), a concurrent write-capable call in the window,
-  a blocked or unreadable path, a Pre without its Post (`PAIRING_BROKEN`). Only a shell
+  exceeded (`SHELL_DIFF_LIMIT_EXCEEDED`), a concurrent write-capable call in the window
+  (another MCP call in it is the addendum's batch, not a reason), a blocked or unreadable
+  path, a Pre without its Post (`PAIRING_BROKEN`). Only a shell
   call can run in the background (`SHELL_BACKGROUND`): `run_in_background` is read for
   shell tools only and the hook decoder rejects it on any other tool, so an MCP call is
   never a background call and has no such reason.
@@ -56,4 +58,43 @@ An MCP call is treated exactly like a shell call:
 - Writes that Git cannot see (ignored files, outside the repository) are outside the
   evidence by design, the same as for the shell. An MCP server that writes there is not
   reviewed.
-- Each MCP call costs two Git snapshots, like each shell call.
+- Each MCP call costs two Git snapshots, like each shell call. A run of calls that
+  overlap in time costs two for the whole run instead (see the addendum below).
+
+## Addendum: concurrent MCP calls share one fence (2026-11-16, issue #73)
+
+The decision above assumed one MCP call at a time. A host that exposes its own tools over
+MCP fires several of them in one turn (an `agentes.chat` turn routinely starts two to
+four `mcp__agentes__*` calls together), and the per-call fence made every such unit
+`UNAVAILABLE`: each call's window overlapped another's, and an overlap has no per-call
+proof.
+
+**Decision: a run of overlapping MCP calls is fenced once, as one batch.** The snapshot
+is taken before the first call of the run and the second one after the last; the
+difference between them is attributed to the unit as the batch's change. The unit is the
+reviewed thing, not the call: every call of the batch belongs to the same turn, so the
+union of what they changed is exactly what the unit changed, and no change of one call is
+attributed to another.
+
+What keeps a verdict honest:
+
+- **The batch is closed by its last call.** A call that ends while a sibling is still
+  running records no evidence of its own; only the last one diffs, so the closing snapshot
+  is taken after every member has finished. Two calls can never both carry a diff.
+- **One diff, and only one, is attributable.** A batch whose closing call has no diff, or
+  a member that carries one of its own, is `UNAVAILABLE` — never a verdict.
+- **A window shared with another kind of writer is not attributable.** If a shell call or
+  an edit is open inside the batch's window, the batch becomes `UNAVAILABLE`: an edit has
+  its own pre/post images, a shell has its own fence and its own cross-check against the
+  host report, and one snapshot cannot separate them. The same holds for a member whose
+  `PostToolUse` never arrives (`PAIRING_BROKEN`).
+- **The batch's pre-images are the ones before its first call**, so a file written and
+  rewritten across the batch is reviewed as one net change from the state before the run.
+- **The cost is one fence per run**: two snapshots for a batch of any size, instead of two
+  per call.
+
+The alternative — one fence per call and `UNAVAILABLE` whenever two overlap — was
+rejected: it is the state this addendum fixes, and it disabled the product on the host
+where the problem was found. Fencing several calls under one snapshot does not turn
+incomplete evidence into a verdict: the closing snapshot is taken after the last member
+finished, and any writer outside the batch keeps the unit `UNAVAILABLE`.

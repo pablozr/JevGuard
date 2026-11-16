@@ -7,6 +7,7 @@ import type {
   ToolCall,
 } from "../hook-event";
 import { toPostImage } from "./images";
+import { type McpRole, mcpRoles } from "./mcp-batch";
 import type {
   AcquireUnitInput,
   ClaudeAcquisitionReason,
@@ -219,10 +220,50 @@ function onShellFinished(
   }
 }
 
+/**
+ * An MCP call of a shared batch reports no evidence of its own: the diff of the whole
+ * batch is recorded once, on the member that closed it (ADR 0017, addendum). A member of
+ * a batch that never closed, or one carrying a diff of its own, is not attributable.
+ */
+function onMcpFinished(
+  event: PostToolUseEvent | PostToolUseFailureEvent,
+  input: AcquireUnitInput,
+  state: UnitAttribution,
+  role: McpRole,
+): void {
+  if (role.batch.closerId === null) {
+    state.reasons.add("SHELL_GIT_DIFF_UNAVAILABLE");
+    return;
+  }
+
+  if (!role.closer) {
+    if (input.capture.gitDiffs.has(event.tool.toolUseId)) {
+      state.reasons.add("SHELL_GIT_DIFF_UNAVAILABLE");
+    }
+
+    return;
+  }
+
+  onShellFinished(event, input, state);
+}
+
+function onBracketFinished(
+  event: PostToolUseEvent | PostToolUseFailureEvent,
+  input: AcquireUnitInput,
+  state: UnitAttribution,
+  roles: ReadonlyMap<string, McpRole>,
+): void {
+  const role = event.tool.category === "MCP" ? roles.get(event.tool.toolUseId) : undefined;
+
+  if (role === undefined) onShellFinished(event, input, state);
+  else onMcpFinished(event, input, state, role);
+}
+
 function onPostToolUse(
   event: PostToolUseEvent,
   input: AcquireUnitInput,
   state: UnitAttribution,
+  roles: ReadonlyMap<string, McpRole>,
 ): void {
   switch (event.tool.category) {
     case "EDIT":
@@ -231,7 +272,7 @@ function onPostToolUse(
     case "BASH":
     case "POWERSHELL":
     case "MCP":
-      onShellFinished(event, input, state);
+      onBracketFinished(event, input, state, roles);
       return;
     default:
       return;
@@ -252,6 +293,8 @@ export function attributeToolEvents(input: AcquireUnitInput): UnitAttribution {
     universeAtShellStart: new Map(),
   };
 
+  const roles = mcpRoles(input.unit.events);
+
   flagPairing(input.unit.events, state);
 
   for (const event of input.unit.events) {
@@ -260,10 +303,10 @@ export function attributeToolEvents(input: AcquireUnitInput): UnitAttribution {
     if (tool !== null) flagToolReasons(tool, state);
 
     if (event.name === "PreToolUse") onPreToolUse(event, input, state);
-    if (event.name === "PostToolUse") onPostToolUse(event, input, state);
+    if (event.name === "PostToolUse") onPostToolUse(event, input, state, roles);
     if (event.name !== "PostToolUseFailure") continue;
 
-    if (isBracketed(event.tool)) onShellFinished(event, input, state);
+    if (isBracketed(event.tool)) onBracketFinished(event, input, state, roles);
     if (event.tool.category === "EDIT") onEditFailed(event, input, state);
   }
 
