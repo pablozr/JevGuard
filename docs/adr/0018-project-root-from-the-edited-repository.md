@@ -26,23 +26,43 @@ In the owner's hook log of 2026-11-13, 11 of 43 `UNAVAILABLE` units had
 
 The unit's root is the **Git top level of the unit's own evidence**, not the session's cwd:
 
-1. The root is resolved from the first write-capable evidence of the unit — the
-   `file_path` of an edit, or the `cwd` of a shell or MCP call — with
-   `git rev-parse --show-toplevel`.
-2. It is recorded once for the unit, with the existing exclusive-create record. A later
-   event that resolves to a **different** top level makes the unit `UNAVAILABLE` with a new
-   reason, `MULTIPLE_REPOSITORIES`. The root never moves silently.
-3. A unit whose write-capable evidence resolves to no work tree at all is `UNAVAILABLE`
-   with a new reason, `PROJECT_ROOT_UNRESOLVED`.
+1. The root is resolved from the first write-capable evidence of the unit that names a
+   place in a work tree: the `file_path` of an edit, or the `cwd` of a shell or MCP call
+   **when that cwd is inside a work tree**, with `git rev-parse --show-toplevel`.
+2. A shell or MCP call whose `cwd` is not inside any work tree establishes nothing. That is
+   the ordinary case on `agentes.chat`, where the host runs the agent in its own folder and
+   its MCP tools are called from there: such a call says where the agent works, not where
+   the change is, so it neither resolves the root nor fails it on its own.
+3. The root is recorded once for the unit, with the existing exclusive-create record. A
+   later event that resolves to a **different** top level makes the unit `UNAVAILABLE` with
+   a new reason, `MULTIPLE_REPOSITORIES`. The root never moves silently.
 4. Every path is resolved against that root, as today, so `PATH_OUTSIDE_REPOSITORY` keeps
    its meaning: a path outside the unit's repository.
 5. The Git snapshot of a shell or MCP call is taken **at the unit's root**, not at the
-   event's `cwd`. A call made from a non-Git cwd is then fenced like any other.
-6. When a unit has no write-capable evidence at all, the root stays
-   `CLAUDE_PROJECT_DIR`; such a unit has nothing to review and ends `SKIPPED`.
+   event's `cwd`. A call made from a non-Git cwd is then fenced like any other, once the
+   root is known.
+6. **A fenced call that starts before the root is known.** Its picture can only be taken
+   where the unit will be judged, and that place is not known yet. When the call's `cwd` is
+   inside a work tree, that is the answer: the call resolves the root, records it and is
+   fenced there. When the `cwd` is not in a work tree, the call carries no proof: the unit
+   is `UNAVAILABLE` with `PROJECT_ROOT_UNRESOLVED`. It is never fenced at the session's
+   cwd, and never dropped without a cause. The consequence is deliberate: a unit that
+   starts with a call from outside any repository and edits a repository afterwards cannot
+   prove what that first call did; a unit that starts with an edit, or with a call from
+   inside the repository, is reviewed normally.
+7. A unit with no write-capable evidence at all keeps `CLAUDE_PROJECT_DIR` as its root;
+   it has nothing to review and ends `SKIPPED`.
+8. A unit whose only write-capable evidence never resolves to a work tree — shell or MCP
+   calls from a folder that is not one, and no edit — is `UNAVAILABLE` with
+   `PROJECT_ROOT_UNRESOLVED`. It is not `SKIPPED`: there were calls that could write, and
+   nothing proves they did not.
 
 The worker keeps loading the policy from the root recorded in the handoff, so the rules
-that apply are the ones of the repository the change belongs to.
+that apply are the ones of the repository the change belongs to. A root without
+`.jev/rules.md` is not a way out of the review: the rule lane reports `UNAVAILABLE`
+(`INVALID_RULE`) and the built-in checks still run, which is what happens today when the
+file is absent. A read failure of `.jev/rules.md` or `.jev/config.yaml` also degrades only
+the rule lane; neither case turns into a silent `SKIPPED`.
 
 ## Why not something else
 
@@ -68,8 +88,13 @@ that apply are the ones of the repository the change belongs to.
   repository, and a unit touching a second repository is `UNAVAILABLE`.
 - **Evidence recorded before the root is known.** The root must be fixed before any
   pre-image or snapshot is keyed by a repo path. Resolution happens at the first
-  write-capable event, inside the same hook process that records that event, so every
-  recorded key belongs to the resolved root or the unit is `UNAVAILABLE`.
+  write-capable event that names a place in a work tree, inside the same hook process that
+  records that event, so every recorded key belongs to the resolved root or the unit is
+  `UNAVAILABLE`. The price is the case in decision 6: a call from outside any repository,
+  before the root is known, leaves the unit without proof. That is the honest outcome —
+  the alternative is judging a unit on a picture that may not cover the call at all — and
+  it is the one to revisit first if `agentes.chat` turns out to start most turns with such
+  a call.
 - **Nested repositories** keep today's behaviour: a call made inside a nested work tree is
   not proven by the outer repository's Git (`ADR 0014`), and it now resolves to a
   different top level, so it is `MULTIPLE_REPOSITORIES`.
