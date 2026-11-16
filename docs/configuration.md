@@ -879,8 +879,9 @@ work the same way as the terminal; only the presentation differs.
   `StopFailure` (recorded as `TURN_FAILED`), and the worker starts.
 - The worker is detached: it outlives the session process and records the review in the
   feed and the local history about a second after the unit closes. It stops after at
-  most 15 minutes. On POSIX it also survives a kill of the session's process tree; on
-  Windows, killing the tree (for example `taskkill /T`) kills the worker too.
+  most 15 minutes. On POSIX it runs in its own process group, so killing the session's
+  process tree does not stop it. On Windows this is not confirmed: `taskkill /T` may stop
+  it together with the session.
 - The UI module loads. `$.ui.log` and `$.ui.status` reach the SDK host as `system`
   messages with subtype `ui_log` / `ui_status` and `plugin: "jevguard"`; the model never
   sees them. Showing them is up to the host.
