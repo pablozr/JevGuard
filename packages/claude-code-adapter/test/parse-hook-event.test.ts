@@ -195,9 +195,10 @@ describe("parseHookEvent tools", () => {
     ["Read", "READONLY"],
     ["Grep", "READONLY"],
     ["LSP", "READONLY"],
-    ["ListMcpResourcesTool", "READONLY"],
-    ["ReadMcpResourceTool", "READONLY"],
-    ["ReadMcpResourceDirTool", "READONLY"],
+    // They run code on an MCP server, so they follow the MCP fence, not the read-only list.
+    ["ListMcpResourcesTool", "MCP"],
+    ["ReadMcpResourceTool", "MCP"],
+    ["ReadMcpResourceDirTool", "MCP"],
     ["CronList", "READONLY"],
     ["ReadNotifications", "READONLY"],
     ["SendMessage", "COORDINATION"],

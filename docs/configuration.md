@@ -746,7 +746,9 @@ reviews a smaller set of work that it can prove:
   before the first and after the last of them, and their combined change is the unit's.
   Their window cannot be shared with a shell call or an edit, and a call that starts
   before the first picture is on disk comes before the fence; either way the unit is
-  `UNAVAILABLE`. Set `JEVGUARD_CLAUDE_SHELL_GIT_DIFF=0` to turn
+  `UNAVAILABLE`. The host's resource tools (`ListMcpResourcesTool`, `ReadMcpResourceTool`,
+  `ReadMcpResourceDirTool`) run code on an MCP server and are fenced like an `mcp__*`
+  call, whatever the tool is meant to read. Set `JEVGUARD_CLAUDE_SHELL_GIT_DIFF=0` to turn
   this capture off; shell and MCP calls then make the unit `UNAVAILABLE`.
   The diff has fixed limits per hook call: 2000 dirty entries (and 2000 paths changed
   between the two HEADs), 16 MiB of read content, 40 Git object reads (two per file

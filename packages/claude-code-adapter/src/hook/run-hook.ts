@@ -112,10 +112,11 @@ function loggedToolName(toolName: string): string {
 /**
  * Records the name of a tool the closed list does not know, so a missing read-only or
  * coordination entry can be found from the log. Only the name goes to the log: no input,
- * no path, no task text.
+ * no path, no task text. One line per call, on its `PreToolUse`: the same call would
+ * otherwise be logged again when its `Post` arrives.
  */
 function logUnknownTool(event: HookEvent, scope: EventScope): void {
-  if (!("tool" in event) || event.tool.category !== "UNKNOWN") return;
+  if (event.name !== "PreToolUse" || event.tool.category !== "UNKNOWN") return;
 
   scope.log(`UNKNOWN_TOOL:${loggedToolName(event.tool.toolName)}`);
 }

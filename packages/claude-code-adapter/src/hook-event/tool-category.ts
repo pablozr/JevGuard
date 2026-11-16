@@ -20,11 +20,19 @@ const READONLY_TOOLS: readonly string[] = [
   "KillShell",
   // Claude Code 2.1.325, read-only registry entries.
   "LSP",
+  "CronList",
+  "ReadNotifications",
+];
+/**
+ * Tools of the host that run code on an MCP server and therefore follow the MCP rule
+ * (ADR 0017): the host's `isReadOnly` says what the tool is meant to do, not what the
+ * server's code does. A write by that server is proven only by the Git fence, so these
+ * are `MCP` and never `READONLY`; the `mcp__*` prefix is not the only way in.
+ */
+const MCP_RESOURCE_TOOLS: readonly string[] = [
   "ListMcpResourcesTool",
   "ReadMcpResourceTool",
   "ReadMcpResourceDirTool",
-  "CronList",
-  "ReadNotifications",
 ];
 /**
  * Tools that drive the session, its tasks or its user interface and never write a file:
@@ -63,7 +71,7 @@ const COORDINATION_TOOLS: readonly string[] = [
 
 /** Explicit lists only: a tool that is not named is `UNKNOWN`, never assumed harmless. */
 export function categorizeTool(toolName: string): ToolCategory {
-  if (toolName.startsWith("mcp__")) return "MCP";
+  if (toolName.startsWith("mcp__") || MCP_RESOURCE_TOOLS.includes(toolName)) return "MCP";
   if (EDIT_TOOLS.includes(toolName)) return "EDIT";
   if (toolName === "Bash") return "BASH";
   if (toolName === "PowerShell") return "POWERSHELL";

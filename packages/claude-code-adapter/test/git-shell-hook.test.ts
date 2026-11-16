@@ -402,3 +402,36 @@ describe("Bash host diff cross-check", () => {
     expect(world.onlyHandoff().resolution.status).toBe("TURN");
   });
 });
+
+describe("MCP resource tools through the hook", () => {
+  let world: HookWorld;
+
+  beforeEach(() => {
+    world = new HookWorld();
+    world.shellDiffLimits = LOADED_MACHINE_LIMITS;
+    initRepository(world.projectRoot);
+  });
+
+  afterEach(() => {
+    world.cleanup();
+  });
+
+  test("a write made while a resource is read is reviewed, not skipped", () => {
+    const id = world.nextToolId();
+    const input = { server: "docs", uri: "notes://a" };
+
+    world.prompt("read a resource that writes");
+    world.preTool("ReadMcpResourceTool", id, input);
+    world.write("a.ts", "one\r\nTWO\r\n");
+    world.postTool("ReadMcpResourceTool", id, input);
+    world.stop();
+
+    const { resolution } = world.onlyHandoff();
+
+    expect(resolution.status).toBe("TURN");
+
+    if (resolution.status !== "TURN") return;
+
+    expect(resolution.turn.files.map((file) => file.path)).toEqual(["a.ts"]);
+  });
+});
