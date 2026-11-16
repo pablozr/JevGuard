@@ -27,8 +27,13 @@ import { createFileHandoffSink, runHook } from "../src/hook";
 export const SESSION = "session-1";
 export const ORIGINAL = "one\r\ntwo\r\n";
 
+/**
+ * Runs Git for a fixture with the machine's own hooks turned off. A developer's global
+ * `core.hooksPath` (a commit hook, for one) would otherwise run inside every fixture
+ * commit, making the suite slow and its result depend on the machine (#86).
+ */
 export function git(cwd: string, ...args: string[]): void {
-  execFileSync("git", args, { cwd, stdio: "ignore" });
+  execFileSync("git", ["-c", "core.hooksPath=", ...args], { cwd, stdio: "ignore" });
 }
 
 export function initRepository(root: string): void {
