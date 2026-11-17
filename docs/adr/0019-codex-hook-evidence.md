@@ -1,13 +1,14 @@
 # ADR 0019: Codex hook evidence follows the Claude Code turn profile
 
-Status: proposed — 2026-11-16 (issue #71). Accepted now: only the F0 payload contract
-(the host encodings typeset in `src/hook-payload.ts` and enforced by
-`test/hook-contract.test.ts`). The decision below is the proposed direction for
-F1–F4 — it applies
+Status: accepted — 2026-11-16 (issue #71); extended 2026-11-17 with F1, the hook's unit
+lifecycle. Accepted: the F0 payload contract (the host encodings typeset in
+`src/hook-payload.ts` and enforced by `test/hook-contract.test.ts`) and F1 (the lifecycle
+described below, implemented in `src/hook/`). F2–F4 stay as proposed: the decision below
+applies
 [ADR 0014](0014-claude-code-tool-attributed-turn-profile.md), the MCP fence of
 [ADR 0017](0017-mcp-calls-fenced-by-git-snapshot.md) and the project root of
-[ADR 0018](0018-project-root-from-the-edited-repository.md) to a second host — and it
-waits for the owner's re-evaluation before any of it is implemented.
+[ADR 0018](0018-project-root-from-the-edited-repository.md) to a second host, and each
+slice starts when the owner says so.
 
 ## Context
 
@@ -55,6 +56,37 @@ model:
   (`last_assistant_message`) is logged, sent as evidence or written to disk. The host's
   `transcript_path` is never read: the transcript format is documented as unstable.
 
+## F1: the hook's unit lifecycle
+
+The first implemented slice keeps the unit and says whether its lifecycle is complete. It
+acquires nothing, calls nothing and reviews nothing: there is no Git fence, no Jev and no
+verdict, so a turn cannot be judged at all until F2 and F3 arrive. What it does fix, so
+the later slices cannot start from a looser contract:
+
+- **The unit is the turn.** It is keyed by `session_id` + `turn_id` and opens at
+  `UserPromptSubmit`. A tool call or a `Stop` whose opening the hook never saw opens the
+  unit too, marked `HOOK_NOT_TRUSTED`: the host can start running hooks mid-turn (right
+  after someone trusts them), and a marked unit is more honest than a lost turn.
+- **The reading is closed.** Only the six events the F0 capture proved are understood, and
+  each must carry the ids the unit needs. Any other event, or a payload without them,
+  marks the session (`UNSUPPORTED_EVENT`, `PAYLOAD_UNREADABLE`) and every unit of it can
+  then only end `UNAVAILABLE`. This is also the runtime half of the version guard: a host
+  that changes its payload falls out here instead of being read as if nothing happened.
+  The other half — pinning a minimum `codex-cli` and failing `doctor` outside it — needs
+  the install, and lands with F4.
+- **Broken pairing marks the unit.** A `PostToolUse` with no `PreToolUse`, a `PreToolUse`
+  that never gets its `PostToolUse` (the refused calls of the captured session), or the
+  same half twice. `Stop` closes the unit; a turn replaced before its `Stop` keeps its
+  predecessor marked `TURN_NOT_CLOSED` and closed.
+- **The state is local and bounded.** Under the `PLUGIN_DATA` directory the host gives the
+  plugin hook: one append-only lifecycle file per session, keyed by a digest of the
+  session id, plus a heartbeat. Lines hold ids, timestamps and closed codes — never a
+  task, a path, a tool input or a diff. Every rule is decided by replaying the file, so
+  concurrent hooks only ever append, and a session idle for a day is swept.
+- **The log is a closed code set.** The hook writes `{ code, event, at }` and nothing else;
+  `prompt`, `last_assistant_message`, `transcript_path`, `cwd`, `tool_input` and
+  `tool_response` never leave the decoder.
+
 ## Alternatives considered
 
 - **Review the repository diff at `Stop`.** Rejected: it is the worktree, not the turn,
@@ -72,7 +104,9 @@ model:
 - Hooks must be trusted by hash before they run (`/hooks`, or
   `--dangerously-bypass-hook-trust` for vetted automation). A plugin installed but not
   trusted produces no event at all, so the adapter needs a `doctor --host codex` check
-  and an `UNAVAILABLE` reason (`HOOK_NOT_TRUSTED`) instead of a silent skip.
+  and an `UNAVAILABLE` reason (`HOOK_NOT_TRUSTED`) instead of a silent skip. F1 has the
+  reason for a turn whose opening was missed; the check itself needs an install to point
+  at and comes with F4.
 - `SessionEnd` is best-effort and was missing from one captured run: `Stop` is the only
   closing event the adapter may rely on.
 - Hosted tools (`WebSearch`) never reach the hook path. Any such tool that one day writes
