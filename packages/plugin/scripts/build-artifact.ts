@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { cp, mkdir, rm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -76,6 +77,29 @@ async function readSourceManifest(): Promise<SourceManifest> {
   return JSON.parse(text) as SourceManifest;
 }
 
+/**
+ * Where the bundle came from. A tarball gives no sign of the tree it was built from:
+ * a bundle older than the version it claims, or a stale local `file:` install loaded
+ * in place of the published package, looks exactly like a correct one. The manifest
+ * names the commit and whether the tracked tree it was built from was clean, so a
+ * release can be checked against the commit it claims to be.
+ */
+interface BuildProvenance {
+  readonly commit: string;
+  readonly dirty: boolean;
+}
+
+function readBuildProvenance(): BuildProvenance {
+  const git = (args: readonly string[]): string =>
+    execFileSync("git", args, { cwd: REPO_ROOT, encoding: "utf8" }).trim();
+
+  return {
+    commit: git(["rev-parse", "HEAD"]),
+    // Untracked files never enter the bundle, so only tracked changes make it dirty.
+    dirty: git(["status", "--porcelain", "--untracked-files=no"]) !== "",
+  };
+}
+
 /** Host peers (`@opencode/plugin`, `effect`) stay external: the host provides them. */
 async function bundleEntries(source: SourceManifest): Promise<void> {
   const result = await Bun.build({
@@ -106,7 +130,10 @@ async function bundleEntries(source: SourceManifest): Promise<void> {
   }
 }
 
-async function writeArtifactManifest(source: SourceManifest): Promise<void> {
+async function writeArtifactManifest(
+  source: SourceManifest,
+  build: BuildProvenance,
+): Promise<void> {
   const manifest = {
     name: source.name,
     version: source.version,
@@ -116,6 +143,7 @@ async function writeArtifactManifest(source: SourceManifest): Promise<void> {
     main: "./index.js",
     exports: { ".": "./index.js" },
     files: [...ARTIFACT_FILES],
+    build,
     engines: source.engines,
     repository: source.repository,
     homepage: source.homepage,
@@ -157,7 +185,7 @@ async function main(): Promise<void> {
   const source = await readSourceManifest();
 
   await bundleEntries(source);
-  await writeArtifactManifest(source);
+  await writeArtifactManifest(source, readBuildProvenance());
   await copyDocs();
   await copySkills();
 
