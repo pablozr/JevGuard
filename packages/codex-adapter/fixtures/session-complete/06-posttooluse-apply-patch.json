@@ -1,0 +1,14 @@
+{
+  "session_id": "01a1e7aa-0001-7c00-9000-000000000001",
+  "turn_id": "01a1e7aa-0002-7c00-9000-000000000002",
+  "cwd": "C:\\work\\smoke",
+  "hook_event_name": "PostToolUse",
+  "model": "gpt-6.1-sol",
+  "permission_mode": "bypassPermissions",
+  "tool_name": "apply_patch",
+  "tool_input": {
+    "command": "*** Begin Patch\n*** Add File: C:/work/smoke/notes.txt\n+smoke\n*** End Patch"
+  },
+  "tool_response": "Exit code: 0\nWall time: 0 seconds\nOutput:\nSuccess. Updated the following files:\nA C:/work/smoke/notes.txt\n",
+  "tool_use_id": "exec-aaaaaaaa-0000-4000-8000-0002"
+}

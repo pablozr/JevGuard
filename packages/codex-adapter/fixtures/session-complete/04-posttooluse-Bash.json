@@ -1,0 +1,14 @@
+{
+  "session_id": "01a1e7aa-0001-7c00-9000-000000000001",
+  "turn_id": "01a1e7aa-0002-7c00-9000-000000000002",
+  "cwd": "C:\\work\\smoke",
+  "hook_event_name": "PostToolUse",
+  "model": "gpt-6.1-sol",
+  "permission_mode": "bypassPermissions",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "echo hello-f0"
+  },
+  "tool_response": "hello-f0\r\n",
+  "tool_use_id": "exec-aaaaaaaa-0000-4000-8000-0001"
+}

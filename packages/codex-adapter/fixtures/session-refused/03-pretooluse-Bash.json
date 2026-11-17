@@ -1,0 +1,13 @@
+{
+  "session_id": "01a1e7aa-0011-7c00-9000-000000000011",
+  "turn_id": "01a1e7aa-0012-7c00-9000-000000000012",
+  "cwd": "C:\\work\\refused",
+  "hook_event_name": "PreToolUse",
+  "model": "gpt-6.1-sol",
+  "permission_mode": "bypassPermissions",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "echo hello-f0"
+  },
+  "tool_use_id": "exec-bbbbbbbb-0000-4000-8000-0001"
+}
