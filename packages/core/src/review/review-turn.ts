@@ -13,8 +13,8 @@ import type { ReviewTurnDependencies, RuleLaneReview, TurnReviewOutcome } from "
  * rule lane and the single built-in batch concurrently and aggregate them. A rejected
  * loader or rule/config failure degrades only the rule lane to a review-level
  * `UNAVAILABLE` and never suppresses the built-in batch. The final results are rules
- * in source order, then scope creep, then complexity, regardless of completion timing.
- * Presentation and remediation stay with the host.
+ * in source order, then scope creep, complexity, and test adequacy, regardless of
+ * completion timing. Presentation and remediation stay with the host.
  */
 export async function reviewTurn(
   turn: Turn,
