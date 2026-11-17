@@ -1,0 +1,10 @@
+{
+  "session_id": "01a1e7aa-0011-7c00-9000-000000000011",
+  "turn_id": "01a1e7aa-0012-7c00-9000-000000000012",
+  "cwd": "C:\\work\\refused",
+  "hook_event_name": "Stop",
+  "model": "gpt-6.1-sol",
+  "permission_mode": "bypassPermissions",
+  "stop_hook_active": false,
+  "last_assistant_message": "Não foi possível concluir: o shell foi bloqueado, o ambiente não permite criar notes.txt e o MCP exige aprovação indisponível nesta sessão."
+}

@@ -1,0 +1,10 @@
+{
+  "session_id": "01a1e7aa-0001-7c00-9000-000000000001",
+  "turn_id": "01a1e7aa-0002-7c00-9000-000000000002",
+  "cwd": "C:\\work\\smoke",
+  "hook_event_name": "Stop",
+  "model": "gpt-6.1-sol",
+  "permission_mode": "bypassPermissions",
+  "stop_hook_active": false,
+  "last_assistant_message": "done"
+}

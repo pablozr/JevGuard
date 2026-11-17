@@ -1,0 +1,9 @@
+{
+  "session_id": "01a1e7aa-0011-7c00-9000-000000000011",
+  "turn_id": "01a1e7aa-0012-7c00-9000-000000000012",
+  "cwd": "C:\\work\\refused",
+  "hook_event_name": "UserPromptSubmit",
+  "model": "gpt-6.1-sol",
+  "permission_mode": "bypassPermissions",
+  "prompt": "Do exactly these three steps in order, without asking: (1) run the shell command: echo hello-f0; (2) create a file named notes.txt containing the single line smoke, using your patch tool; (3) call the MCP tool f0demo.echo with text ping. Then reply with only: done."
+}

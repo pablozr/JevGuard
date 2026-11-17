@@ -1,0 +1,8 @@
+{
+  "session_id": "01a1e7aa-0001-7c00-9000-000000000001",
+  "cwd": "C:\\work\\smoke",
+  "hook_event_name": "SessionStart",
+  "model": "gpt-6.1-sol",
+  "permission_mode": "bypassPermissions",
+  "source": "startup"
+}

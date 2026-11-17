@@ -1,0 +1,21 @@
+{
+  "session_id": "01a1e7aa-0001-7c00-9000-000000000001",
+  "turn_id": "01a1e7aa-0002-7c00-9000-000000000002",
+  "cwd": "C:\\work\\smoke",
+  "hook_event_name": "PostToolUse",
+  "model": "gpt-6.1-sol",
+  "permission_mode": "bypassPermissions",
+  "tool_name": "mcp__f0demo__echo",
+  "tool_input": {
+    "text": "ping"
+  },
+  "tool_response": {
+    "content": [
+      {
+        "type": "text",
+        "text": "echo: ping"
+      }
+    ]
+  },
+  "tool_use_id": "exec-aaaaaaaa-0000-4000-8000-0003"
+}

@@ -18,6 +18,7 @@ packages/
 ├── claude-code-adapter/
 ├── claude-code-plugin/
 ├── cli/
+├── codex-adapter/
 ├── core/
 ├── node-infra/
 ├── opencode-adapter/
@@ -73,6 +74,10 @@ cli ─────────────────────────�
   strategy-only (ADR 0014): the worker writes a private proposal request, and the mod makes
   one `$.model.complete` call and shows the result in a user-only panel; an explicit
   user opt-in (`delivery: agent`) may also submit it to the agent once, visibly.
+- `codex-adapter` owns the Codex host contract (ADR 0019). So far it holds only what the
+  host sends — the raw hook payload types and the captured payloads under `fixtures/`,
+  with the contract test that pairs them. It has no entrypoint, no dependency and no
+  build yet; normalization and capture start with the next slice.
 - `plugin` is composition plus the single public OpenCode 2.2.x server plugin entrypoint
   (V2 `Plugin.Plugin`, engine range `>=2.2.2 <2.3`). It registers the bundled
   `jevguard-rules` and `jev-init` skills through `skill.transform`; there is no command
