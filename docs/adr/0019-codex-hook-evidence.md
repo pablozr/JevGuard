@@ -1,11 +1,13 @@
 # ADR 0019: Codex hook evidence follows the Claude Code turn profile
 
-Status: accepted — 2026-11-16, owner-approved direction (issue #71). Applies
+Status: proposed — 2026-11-16 (issue #71). Accepted now: only the F0 payload contract
+(the host encodings typeset in `src/hook-payload.ts` and enforced by
+`test/hook-contract.test.ts`). The decision below is the proposed direction for
+F1–F4 — it applies
 [ADR 0014](0014-claude-code-tool-attributed-turn-profile.md), the MCP fence of
 [ADR 0017](0017-mcp-calls-fenced-by-git-snapshot.md) and the project root of
-[ADR 0018](0018-project-root-from-the-edited-repository.md) to a second host. Only the
-first slice (F0, payload capture) is implemented; the rest waits for the owner's
-re-evaluation.
+[ADR 0018](0018-project-root-from-the-edited-repository.md) to a second host — and it
+waits for the owner's re-evaluation before any of it is implemented.
 
 ## Context
 
@@ -24,8 +26,10 @@ checked by `packages/codex-adapter/test/hook-contract.test.ts`. What they show:
 - `PreToolUse`/`PostToolUse` share one `tool_use_id` per call, for `Bash`, `apply_patch`
   and `mcp__<server>__<tool>` alike (observed shape `exec-<uuid>`).
 - `apply_patch` sends the complete patch in `tool_input.command`, so the host's report and
-  the Git fence can be cross-checked for edits, as the host's `bashEditDiff` already is
-  for the shell.
+  the Git fence can be cross-checked for edits. This cross-check is not inherited from
+  Claude Code: there `bashEditDiff` is recorded only as a code and never affects
+  acquisition (ADR 0014), so deciding on a disagreement is a new rule for Codex, adopted
+  in this ADR and not copied from an existing gate.
 - A call that policy refuses still gets its `PreToolUse` and no `PostToolUse` — the same
   broken pairing the Claude Code hook already handles.
 
@@ -40,6 +44,8 @@ model:
   overlap in time sharing one fence as a batch.
 - `apply_patch` is fenced the same way **and** carries the patch as a second source; when
   the patch and the fence disagree about which files changed, the unit is `UNAVAILABLE`.
+  This one is a **new rule**, not a transfer: in the Claude Code profile the host's edit
+  report (`bashEditDiff`) is a cross-check code only and never decides acquisition.
 - Tool names are a closed classification: known read-only tools are skipped, `Bash`,
   `apply_patch` and `mcp__*` are fenced, and anything else is `UNKNOWN` and makes the
   unit `UNAVAILABLE` when it could write.
