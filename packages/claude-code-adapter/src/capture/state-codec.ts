@@ -13,6 +13,7 @@ import type {
   StateLine,
   StoredGitDiff,
   StoredShellChange,
+  TaintReason,
   UnkeptContentProblem,
 } from "./types";
 
@@ -25,6 +26,14 @@ function onlyKeys(value: JsonObject, allowed: readonly string[]): boolean {
 
 function isDigest(value: unknown): value is string {
   return typeof value === "string" && DIGEST_PATTERN.test(value);
+}
+
+function isTaintReason(value: unknown): value is TaintReason {
+  return (
+    value === "CAPTURE_FAILED" ||
+    value === "MULTIPLE_REPOSITORIES" ||
+    value === "PROJECT_ROOT_UNRESOLVED"
+  );
 }
 
 function isProblem(value: unknown): value is CaptureProblem {
@@ -145,8 +154,8 @@ export function decodeStateLine(value: unknown): StateLine | null {
   if (!isJsonObject(value) || value.v !== 1) return null;
 
   if (Object.hasOwn(value, "taint")) {
-    return value.taint === "CAPTURE_FAILED" && hasKeys(value, ["v", "taint"])
-      ? { v: 1, taint: "CAPTURE_FAILED" }
+    return isTaintReason(value.taint) && hasKeys(value, ["v", "taint"])
+      ? { v: 1, taint: value.taint }
       : null;
   }
 

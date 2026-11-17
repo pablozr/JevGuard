@@ -3,18 +3,20 @@ import { BudgetExceededError, createBudget } from "../capture/budget";
 import { captureAfterAppend, captureBeforeAppend } from "../capture/capture-event";
 import { closeUnit } from "../capture/close-unit";
 import { createRepoPathResolver } from "../capture/file-image";
+import { type RootLookup, rootCandidateOf } from "../capture/project-root";
 import { DEFAULT_SHELL_DIFF_LIMITS } from "../capture/shell-diff-limits";
 import type { Budget, CaptureContext, HandoffSink, LineCapture, UnitState } from "../capture/types";
 import {
   appendLine,
   handoffDirectoryOf,
   openCurrentUnit,
+  readUnitRoot,
   recordUnitRoot,
   removeSession,
   stateDirectoryOf,
   sweepOrphans,
   taintSession,
-  taintUnit,
+  taintUnitWith,
 } from "../capture/unit-state";
 import type { HookEvent } from "../hook-event";
 import { isHookEventParseFailure, parseHookEvent } from "../hook-event";
@@ -85,23 +87,64 @@ function contextFor(scope: EventScope, unit: UnitState, projectRoot: string): Ca
   };
 }
 
-function trustedProjectRoot(scope: EventScope, unit: UnitState): string | null {
-  const projectRoot = scope.dependencies.environment.get("CLAUDE_PROJECT_DIR");
+/**
+ * Where the unit is judged (ADR 0018): `KNOWN` once its own evidence named a work tree,
+ * `PENDING` while no event has named one — nothing is recorded, so nothing is keyed by a
+ * place that is not the unit's yet — and `UNRESOLVED` when a call that can write ran from
+ * outside every work tree before the root was known, which leaves no proof at all.
+ */
+type RootReading =
+  | { readonly status: "KNOWN"; readonly root: string }
+  | { readonly status: "PENDING" }
+  | { readonly status: "UNRESOLVED" };
 
-  if (projectRoot === undefined || projectRoot === "") {
-    taintUnit(unit);
-    scope.log("CAPTURE_READ_FAILED");
+/** A call whose effects only a Git picture proves, so its place decides the unit's root. */
+function namesAFencedCall(event: HookEvent): boolean {
+  if (!("tool" in event)) return false;
 
-    return null;
+  const { category } = event.tool;
+
+  return category === "BASH" || category === "POWERSHELL" || category === "MCP";
+}
+
+function rootLookup(scope: EventScope): RootLookup {
+  const { dependencies } = scope;
+
+  const fallbackRoot = dependencies.environment.get("CLAUDE_PROJECT_DIR");
+
+  return {
+    files: dependencies.files,
+    git: dependencies.git,
+    limits: dependencies.shellDiffLimits ?? DEFAULT_SHELL_DIFF_LIMITS,
+    fallbackRoot: fallbackRoot === undefined || fallbackRoot === "" ? null : fallbackRoot,
+  };
+}
+
+function unitRoot(scope: EventScope, unit: UnitState, event: HookEvent): RootReading {
+  const recorded = readUnitRoot(unit);
+
+  if (recorded !== null) return { status: "KNOWN", root: recorded };
+
+  const candidate = rootCandidateOf(event, rootLookup(scope));
+
+  if (candidate.status === "NOT_EVIDENCE") return { status: "PENDING" };
+
+  if (candidate.status === "NO_PLACE") {
+    return namesAFencedCall(event) ? { status: "UNRESOLVED" } : { status: "PENDING" };
   }
 
-  if (!recordUnitRoot(unit, projectRoot)) {
-    taintUnit(unit);
-
-    return null;
+  if (recordUnitRoot(unit, candidate.toplevel)) {
+    return { status: "KNOWN", root: candidate.toplevel };
   }
 
-  return projectRoot;
+  const winner = readUnitRoot(unit);
+
+  if (winner === null) return { status: "UNRESOLVED" };
+  if (winner === candidate.toplevel) return { status: "KNOWN", root: winner };
+
+  taintUnitWith(unit, "MULTIPLE_REPOSITORIES");
+
+  return { status: "KNOWN", root: winner };
 }
 
 /** A tool name is safe to log; anything unexpected about it is dropped, not escaped. */
@@ -125,8 +168,11 @@ function recordEvent(event: HookEvent, scope: EventScope): void {
   logUnknownTool(event, scope);
 
   const unit = openCurrentUnit(scope.stateDirectory, event.sessionId, scope.dependencies.now());
-  const projectRoot = trustedProjectRoot(scope, unit);
-  const context = projectRoot === null ? null : contextFor(scope, unit, projectRoot);
+  const reading = unitRoot(scope, unit, event);
+
+  if (reading.status === "UNRESOLVED") taintUnitWith(unit, "PROJECT_ROOT_UNRESOLVED");
+
+  const context = reading.status === "KNOWN" ? contextFor(scope, unit, reading.root) : null;
   const capture = context === null ? null : captureOrFail(event, context);
 
   appendLine(unit, capture === null ? { v: 1, event } : { v: 1, event, capture });

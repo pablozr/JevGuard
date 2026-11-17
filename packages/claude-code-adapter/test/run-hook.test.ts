@@ -337,14 +337,25 @@ describe("closure", () => {
     });
   });
 
-  test("a changed project root taints the unit", () => {
-    world.write("src/a.ts", "old\n");
-    world.prompt("move");
-    world.environment.set("CLAUDE_PROJECT_DIR", join(world.base, "other"));
+  test("a unit that edits two repositories is UNAVAILABLE with its own reason", () => {
+    initRepository(world.projectRoot);
+
+    const other = join(world.base, "other");
+
+    initRepository(other);
+
+    world.prompt("touch two repositories");
     world.edit("src/a.ts", "new\n");
+
+    const id = world.nextToolId();
+    const input = { file_path: join(other, "b.ts") };
+
+    world.preTool("Write", id, input);
+    writeFileSync(join(other, "b.ts"), "b\n");
+    world.postTool("Write", id, input);
     world.stop();
 
-    expect(causesOf(world.onlyHandoff())).toContain("CAPTURE_FAILED");
+    expect(causesOf(world.onlyHandoff())).toContain("MULTIPLE_REPOSITORIES");
   });
 });
 
@@ -448,7 +459,7 @@ describe("Bash with a real repository", () => {
     expect(patchOf(handoff)).toContain("-two\r\n+TWO\r\n");
   });
 
-  test("outside a Git repository Bash is SHELL_GIT_DIFF_UNAVAILABLE", () => {
+  test("a Bash call from outside every repository has no root to be fenced at", () => {
     world.write("src/a.ts", "old\n");
     world.prompt("run bash");
 
@@ -458,7 +469,24 @@ describe("Bash with a real repository", () => {
     world.postTool("Bash", id, { command: "echo" }, { stdout: "" });
     world.stop();
 
-    expect(causesOf(world.onlyHandoff())).toEqual(["SHELL_GIT_DIFF_UNAVAILABLE"]);
+    expect(causesOf(world.onlyHandoff())).toContain("PROJECT_ROOT_UNRESOLVED");
+  });
+
+  test("a Bash call from an edit-free project that is not a work tree is still recorded", () => {
+    world.prompt("run bash in a plain directory");
+
+    const id = world.nextToolId();
+
+    world.hook({
+      hook_event_name: "PreToolUse",
+      tool_name: "Bash",
+      tool_use_id: id,
+      tool_input: { command: "echo" },
+      cwd: world.projectRoot,
+    });
+    world.stop();
+
+    expect(causesOf(world.onlyHandoff())).toContain("PROJECT_ROOT_UNRESOLVED");
   });
 });
 

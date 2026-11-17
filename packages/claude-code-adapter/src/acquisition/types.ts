@@ -56,6 +56,11 @@ export interface UnitCapture {
   readonly gitDiffs: ReadonlyMap<string, GitShellDiff>;
   /** Problems met while capturing; each one becomes an acquisition reason. */
   readonly problems: ReadonlySet<CaptureProblem>;
+  /**
+   * Reasons the capture marked for the whole unit, because they are about the unit's
+   * place rather than about one file's evidence (for example its root).
+   */
+  readonly reasons?: readonly ClaudeAcquisitionReason[] | undefined;
 }
 
 /**
@@ -97,6 +102,8 @@ export type ClaudeAcquisitionReason =
   | "SHELL_DIFF_LIMIT_EXCEEDED"
   | "MCP_TOOL"
   | "UNKNOWN_TOOL"
+  | "MULTIPLE_REPOSITORIES"
+  | "PROJECT_ROOT_UNRESOLVED"
   | "PAIRING_BROKEN"
   | "CAPTURE_FAILED"
   | "CONTENT_TOO_LARGE"

@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
 import type {
   CaptureProblem,
+  ClaudeAcquisitionReason,
   FileImage,
   GitShellChange,
   GitShellDiff,
@@ -45,6 +46,7 @@ interface Accumulator {
   readonly postImages: Map<string, Map<string, PostImage>>;
   readonly gitDiffs: Map<string, GitShellDiff>;
   readonly problems: Set<CaptureProblem>;
+  readonly reasons: Set<ClaudeAcquisitionReason>;
 }
 
 function toolUseIdOf(event: HookEvent): string | null {
@@ -98,7 +100,9 @@ function collectLines(input: CloseUnitInput, state: Accumulator): readonly HookE
 
   for (const line of lines) {
     if (!("event" in line)) {
-      state.problems.add("CAPTURE_FAILED");
+      if (line.taint === "CAPTURE_FAILED") state.problems.add("CAPTURE_FAILED");
+      else state.reasons.add(line.taint);
+
       continue;
     }
 
@@ -202,6 +206,7 @@ function foldUnit(input: CloseUnitInput, projectRoot: string): FoldedUnit | null
     postImages: new Map(),
     gitDiffs: new Map(),
     problems: new Set(),
+    reasons: new Set(),
   };
   const events = collectLines(input, state);
 
@@ -231,6 +236,7 @@ function foldUnit(input: CloseUnitInput, projectRoot: string): FoldedUnit | null
       finalImages: readFinalImages(input, projectRoot, finalPaths, state),
       gitDiffs: state.gitDiffs,
       problems: state.problems,
+      reasons: [...state.reasons],
     },
     shellCoverage: shellCoverageOf(state.gitDiffs),
   };

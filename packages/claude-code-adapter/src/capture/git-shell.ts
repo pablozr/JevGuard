@@ -1,4 +1,4 @@
-import { resolve } from "node:path";
+import { isAbsolute, relative, resolve } from "node:path";
 import { guardPath, isReadablePath, MAX_CAPTURED_FILE_BYTES, sha256Hex } from "./file-image";
 import { assertStatusEntries, chargeContent, runBounded, text } from "./git-run";
 import { ShellDiffLimitError } from "./shell-diff-limits";
@@ -154,15 +154,47 @@ function snapshotEntries(
   return { entries, contents };
 }
 
-function captureSnapshot(context: GitShellContext, cwd: string): TakenSnapshot | null {
-  const top = runBounded(context, ["rev-parse", "--show-toplevel"], context.projectRoot);
+/**
+ * Where the call was made, relative to the unit's repository: `INSIDE` when its `cwd` is
+ * in no work tree or in the unit's own (a call from the agent's folder is fenced where the
+ * unit is judged, ADR 0018), `FOREIGN` when it is in another one.
+ */
+type CallPlace = "INSIDE" | "FOREIGN";
+
+/** Whether `path` is `root` itself or below it, after links and short names are expanded. */
+function isWithin(context: GitShellContext, root: string, path: string): boolean {
+  const inside = relative(resolve(root), context.files.realPath(path) ?? path);
+
+  return inside === "" || (!isAbsolute(inside) && !inside.startsWith(".."));
+}
+
+/**
+ * A `cwd` in no work tree leaves no proof of where the call ran when it is inside the
+ * unit's repository: a `rev-parse` that fails there (a nested repository of another owner,
+ * a `safe.directory` refusal) would otherwise fence a call whose writes nothing observed.
+ * From outside the repository — the agent's own folder — the same failure is expected and
+ * the call is fenced where the unit is judged (ADR 0018).
+ */
+function placeOf(context: GitShellContext, cwd: string, toplevel: string): CallPlace | null {
   const cwdTop = runBounded(context, ["rev-parse", "--show-toplevel"], cwd);
 
-  if (!top.ok || !cwdTop.ok) return null;
+  if (!cwdTop.ok) return isWithin(context, toplevel, cwd) ? null : "INSIDE";
+
+  return resolve(text(cwdTop.stdout).trim()) === toplevel ? "INSIDE" : "FOREIGN";
+}
+
+function captureSnapshot(
+  context: GitShellContext,
+  cwd: string,
+): { readonly taken: TakenSnapshot; readonly place: CallPlace } | null {
+  const top = runBounded(context, ["rev-parse", "--show-toplevel"], context.projectRoot);
+
+  if (!top.ok) return null;
 
   const toplevel = resolve(text(top.stdout).trim());
+  const place = placeOf(context, cwd, toplevel);
 
-  if (resolve(text(cwdTop.stdout).trim()) !== toplevel) return null;
+  if (place === null) return null;
 
   const headResult = runBounded(context, ["rev-parse", "-q", "--verify", "HEAD"], toplevel);
 
@@ -181,13 +213,16 @@ function captureSnapshot(context: GitShellContext, cwd: string): TakenSnapshot |
   const { entries, contents } = snapshotEntries(dirtyPaths, toplevel, new Set(indexLinks), context);
 
   return {
-    snapshot: {
-      toplevel,
-      head: headResult.ok ? text(headResult.stdout).trim() : null,
-      indexLinks,
-      entries,
+    taken: {
+      snapshot: {
+        toplevel,
+        head: headResult.ok ? text(headResult.stdout).trim() : null,
+        indexLinks,
+        entries,
+      },
+      contents,
     },
-    contents,
+    place,
   };
 }
 
@@ -200,10 +235,14 @@ function captureSnapshot(context: GitShellContext, cwd: string): TakenSnapshot |
  */
 export function takeGitSnapshot(context: GitShellContext, cwd: string): SnapshotResult {
   try {
-    const taken = captureSnapshot(context, cwd);
+    const captured = captureSnapshot(context, cwd);
 
-    return taken === null
-      ? { status: "FAILED", failure: { kind: "UNPROVEN" } }
+    if (captured === null) return { status: "FAILED", failure: { kind: "UNPROVEN" } };
+
+    const { taken, place } = captured;
+
+    return place === "FOREIGN"
+      ? { status: "TAKEN", ...taken, foreign: true }
       : { status: "TAKEN", ...taken };
   } catch (error) {
     return {

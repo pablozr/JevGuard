@@ -1,4 +1,4 @@
-import { resolve } from "node:path";
+import { dirname, isAbsolute, relative, resolve } from "node:path";
 import {
   type CaptureProblem,
   type GitShellChange,
@@ -18,6 +18,7 @@ import { assertWithinBudget, narrowBudget } from "./budget";
 import { isReadablePath, readFileImage } from "./file-image";
 import { takeGitSnapshot } from "./git-shell";
 import { diffGitSnapshots } from "./git-shell-diff";
+import { rootCandidateOf } from "./project-root";
 import { createShellDiffMeter } from "./shell-diff-limits";
 import type {
   CaptureContext,
@@ -35,6 +36,7 @@ import {
   markShellBatchUnproven,
   readStateLines,
   takeShellSnapshot,
+  taintUnitWith,
   writeBlob,
   writeFirstPreRecord,
   writeShellSnapshot,
@@ -118,6 +120,73 @@ function preRecordOf(context: CaptureContext, repoPath: string): PreRecord {
   writeBlob(context.unit, Buffer.from(reading.image.content, "utf8"));
 
   return { v: 1, path: repoPath, image: toPostImage(reading.image) };
+}
+
+const MAX_ANCESTOR_STEPS = 40;
+
+function isWithin(root: string, path: string): boolean {
+  const inside = relative(resolve(root), resolve(path));
+
+  return inside === "" || (!isAbsolute(inside) && !inside.startsWith(".."));
+}
+
+/**
+ * The nearest directory strictly below the unit's root that holds a `.git` entry. A file of
+ * a nested repository resolves inside the outer root, so the walk is what tells it apart
+ * before any Git call: an ordinary edit costs a few `stat`s and no Git process (issue #88).
+ */
+function nestedRepositoryOf(context: CaptureContext, start: string): string | null {
+  const root = resolve(context.projectRoot);
+  let current = resolve(start);
+
+  for (let step = 0; step < MAX_ANCESTOR_STEPS; step += 1) {
+    if (!isWithin(root, current) || current === root) return null;
+    if (context.files.stat(resolve(current, ".git")) !== null) return current;
+
+    const parent = dirname(current);
+
+    if (parent === current) return null;
+
+    current = parent;
+  }
+
+  return null;
+}
+
+/**
+ * An edit outside the unit's root can still belong to another work tree, and then the unit
+ * spans two repositories: the review would judge one repository's change by another's
+ * policy, so it is `UNAVAILABLE` with its own reason (ADR 0018).
+ *
+ * A nested repository resolves inside the outer root, so the path alone does not say whether
+ * it is the unit's repository; the walk that finds its `.git` does. Once it is found, the
+ * edit is another repository's unless the place proves the unit's own root: an answer the
+ * edit cannot get at all (a `rev-parse` that fails there, as on Windows without
+ * `safe.directory`) is not proof that it belongs to the outer repository (issue #88).
+ */
+function noteForeignEdit(event: PreToolUseEvent, context: CaptureContext): void {
+  if (event.tool.filePath === null) return;
+
+  const absolute = resolve(event.cwd, event.tool.filePath);
+  const insideUnit = context.resolveRepoPath(event.tool.filePath, event.cwd) !== null;
+  const nested = insideUnit ? nestedRepositoryOf(context, dirname(absolute)) : null;
+
+  if (insideUnit && nested === null) return;
+
+  const candidate = rootCandidateOf(event, {
+    files: context.files,
+    git: context.git,
+    limits: context.shellDiffLimits,
+    fallbackRoot: null,
+  });
+
+  if (candidate.status === "PLACE" && candidate.toplevel === context.projectRoot) return;
+
+  // Outside the root only a proven other work tree makes the unit span two repositories;
+  // inside it, a nested repository the walk found counts even when the place cannot answer.
+  if (nested !== null || candidate.status === "PLACE") {
+    taintUnitWith(context.unit, "MULTIPLE_REPOSITORIES");
+  }
 }
 
 function capturePreEdit(event: PreToolUseEvent, context: CaptureContext): null {
@@ -345,6 +414,13 @@ function closingDiff(
 
   const shell = shellDiffContext(context);
   const post = takeGitSnapshot(shell, event.cwd);
+
+  if (post.status === "TAKEN" && post.foreign === true) {
+    taintUnitWith(context.unit, "MULTIPLE_REPOSITORIES");
+
+    return failedShellCapture("UNPROVEN");
+  }
+
   const result = post.status === "TAKEN" ? diffGitSnapshots(shell, pre, post) : post;
 
   if (result.status === "FAILED") {
@@ -380,8 +456,13 @@ export function captureBeforeAppend(event: HookEvent, context: CaptureContext): 
   assertWithinBudget(context.budget);
 
   switch (event.name) {
-    case "PreToolUse":
-      return event.tool.category === "EDIT" ? capturePreEdit(event, context) : null;
+    case "PreToolUse": {
+      if (event.tool.category !== "EDIT") return null;
+
+      noteForeignEdit(event, context);
+
+      return capturePreEdit(event, context);
+    }
     case "PostToolUse":
       if (event.tool.category === "EDIT") return captureEditPost(event, context);
 
@@ -426,8 +507,13 @@ export function captureAfterAppend(event: HookEvent, context: CaptureContext): v
 
   const result = takeGitSnapshot(shellDiffContext(context), event.cwd);
 
-  if (result.status === "TAKEN") {
+  if (result.status === "TAKEN" && result.foreign !== true) {
     writeShellSnapshot(context.unit, event.tool.toolUseId, result);
+    return;
+  }
+
+  if (result.status === "TAKEN") {
+    taintUnitWith(context.unit, "MULTIPLE_REPOSITORIES");
     return;
   }
 
