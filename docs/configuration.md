@@ -734,8 +734,8 @@ reviews a smaller set of work that it can prove:
   (`PROJECT_ROOT_UNRESOLVED`). A call made from a folder that is not a work tree, after
   the repository is known, is fenced at the unit's repository like any other. A session
   that runs outside the repository it edits — an agent in its own folder changing a
-  repository by absolute path — is therefore reviewed normally, and `.jev/rules.md` is
-  read from that repository. A project that is not a Git work tree is still reviewed
+  repository by absolute path — is reviewed when its first write-capable evidence is in
+  the repository, and `.jev/rules.md` is read from that repository. A project that is not a Git work tree is still reviewed
   from the files its edits name, and its shell calls have no Git proof, as before.
 - **Evidence.** Only files named by `Write`, `Edit`, `MultiEdit`, and `NotebookEdit`
   calls (including those of subagents), plus files a shell command changed. The patch

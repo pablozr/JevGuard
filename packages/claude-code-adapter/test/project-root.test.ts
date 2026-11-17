@@ -144,6 +144,23 @@ describe("a nested repository inside the unit's repository", () => {
     expect(causesOf(world.onlyHandoff())).toContain("MULTIPLE_REPOSITORIES");
   });
 
+  test("an edit in the nested repository the place cannot answer for is still another one", () => {
+    // The nested repository is not safe for this user (on Windows a `rev-parse` there
+    // exits 128), so the edit cannot prove which work tree holds it. It is not the outer
+    // one either, and judging it by the outer repository's policy would be a silent pass.
+    world.gitRunner = (args, cwd, options) =>
+      args.includes("--show-toplevel") && resolve(cwd) === resolve(inner)
+        ? { ok: false, failure: "EXIT" }
+        : runGit(args, cwd, options);
+
+    world.prompt("change the outer file and the nested one");
+    editByAbsolutePath(world.path("a.ts"), "one\r\ntwo\r\nTHREE\r\n");
+    editByAbsolutePath(join(inner, "a.ts"), "inner\r\nCHANGED\r\n");
+    world.stop();
+
+    expect(causesOf(world.onlyHandoff())).toContain("MULTIPLE_REPOSITORIES");
+  });
+
   test("an ordinary edit below the root makes no Git call to prove it", () => {
     mkdirSync(world.path("src"), { recursive: true });
 

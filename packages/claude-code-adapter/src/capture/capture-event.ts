@@ -157,15 +157,21 @@ function nestedRepositoryOf(context: CaptureContext, start: string): string | nu
  * An edit outside the unit's root can still belong to another work tree, and then the unit
  * spans two repositories: the review would judge one repository's change by another's
  * policy, so it is `UNAVAILABLE` with its own reason (ADR 0018).
+ *
+ * A nested repository resolves inside the outer root, so the path alone does not say whether
+ * it is the unit's repository; the walk that finds its `.git` does. Once it is found, the
+ * edit is another repository's unless the place proves the unit's own root: an answer the
+ * edit cannot get at all (a `rev-parse` that fails there, as on Windows without
+ * `safe.directory`) is not proof that it belongs to the outer repository (issue #88).
  */
 function noteForeignEdit(event: PreToolUseEvent, context: CaptureContext): void {
   if (event.tool.filePath === null) return;
 
   const absolute = resolve(event.cwd, event.tool.filePath);
+  const insideUnit = context.resolveRepoPath(event.tool.filePath, event.cwd) !== null;
+  const nested = insideUnit ? nestedRepositoryOf(context, dirname(absolute)) : null;
 
-  if (context.resolveRepoPath(event.tool.filePath, event.cwd) !== null) {
-    if (nestedRepositoryOf(context, dirname(absolute)) === null) return;
-  }
+  if (insideUnit && nested === null) return;
 
   const candidate = rootCandidateOf(event, {
     files: context.files,
@@ -174,7 +180,11 @@ function noteForeignEdit(event: PreToolUseEvent, context: CaptureContext): void 
     fallbackRoot: null,
   });
 
-  if (candidate.status === "PLACE" && candidate.toplevel !== context.projectRoot) {
+  if (candidate.status === "PLACE" && candidate.toplevel === context.projectRoot) return;
+
+  // Outside the root only a proven other work tree makes the unit span two repositories;
+  // inside it, a nested repository the walk found counts even when the place cannot answer.
+  if (nested !== null || candidate.status === "PLACE") {
     taintUnitWith(context.unit, "MULTIPLE_REPOSITORIES");
   }
 }
