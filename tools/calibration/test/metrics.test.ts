@@ -67,6 +67,7 @@ class FixedBatchPort implements JevEvaluationPort {
       answers: {
         scopeCreep: { status: "EVALUATED", noul: { violationProbability: this.scope } },
         complexity: { status: "EVALUATED", noul: { violationProbability: this.complexity } },
+        testAdequacy: { status: "EVALUATED", noul: { violationProbability: this.complexity } },
       },
     };
   }

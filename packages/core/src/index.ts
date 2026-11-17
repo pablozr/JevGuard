@@ -1,6 +1,7 @@
 export { COMPLEXITY_CHECK_ID, COMPLEXITY_GATE_CONFIG } from "./builtins/complexity";
 export { buildBuiltInBatchRequest, evaluateBuiltIns } from "./builtins/evaluate-builtins";
 export { SCOPE_CREEP_CHECK_ID, SCOPE_CREEP_GATE_CONFIG } from "./builtins/scope-creep";
+export { TEST_ADEQUACY_CHECK_ID, TEST_ADEQUACY_GATE_CONFIG } from "./builtins/test-adequacy";
 export type {
   BuiltInBatchReview,
   EvaluateBuiltInsDependencies,
@@ -127,7 +128,7 @@ export type {
   PolicySource,
   PolicySourcePort,
 } from "./ports/types";
-export { COMPLEXITY_ANSWER, SCOPE_CREEP_ANSWER } from "./ports/types";
+export { COMPLEXITY_ANSWER, SCOPE_CREEP_ANSWER, TEST_ADEQUACY_ANSWER } from "./ports/types";
 export { parseModelSpecifier, resolveRemediationConfig } from "./remediation/config";
 export { decideAgentDelivery, withinSessionLimit } from "./remediation/delivery-decision";
 export { collectDeliveryFindings, deliveryFindingsOf } from "./remediation/delivery-findings";

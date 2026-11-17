@@ -12,8 +12,9 @@ export interface EvaluateBuiltInsDependencies {
   readonly jev: JevEvaluationPort;
 }
 
-/** Both built-in results from one batch evaluation, in fixed display order. */
+/** Every built-in result from one batch evaluation, in fixed display order. */
 export interface BuiltInBatchReview {
   readonly scopeCreep: BuiltInReviewResult;
   readonly complexity: BuiltInReviewResult;
+  readonly testAdequacy: BuiltInReviewResult;
 }

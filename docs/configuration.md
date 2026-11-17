@@ -165,8 +165,8 @@ Alongside the repository rules, JevGuard runs product-owned built-in checks with
 their own fixed policy. They are not declared in `.jev/rules.md` and are not
 configured by `.jev/config.yaml`.
 
-`SCOPE-CREEP` and `COMPLEXITY` are the implemented built-ins. Each receives the
-turn's complete, safe attributed patch with no scope filtering.
+`SCOPE-CREEP`, `COMPLEXITY`, and `TEST-ADEQUACY` are the implemented built-ins. Each
+receives the turn's complete, safe attributed patch with no scope filtering.
 
 `SCOPE-CREEP` asks whether the attributed change contains material functional,
 behavioral, architectural, dependency, configuration, documentation, or refactoring
@@ -182,24 +182,33 @@ materially larger than the problem requires. It always uses a fixed advisory thr
 — warn at `0.50` — and can never fail, so `.jev/config.yaml` cannot change its outcome
 or turn it into a failure.
 
+`TEST-ADEQUACY` asks whether the attributed change adds or changes behavior that no
+test it adds or updates exercises. Changes with no behavior — documentation, comments,
+formatting, type-only edits, or a behavior-preserving refactor — and changes whose
+behavior is already exercised by tests they do not need to touch are not violations.
+It always uses a fixed advisory threshold — warn at `0.60` — and can never fail:
+judging what is absent from a patch is the least reliable of the three, so
+`.jev/config.yaml` cannot change its outcome or turn it into a failure.
+
 The rule lane and the built-in batch run concurrently. The batch selects the turn's
-complete, safe attributed patch once and sends `SCOPE-CREEP` and `COMPLEXITY` as two
-independent named answers in **one** Jev request. A single shared FIFO concurrency
-limit caps in-flight Jev requests at two across the plugin instance, counting the
-batch as one request, so completion timing never changes the result order. Results are
-always the rules in source order, then `SCOPE-CREEP`, then `COMPLEXITY`.
+complete, safe attributed patch once and sends `SCOPE-CREEP`, `COMPLEXITY`, and
+`TEST-ADEQUACY` as three independent named answers in **one** Jev request. A single
+shared FIFO concurrency limit caps in-flight Jev requests at two across the plugin
+instance, counting the batch as one request, so completion timing never changes the
+result order. Results are always the rules in source order, then `SCOPE-CREEP`,
+`COMPLEXITY`, and `TEST-ADEQUACY`.
 
 Each batch answer is validated on its own. A malformed, missing, or out-of-range
-answer makes only that check `UNAVAILABLE`; the valid sibling still gates. A request
-that fails at the envelope level makes both checks `UNAVAILABLE` (`JEV_FAILURE`).
+answer makes only that check `UNAVAILABLE`; the valid siblings still gate. A request
+that fails at the envelope level makes every check `UNAVAILABLE` (`JEV_FAILURE`).
 
-A built-in has no rule scope. No attributed patch makes both `SKIPPED`
-(`NO_ATTRIBUTED_PATCH`), and blocked or oversized evidence makes both `UNAVAILABLE`
-(`BLOCKED_EVIDENCE` or `OVERSIZED_DIFF`). A rule, policy-load, or config failure never
-suppresses the batch: when `.jev/rules.md` is missing or `.jev/config.yaml` is
-invalid, the rule lane degrades while the batch still runs. One built-in's answer never
-suppresses the other. Built-ins are observe-only; their verdicts affect the aggregate
-outcome but never block a turn.
+A built-in has no rule scope. No attributed patch makes all of them `SKIPPED`
+(`NO_ATTRIBUTED_PATCH`), and blocked or oversized evidence makes all of them
+`UNAVAILABLE` (`BLOCKED_EVIDENCE` or `OVERSIZED_DIFF`). A rule, policy-load, or config
+failure never suppresses the batch: when `.jev/rules.md` is missing or
+`.jev/config.yaml` is invalid, the rule lane degrades while the batch still runs. One
+built-in's answer never suppresses another's. Built-ins are observe-only; their
+verdicts affect the aggregate outcome but never block a turn.
 
 ## `config.yaml`
 
@@ -256,9 +265,9 @@ Defaults: `error` warns at `0.40` and fails at `0.70`; `warning` warns at `0.60`
 and never fails.
 
 These thresholds apply to repository rules only. The `SCOPE-CREEP` built-in always
-uses its fixed `error` thresholds (`0.65`/`0.90`), and `COMPLEXITY` always uses its
-fixed `warning` threshold (`0.50`) and never fails, even when the configuration is
-absent or invalid.
+uses its fixed `error` thresholds (`0.65`/`0.90`), and `COMPLEXITY` and
+`TEST-ADEQUACY` always use their fixed `warning` thresholds (`0.50` and `0.60`) and
+never fail, even when the configuration is absent or invalid.
 
 ## Evidence
 
@@ -294,7 +303,7 @@ Outcomes are per result: a repository rule or one of the built-ins.
 | --- | --- |
 | `PASS` | Applicable result evaluated and stayed below its warning threshold. |
 | `WARN` | Applicable result evaluated and reached its warning threshold. |
-| `FAIL` | An `error`-severity result evaluated at or above its failure threshold. `COMPLEXITY` is advisory and can never reach this outcome. |
+| `FAIL` | An `error`-severity result evaluated at or above its failure threshold. `COMPLEXITY` and `TEST-ADEQUACY` are advisory and can never reach this outcome. |
 | `SKIPPED` | No attributed patch (`NO_ATTRIBUTED_PATCH`), or no file matched the rule scope (`NO_SCOPE_MATCH`; rules only). |
 | `UNAVAILABLE` | That result's evaluation could not safely or completely happen. |
 
@@ -321,8 +330,8 @@ once per declared rule. When the attributed diff itself cannot be built
 (`MISSING_ATTRIBUTED_DIFF`), that synthetic entry is the whole review. When the turn
 is attributed but the policy files are unreadable or invalid
 (`INVALID_RULE`/`INVALID_CONFIG`) or `.jev/rules.md` is missing (`INVALID_RULE`),
-the synthetic entry covers the rule lane and both built-ins still add their own
-results. The aggregate counts include every entry.
+the synthetic entry covers the rule lane and every built-in still adds its own
+result. The aggregate counts include every entry.
 
 ## Presentation
 
@@ -353,7 +362,7 @@ execution is not reviewed; the plugin logs `JevGuard skipped · interrupted|fail
   ordered slice summaries (index, path, `FILE`/`HUNK`, hunk ordinal), and per-slice
   probabilities and gate outcomes for a complete result. The log never carries diff
   content. Results have a fixed order: the rules in source order, then the
-  `SCOPE-CREEP` built-in, then the `COMPLEXITY` built-in. A review-level failure
+  `SCOPE-CREEP`, `COMPLEXITY`, and `TEST-ADEQUACY` built-ins. A review-level failure
   contributes its single synthetic entry (null rule ID and severity). All of them are
   included in the counts.
 
@@ -550,8 +559,8 @@ never applies a change.
 
 The request aggregates every `FAIL` finding in the review — local `error`-severity
 repository rules and the `SCOPE-CREEP` built-in — together with the turn's task and its
-complete, safe, full attributed patch. `COMPLEXITY` is advisory and never fails, and
-`warning` rules never fail, so neither triggers a proposal. The patch is the same
+complete, safe, full attributed patch. `COMPLEXITY` and `TEST-ADEQUACY` are advisory
+and never fail, and `warning` rules never fail, so none of them triggers a proposal. The patch is the same
 complete attributed patch the review uses; there is no repository or global diff
 fallback.
 

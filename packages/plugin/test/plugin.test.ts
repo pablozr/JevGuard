@@ -85,6 +85,7 @@ const SECOND_ASSISTANT_ID = "msg_assistant_2";
 const SECOND_USER_ID = "msg_user_2";
 const SCOPE_CREEP_ID = "SCOPE-CREEP";
 const COMPLEXITY_ID = "COMPLEXITY";
+const TEST_ADEQUACY_ID = "TEST-ADEQUACY";
 const BUILT_IN_BATCH_LABEL = "BUILT_IN_BATCH";
 const MAX_CONCURRENT_JEV_CALLS = 2;
 
@@ -578,6 +579,7 @@ class FakeJev implements JevEvaluationPort {
       answers: {
         scopeCreep: this.answer(SCOPE_CREEP_ID),
         complexity: this.answer(COMPLEXITY_ID),
+        testAdequacy: this.answer("TEST-ADEQUACY"),
       },
     };
   }
@@ -745,7 +747,9 @@ function jevCalls(jev: FakeJev): readonly string[] {
 
 function jevRequestedChecks(jev: FakeJev): readonly string[] {
   return jev.requests.flatMap((request) =>
-    request.kind === "RULE" ? [request.question.criteria.id] : [SCOPE_CREEP_ID, COMPLEXITY_ID],
+    request.kind === "RULE"
+      ? [request.question.criteria.id]
+      : [SCOPE_CREEP_ID, COMPLEXITY_ID, TEST_ADEQUACY_ID],
   );
 }
 
@@ -942,6 +946,52 @@ function complexityUnavailable(
   };
 }
 
+function testAdequacyEvaluated(
+  outcome: SemanticVerdict,
+  probability: number,
+  scopedPaths: readonly string[],
+): BuiltInReviewResult {
+  return {
+    kind: "BUILT_IN",
+    turnId: ASSISTANT_ID,
+    ruleId: null,
+    checkId: TEST_ADEQUACY_ID,
+    severity: "warning",
+    scopedPaths,
+    outcome,
+    violationProbability: probability,
+  };
+}
+
+function testAdequacySkipped(): BuiltInReviewResult {
+  return {
+    kind: "BUILT_IN",
+    turnId: ASSISTANT_ID,
+    ruleId: null,
+    checkId: TEST_ADEQUACY_ID,
+    severity: "warning",
+    scopedPaths: [],
+    outcome: "SKIPPED",
+    reason: "NO_ATTRIBUTED_PATCH",
+  };
+}
+
+function testAdequacyUnavailable(
+  reason: BuiltInUnavailableReason,
+  scopedPaths: readonly string[] = [],
+): BuiltInReviewResult {
+  return {
+    kind: "BUILT_IN",
+    turnId: ASSISTANT_ID,
+    ruleId: null,
+    checkId: TEST_ADEQUACY_ID,
+    severity: "warning",
+    scopedPaths,
+    outcome: "UNAVAILABLE",
+    reason,
+  };
+}
+
 function reviewUnavailable(turnId: string, reason: UnavailableReason): ReviewLevelResult {
   return {
     kind: "REVIEW",
@@ -1011,6 +1061,7 @@ describe("JevGuardPlugin composition", () => {
       jev.probability = probability;
       jev.probabilities.set(SCOPE_CREEP_ID, 0.1);
       jev.probabilities.set(COMPLEXITY_ID, 0.1);
+      jev.probabilities.set(TEST_ADEQUACY_ID, 0.1);
 
       await dispatch(runtime, turnEvents());
 
@@ -1023,12 +1074,18 @@ describe("JevGuardPlugin composition", () => {
       ]);
       expect(policy.calls).toEqual(["load"]);
       expect(jevCalls(jev)).toEqual(["TEST-1", BUILT_IN_BATCH_LABEL]);
-      expect(jevRequestedChecks(jev)).toEqual(["TEST-1", SCOPE_CREEP_ID, COMPLEXITY_ID]);
+      expect(jevRequestedChecks(jev)).toEqual([
+        "TEST-1",
+        SCOPE_CREEP_ID,
+        COMPLEXITY_ID,
+        TEST_ADEQUACY_ID,
+      ]);
       expect(presenter.reviews).toHaveLength(1);
       expect(lastResults(presenter)).toEqual([
         ruleEvaluated("TEST-1", "error", outcome, probability, ["src/a.ts"]),
         builtInEvaluated("PASS", 0.1, ["src/a.ts"]),
         complexityEvaluated("PASS", 0.1, ["src/a.ts"]),
+        testAdequacyEvaluated("PASS", 0.1, ["src/a.ts"]),
       ]);
       expect(lastReview(presenter).summary.verdict).toBe(outcome);
     },
@@ -1045,11 +1102,12 @@ describe("JevGuardPlugin composition", () => {
       ruleSkipped("TEST-1", "error", "NO_ATTRIBUTED_PATCH"),
       builtInSkipped(),
       complexitySkipped(),
+      testAdequacySkipped(),
     ]);
     expect(lastReview(presenter).summary).toEqual({
       verdict: null,
       hasUnavailable: false,
-      counts: { pass: 0, warn: 0, fail: 0, skipped: 3, unavailable: 0 },
+      counts: { pass: 0, warn: 0, fail: 0, skipped: 4, unavailable: 0 },
     });
   });
 
@@ -1100,6 +1158,7 @@ describe("JevGuardPlugin event returns before background work", () => {
       "TEST-1",
       SCOPE_CREEP_ID,
       COMPLEXITY_ID,
+      TEST_ADEQUACY_ID,
     ]);
   });
 });
@@ -1137,16 +1196,17 @@ describe("JevGuardPlugin operational failures", () => {
     await dispatch(runtime, turnEvents());
 
     expect(jevCalls(jev)).toEqual([BUILT_IN_BATCH_LABEL]);
-    expect(jevRequestedChecks(jev)).toEqual([SCOPE_CREEP_ID, COMPLEXITY_ID]);
+    expect(jevRequestedChecks(jev)).toEqual([SCOPE_CREEP_ID, COMPLEXITY_ID, TEST_ADEQUACY_ID]);
     expect(lastResults(presenter)).toEqual([
       reviewUnavailable(ASSISTANT_ID, "INVALID_RULE"),
       builtInEvaluated("PASS", 0.1, ["src/a.ts"]),
       complexityEvaluated("PASS", 0.1, ["src/a.ts"]),
+      testAdequacyEvaluated("PASS", 0.1, ["src/a.ts"]),
     ]);
     expect(lastReview(presenter).summary).toEqual({
       verdict: "PASS",
       hasUnavailable: true,
-      counts: { pass: 2, warn: 0, fail: 0, skipped: 0, unavailable: 1 },
+      counts: { pass: 3, warn: 0, fail: 0, skipped: 0, unavailable: 1 },
     });
   });
 
@@ -1161,6 +1221,7 @@ describe("JevGuardPlugin operational failures", () => {
       reviewUnavailable(ASSISTANT_ID, "INVALID_RULE"),
       builtInEvaluated("PASS", 0.1, ["src/a.ts"]),
       complexityEvaluated("PASS", 0.1, ["src/a.ts"]),
+      testAdequacyEvaluated("PASS", 0.1, ["src/a.ts"]),
     ]);
   });
 
@@ -1175,6 +1236,7 @@ describe("JevGuardPlugin operational failures", () => {
       ruleUnavailable(null, null, "INVALID_RULE"),
       builtInEvaluated("PASS", 0.1, ["src/a.ts"]),
       complexityEvaluated("PASS", 0.1, ["src/a.ts"]),
+      testAdequacyEvaluated("PASS", 0.1, ["src/a.ts"]),
     ]);
   });
 
@@ -1189,6 +1251,7 @@ describe("JevGuardPlugin operational failures", () => {
       ruleUnavailable("TEST-1", "error", "INVALID_CONFIG"),
       builtInEvaluated("PASS", 0.1, ["src/a.ts"]),
       complexityEvaluated("PASS", 0.1, ["src/a.ts"]),
+      testAdequacyEvaluated("PASS", 0.1, ["src/a.ts"]),
     ]);
   });
 
@@ -1215,6 +1278,7 @@ describe("JevGuardPlugin operational failures", () => {
       reviewUnavailable(ASSISTANT_ID, "INVALID_CONFIG"),
       builtInEvaluated("PASS", 0.1, ["src/a.ts"]),
       complexityEvaluated("PASS", 0.1, ["src/a.ts"]),
+      testAdequacyEvaluated("PASS", 0.1, ["src/a.ts"]),
     ]);
   });
 
@@ -1229,6 +1293,7 @@ describe("JevGuardPlugin operational failures", () => {
       ruleUnavailable("TEST-1", "error", "JEV_FAILURE", ["src/a.ts"]),
       builtInUnavailable("JEV_FAILURE", ["src/a.ts"]),
       complexityUnavailable("JEV_FAILURE", ["src/a.ts"]),
+      testAdequacyUnavailable("JEV_FAILURE", ["src/a.ts"]),
     ]);
   });
 });
@@ -1278,6 +1343,7 @@ describe("JevGuardPlugin deduplication and containment", () => {
       reviewUnavailable(ASSISTANT_ID, "INVALID_RULE"),
       builtInEvaluated("PASS", 0.1, ["src/a.ts"]),
       complexityEvaluated("PASS", 0.1, ["src/a.ts"]),
+      testAdequacyEvaluated("PASS", 0.1, ["src/a.ts"]),
     ]);
     expect(JSON.stringify(lastReview(presenter))).not.toContain("programming bug");
   });
@@ -1346,6 +1412,7 @@ describe("JevGuardPlugin concurrency", () => {
       "SRC-2",
       SCOPE_CREEP_ID,
       COMPLEXITY_ID,
+      TEST_ADEQUACY_ID,
     ]);
   });
 
@@ -1401,6 +1468,7 @@ describe("JevGuardPlugin concurrency", () => {
       ruleEvaluated("SRC-2", "error", "PASS", 0.1, ["src/a.ts"]),
       builtInEvaluated("PASS", 0.1, ["src/a.ts"]),
       complexityUnavailable("JEV_FAILURE", ["src/a.ts"]),
+      testAdequacyEvaluated("PASS", 0.1, ["src/a.ts"]),
     ]);
   });
 });
@@ -1423,7 +1491,9 @@ describe("JevGuardPlugin multi-rule end-to-end", () => {
 
     expect(presenter.reviews).toHaveLength(1);
     expect(jevCalls(jev)).toEqual(["SRC-1", BUILT_IN_BATCH_LABEL, "GLOBAL-3"]);
-    expect(jevCheckSet(jev)).toEqual(new Set(["SRC-1", SCOPE_CREEP_ID, COMPLEXITY_ID, "GLOBAL-3"]));
+    expect(jevCheckSet(jev)).toEqual(
+      new Set(["SRC-1", SCOPE_CREEP_ID, COMPLEXITY_ID, TEST_ADEQUACY_ID, "GLOBAL-3"]),
+    );
     expect(batchRequests(jev)).toHaveLength(1);
     expect(lastResults(presenter).map(resultIdentity)).toEqual([
       "SRC-1",
@@ -1431,6 +1501,7 @@ describe("JevGuardPlugin multi-rule end-to-end", () => {
       "GLOBAL-3",
       SCOPE_CREEP_ID,
       COMPLEXITY_ID,
+      TEST_ADEQUACY_ID,
     ]);
     expect(lastResults(presenter).map((result) => result.outcome)).toEqual([
       "PASS",
@@ -1438,11 +1509,12 @@ describe("JevGuardPlugin multi-rule end-to-end", () => {
       "PASS",
       "PASS",
       "PASS",
+      "PASS",
     ]);
     expect(lastReview(presenter).summary).toEqual({
       verdict: "PASS",
       hasUnavailable: false,
-      counts: { pass: 4, warn: 0, fail: 0, skipped: 1, unavailable: 0 },
+      counts: { pass: 5, warn: 0, fail: 0, skipped: 1, unavailable: 0 },
     });
   });
 
@@ -1457,18 +1529,21 @@ describe("JevGuardPlugin multi-rule end-to-end", () => {
 
     await dispatch(runtime, turnEvents());
 
-    expect(jevCheckSet(jev)).toEqual(new Set(["GOOD-1", SCOPE_CREEP_ID, COMPLEXITY_ID, "GOOD-3"]));
+    expect(jevCheckSet(jev)).toEqual(
+      new Set(["GOOD-1", SCOPE_CREEP_ID, COMPLEXITY_ID, TEST_ADEQUACY_ID, "GOOD-3"]),
+    );
     expect(lastResults(presenter)).toEqual([
       ruleEvaluated("GOOD-1", "error", "PASS", 0.1, ["src/a.ts"]),
       ruleUnavailable("BAD-2", null, "INVALID_RULE"),
       ruleEvaluated("GOOD-3", "warning", "PASS", 0.1, ["src/a.ts"]),
       builtInEvaluated("PASS", 0.1, ["src/a.ts"]),
       complexityEvaluated("PASS", 0.1, ["src/a.ts"]),
+      testAdequacyEvaluated("PASS", 0.1, ["src/a.ts"]),
     ]);
     expect(lastReview(presenter).summary).toEqual({
       verdict: "PASS",
       hasUnavailable: true,
-      counts: { pass: 4, warn: 0, fail: 0, skipped: 0, unavailable: 1 },
+      counts: { pass: 5, warn: 0, fail: 0, skipped: 0, unavailable: 1 },
     });
   });
 
@@ -1487,6 +1562,7 @@ describe("JevGuardPlugin multi-rule end-to-end", () => {
       ruleUnavailable("DUP-1", null, "INVALID_RULE"),
       builtInEvaluated("PASS", 0.1, ["src/a.ts"]),
       complexityEvaluated("PASS", 0.1, ["src/a.ts"]),
+      testAdequacyEvaluated("PASS", 0.1, ["src/a.ts"]),
     ]);
   });
 
@@ -1500,12 +1576,15 @@ describe("JevGuardPlugin multi-rule end-to-end", () => {
 
     await dispatch(runtime, turnEvents());
 
-    expect(jevCheckSet(jev)).toEqual(new Set(["FAIL-1", SCOPE_CREEP_ID, COMPLEXITY_ID, "OK-2"]));
+    expect(jevCheckSet(jev)).toEqual(
+      new Set(["FAIL-1", SCOPE_CREEP_ID, COMPLEXITY_ID, TEST_ADEQUACY_ID, "OK-2"]),
+    );
     expect(lastResults(presenter)).toEqual([
       ruleUnavailable("FAIL-1", "error", "JEV_FAILURE", ["src/a.ts"]),
       ruleEvaluated("OK-2", "error", "PASS", 0.1, ["src/a.ts"]),
       builtInEvaluated("PASS", 0.1, ["src/a.ts"]),
       complexityEvaluated("PASS", 0.1, ["src/a.ts"]),
+      testAdequacyEvaluated("PASS", 0.1, ["src/a.ts"]),
     ]);
   });
 
@@ -1516,11 +1595,14 @@ describe("JevGuardPlugin multi-rule end-to-end", () => {
 
     await dispatch(runtime, turnEvents());
 
-    expect(jevCheckSet(jev)).toEqual(new Set(["OK-1", SCOPE_CREEP_ID, COMPLEXITY_ID]));
+    expect(jevCheckSet(jev)).toEqual(
+      new Set(["OK-1", SCOPE_CREEP_ID, COMPLEXITY_ID, TEST_ADEQUACY_ID]),
+    );
     expect(lastResults(presenter)).toEqual([
       ruleEvaluated("OK-1", "error", "PASS", 0.1, ["src/a.ts"]),
       builtInEvaluated("PASS", 0.1, ["src/a.ts"]),
       complexityUnavailable("JEV_FAILURE", ["src/a.ts"]),
+      testAdequacyEvaluated("PASS", 0.1, ["src/a.ts"]),
     ]);
   });
 
@@ -1548,6 +1630,7 @@ describe("JevGuardPlugin multi-rule end-to-end", () => {
       "PASS",
       "UNAVAILABLE",
       "UNAVAILABLE",
+      "UNAVAILABLE",
     ]);
     expect(lastResults(presenter)[0]).toMatchObject({
       ruleId: "BLOCK-1",
@@ -1561,6 +1644,7 @@ describe("JevGuardPlugin multi-rule end-to-end", () => {
     });
     expect(lastResults(presenter)[3]).toEqual(builtInUnavailable("OVERSIZED_DIFF"));
     expect(lastResults(presenter)[4]).toEqual(complexityUnavailable("OVERSIZED_DIFF"));
+    expect(lastResults(presenter)[5]).toEqual(testAdequacyUnavailable("OVERSIZED_DIFF"));
   });
 
   test("reports the invalid config once per rule and still runs the batch", async () => {
@@ -1578,6 +1662,7 @@ describe("JevGuardPlugin multi-rule end-to-end", () => {
       ruleUnavailable("B-2", "warning", "INVALID_CONFIG"),
       builtInEvaluated("PASS", 0.1, ["src/a.ts"]),
       complexityEvaluated("PASS", 0.1, ["src/a.ts"]),
+      testAdequacyEvaluated("PASS", 0.1, ["src/a.ts"]),
     ]);
   });
 
@@ -1593,7 +1678,9 @@ describe("JevGuardPlugin multi-rule end-to-end", () => {
     await dispatch(runtime, turnEvents());
     await dispatch(runtime, turnEvents());
 
-    expect(jevCheckSet(jev)).toEqual(new Set(["SRC-1", SCOPE_CREEP_ID, COMPLEXITY_ID, "GLOBAL-2"]));
+    expect(jevCheckSet(jev)).toEqual(
+      new Set(["SRC-1", SCOPE_CREEP_ID, COMPLEXITY_ID, TEST_ADEQUACY_ID, "GLOBAL-2"]),
+    );
     expect(presenter.reviews).toHaveLength(1);
   });
 });
@@ -1615,6 +1702,7 @@ describe("JevGuardPlugin gate propagation", () => {
       jev.probability = probability;
       jev.probabilities.set(SCOPE_CREEP_ID, 0.1);
       jev.probabilities.set(COMPLEXITY_ID, 0.1);
+      jev.probabilities.set(TEST_ADEQUACY_ID, 0.1);
 
       await dispatch(runtime, turnEvents());
 
@@ -1640,6 +1728,7 @@ describe("JevGuardPlugin runtime short-circuits", () => {
       ruleSkipped("TEST-1", "error", "NO_SCOPE_MATCH"),
       builtInEvaluated("PASS", 0.1, ["docs/readme.md"]),
       complexityEvaluated("PASS", 0.1, ["docs/readme.md"]),
+      testAdequacyEvaluated("PASS", 0.1, ["docs/readme.md"]),
     ]);
   });
 
@@ -1657,6 +1746,7 @@ describe("JevGuardPlugin runtime short-circuits", () => {
       ruleUnavailable("TEST-1", "error", "OVERSIZED_DIFF"),
       builtInUnavailable("OVERSIZED_DIFF"),
       complexityUnavailable("OVERSIZED_DIFF"),
+      testAdequacyUnavailable("OVERSIZED_DIFF"),
     ]);
   });
 
@@ -1675,6 +1765,7 @@ describe("JevGuardPlugin runtime short-circuits", () => {
       ruleUnavailable("TEST-1", "error", "BLOCKED_EVIDENCE"),
       builtInUnavailable("BLOCKED_EVIDENCE"),
       complexityUnavailable("BLOCKED_EVIDENCE"),
+      testAdequacyUnavailable("BLOCKED_EVIDENCE"),
     ]);
   });
 });

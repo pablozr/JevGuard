@@ -124,7 +124,7 @@ class FakeJev implements JevEvaluationPort {
       return {
         kind: "BUILT_IN_BATCH",
         status: "EVALUATED",
-        answers: { scopeCreep: answer, complexity: answer },
+        answers: { scopeCreep: answer, complexity: answer, testAdequacy: answer },
       };
     }
 

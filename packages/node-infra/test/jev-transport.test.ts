@@ -110,6 +110,16 @@ function batchRequest(overrides: Partial<JevBuiltInBatchRequest> = {}): JevBuilt
           allowed: "Complexity explicitly required by the task.",
         },
       },
+      testAdequacy: {
+        type: "noul",
+        instructions: "Does this attributed change test the behavior it adds or changes?",
+        criteria: {
+          id: "TEST-ADEQUACY",
+          description: "Behavior the change does not cover with a test.",
+          violation: "The change adds behavior without a test.",
+          allowed: "Changes that add a test, or change no behavior.",
+        },
+      },
     },
     change: { files: ["src/health.ts"], diff: DIFF },
     ...overrides,
@@ -124,8 +134,8 @@ function noulAnswer(noul: number): unknown {
   return { type: "noul", noul };
 }
 
-function batchResponse(scopeCreep: unknown, complexity: unknown): unknown {
-  return { answers: { scopeCreep, complexity } };
+function batchResponse(scopeCreep: unknown, complexity: unknown, testAdequacy: unknown): unknown {
+  return { answers: { scopeCreep, complexity, testAdequacy } };
 }
 
 describe("TypeSafe client configuration", () => {
@@ -280,7 +290,7 @@ describe("Jev transport rule payload", () => {
 });
 
 describe("Jev transport built-in batch payload", () => {
-  test("maps the batch to one request with two named questions and a checks state", async () => {
+  test("maps the batch to one request with every named question and a checks state", async () => {
     const h = harness();
 
     await h.port.evaluate(batchRequest());
@@ -302,6 +312,12 @@ describe("Jev transport built-in batch payload", () => {
             violation: "The change adds unnecessary abstractions.",
             allowed: "Complexity explicitly required by the task.",
           },
+          testAdequacy: {
+            id: "TEST-ADEQUACY",
+            description: "Behavior the change does not cover with a test.",
+            violation: "The change adds behavior without a test.",
+            allowed: "Changes that add a test, or change no behavior.",
+          },
         },
         change: { files: ["src/health.ts"], diff: DIFF },
       },
@@ -320,6 +336,14 @@ describe("Jev transport built-in batch payload", () => {
           criteria: {
             true: "The change adds unnecessary abstractions.",
             false: "Complexity explicitly required by the task.",
+          },
+        },
+        testAdequacy: {
+          type: "noul",
+          instructions: "Does this attributed change test the behavior it adds or changes?",
+          criteria: {
+            true: "The change adds behavior without a test.",
+            false: "Changes that add a test, or change no behavior.",
           },
         },
       },
@@ -396,9 +420,9 @@ describe("Jev transport rule response validation", () => {
 });
 
 describe("Jev transport built-in batch response validation", () => {
-  test("accepts both named answers independently", async () => {
+  test("accepts every named answer independently", async () => {
     const h = harness();
-    h.client.response = batchResponse(noulAnswer(0.2), noulAnswer(0.8));
+    h.client.response = batchResponse(noulAnswer(0.2), noulAnswer(0.8), noulAnswer(0.5));
 
     expect(await h.port.evaluate(batchRequest())).toEqual({
       kind: "BUILT_IN_BATCH",
@@ -406,6 +430,7 @@ describe("Jev transport built-in batch response validation", () => {
       answers: {
         scopeCreep: { status: "EVALUATED", noul: { violationProbability: 0.2 } },
         complexity: { status: "EVALUATED", noul: { violationProbability: 0.8 } },
+        testAdequacy: { status: "EVALUATED", noul: { violationProbability: 0.5 } },
       },
     });
   });
@@ -437,7 +462,7 @@ describe("Jev transport built-in batch response validation", () => {
     ["noul above one", { type: "noul", noul: 1.1 }],
   ])("fails only the malformed scope-creep answer for %s", async (_label, scopeCreep) => {
     const h = harness();
-    h.client.response = batchResponse(scopeCreep, noulAnswer(0.8));
+    h.client.response = batchResponse(scopeCreep, noulAnswer(0.8), noulAnswer(0.5));
 
     expect(await h.port.evaluate(batchRequest())).toEqual({
       kind: "BUILT_IN_BATCH",
@@ -445,13 +470,14 @@ describe("Jev transport built-in batch response validation", () => {
       answers: {
         scopeCreep: { status: "FAILED", reason: "INVALID_RESPONSE" },
         complexity: { status: "EVALUATED", noul: { violationProbability: 0.8 } },
+        testAdequacy: { status: "EVALUATED", noul: { violationProbability: 0.5 } },
       },
     });
   });
 
-  test("fails only the malformed complexity answer while scope creep stays valid", async () => {
+  test("fails only the malformed complexity answer while its siblings stay valid", async () => {
     const h = harness();
-    h.client.response = batchResponse(noulAnswer(0.2), { type: "noul", noul: 2 });
+    h.client.response = batchResponse(noulAnswer(0.2), { type: "noul", noul: 2 }, noulAnswer(0.5));
 
     expect(await h.port.evaluate(batchRequest())).toEqual({
       kind: "BUILT_IN_BATCH",
@@ -459,6 +485,22 @@ describe("Jev transport built-in batch response validation", () => {
       answers: {
         scopeCreep: { status: "EVALUATED", noul: { violationProbability: 0.2 } },
         complexity: { status: "FAILED", reason: "INVALID_RESPONSE" },
+        testAdequacy: { status: "EVALUATED", noul: { violationProbability: 0.5 } },
+      },
+    });
+  });
+
+  test("fails only the malformed test-adequacy answer while its siblings stay valid", async () => {
+    const h = harness();
+    h.client.response = batchResponse(noulAnswer(0.2), noulAnswer(0.1), { type: "noul", noul: -1 });
+
+    expect(await h.port.evaluate(batchRequest())).toEqual({
+      kind: "BUILT_IN_BATCH",
+      status: "EVALUATED",
+      answers: {
+        scopeCreep: { status: "EVALUATED", noul: { violationProbability: 0.2 } },
+        complexity: { status: "EVALUATED", noul: { violationProbability: 0.1 } },
+        testAdequacy: { status: "FAILED", reason: "INVALID_RESPONSE" },
       },
     });
   });

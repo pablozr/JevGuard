@@ -11,7 +11,12 @@ import type {
   ReviewResult,
   Turn,
 } from "../src/index";
-import { COMPLEXITY_CHECK_ID, reviewTurn, SCOPE_CREEP_CHECK_ID } from "../src/index";
+import {
+  COMPLEXITY_CHECK_ID,
+  reviewTurn,
+  SCOPE_CREEP_CHECK_ID,
+  TEST_ADEQUACY_CHECK_ID,
+} from "../src/index";
 
 const PATCH = "diff --git a/src/auth/login.ts b/src/auth/login.ts\n+const limit = 5;";
 
@@ -30,7 +35,7 @@ class FakeJevPort implements JevEvaluationPort {
       return {
         kind: "BUILT_IN_BATCH",
         status: "EVALUATED",
-        answers: { scopeCreep: answer, complexity: answer },
+        answers: { scopeCreep: answer, complexity: answer, testAdequacy: answer },
       };
     }
 
@@ -139,6 +144,7 @@ describe("reviewTurn", () => {
       "REVIEW",
       SCOPE_CREEP_CHECK_ID,
       COMPLEXITY_CHECK_ID,
+      TEST_ADEQUACY_CHECK_ID,
     ]);
     expect(reviewLevelReason(outcome.review.results)).toBe("INVALID_RULE");
     expect(jev.requests).toHaveLength(1);
@@ -160,6 +166,7 @@ describe("reviewTurn", () => {
       "REVIEW",
       SCOPE_CREEP_CHECK_ID,
       COMPLEXITY_CHECK_ID,
+      TEST_ADEQUACY_CHECK_ID,
     ]);
     expect(outcome.rules).toEqual([]);
     expect(outcome.remediation.status).toBe("INVALID");
@@ -179,6 +186,7 @@ describe("reviewTurn", () => {
       "REVIEW",
       SCOPE_CREEP_CHECK_ID,
       COMPLEXITY_CHECK_ID,
+      TEST_ADEQUACY_CHECK_ID,
     ]);
     expect(outcome.rules).toEqual([]);
     expect(outcome.remediation.status).toBe("INVALID");
@@ -194,7 +202,7 @@ describe("reviewTurn", () => {
     });
 
     expect(reviewLevelReason(outcome.review.results)).toBe("INVALID_RULE");
-    expect(identities(outcome.review.results)).toHaveLength(3);
+    expect(identities(outcome.review.results)).toHaveLength(4);
     expect(outcome.rules).toEqual([]);
   });
 
@@ -223,6 +231,7 @@ describe("reviewTurn", () => {
       "R-1",
       SCOPE_CREEP_CHECK_ID,
       COMPLEXITY_CHECK_ID,
+      TEST_ADEQUACY_CHECK_ID,
     ]);
     expect(ruleResult).toMatchObject({
       kind: "RULE",
@@ -231,7 +240,7 @@ describe("reviewTurn", () => {
     });
   });
 
-  test("orders rules in source order, then scope creep, then complexity", async () => {
+  test("orders rules in source order, then scope creep, complexity, and test adequacy", async () => {
     const rules = [rule("R-2"), rule("R-1")].join("\n\n");
 
     const outcome = await reviewTurn(makeTurn(), {
@@ -245,6 +254,7 @@ describe("reviewTurn", () => {
       "R-1",
       SCOPE_CREEP_CHECK_ID,
       COMPLEXITY_CHECK_ID,
+      TEST_ADEQUACY_CHECK_ID,
     ]);
     expect(outcome.remediation.status).toBe("VALID");
     expect(outcome.rules).toHaveLength(2);
