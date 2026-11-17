@@ -80,6 +80,52 @@ describe("MCP calls fired in parallel", () => {
     );
   });
 
+  test("a resource tool that opens the batch with an mcp__agentes__ call is fenced with it", () => {
+    world.prompt("resource tool first, server call second");
+    parallel([
+      mcp("ReadMcpResourceTool", () => world.write("a.ts", "one\r\nTWO\r\n")),
+      mcp("mcp__agentes__one", () => world.write("keep.ts", "KEEP\r\n")),
+    ]);
+    world.stop();
+
+    const handoff = world.onlyHandoff();
+
+    expect(causesOf(handoff)).toEqual([]);
+    expect(handoff.shellCoverage).toEqual(["ADAPTER_GIT_DIFF"]);
+    expect(handoff.resolution.status).toBe("TURN");
+
+    if (handoff.resolution.status !== "TURN") return;
+
+    expect(handoff.resolution.turn.files.map((file) => file.path).sort()).toEqual([
+      "a.ts",
+      "keep.ts",
+    ]);
+    expect(snapshots.count).toBe(2);
+  });
+
+  test("a resource tool that joins an open mcp__agentes__ batch is fenced with it", () => {
+    world.prompt("server call first, resource tool second");
+    parallel([
+      mcp("mcp__agentes__one", () => world.write("a.ts", "one\r\nTWO\r\n")),
+      mcp("ReadMcpResourceTool", () => world.write("keep.ts", "KEEP\r\n")),
+    ]);
+    world.stop();
+
+    const handoff = world.onlyHandoff();
+
+    expect(causesOf(handoff)).toEqual([]);
+    expect(handoff.shellCoverage).toEqual(["ADAPTER_GIT_DIFF"]);
+    expect(handoff.resolution.status).toBe("TURN");
+
+    if (handoff.resolution.status !== "TURN") return;
+
+    expect(handoff.resolution.turn.files.map((file) => file.path).sort()).toEqual([
+      "a.ts",
+      "keep.ts",
+    ]);
+    expect(snapshots.count).toBe(2);
+  });
+
   test("two parallel calls changing the same file net out to one change", () => {
     world.prompt("one file, two servers");
     parallel([
