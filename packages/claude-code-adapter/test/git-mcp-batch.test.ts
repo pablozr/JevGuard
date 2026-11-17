@@ -1,7 +1,10 @@
+import { appendFileSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { runGit } from "../src/capture/node-ports";
 import { DEFAULT_SHELL_DIFF_LIMITS } from "../src/capture/shell-diff-limits";
-import { causesOf, HookWorld, initRepository } from "./hook-world";
+import { isHookEventParseFailure, parseHookEvent } from "../src/index";
+import { causesOf, HookWorld, initRepository, SESSION } from "./hook-world";
 
 // Real Git processes are slow under a loaded parallel run; only the time limits are relaxed (#72).
 const LOADED_MACHINE_LIMITS = {
@@ -260,6 +263,65 @@ describe("MCP calls fired in parallel", () => {
     world.stop();
 
     expect(causesOf(world.onlyHandoff())).toContain("SHELL_GIT_DIFF_UNAVAILABLE");
+  });
+
+  test("the base call fences the batch when a member's Pre landed before its state read", () => {
+    const base = world.nextToolId();
+    const member = world.nextToolId();
+    const input = { command: "write" };
+    const eventsFile = join(world.unitDirectory(), "events.jsonl");
+    let injected = false;
+
+    world.prompt("two servers start together");
+
+    const environment = world.environment;
+    const read = environment.get.bind(environment);
+
+    // The hook processes share no lock: the other member's line lands after the base's own
+    // append and before the state read that decides whether the base fences the batch. The
+    // base must still take the snapshot, or every member of the batch loses its proof (#89).
+    environment.get = (name: string) => {
+      if (!injected && readFileSync(eventsFile, "utf8").includes(base)) {
+        injected = true;
+
+        const parsed = parseHookEvent({
+          session_id: SESSION,
+          cwd: world.projectRoot,
+          hook_event_name: "PreToolUse",
+          tool_name: "mcp__agentes__two",
+          tool_use_id: member,
+          tool_input: input,
+        });
+
+        if (isHookEventParseFailure(parsed)) throw new Error("the fixture event did not parse");
+
+        appendFileSync(eventsFile, `${JSON.stringify({ v: 1, event: parsed })}\n`);
+      }
+
+      return read(name);
+    };
+
+    world.preTool("mcp__agentes__one", base, input);
+    environment.get = read;
+
+    world.write("a.ts", "one\r\nTWO\r\n");
+    world.write("keep.ts", "KEEP_BY_B\r\n");
+    world.postTool("mcp__agentes__one", base, input);
+    world.postTool("mcp__agentes__two", member, input);
+    world.stop();
+
+    const handoff = world.onlyHandoff();
+
+    expect(causesOf(handoff)).toEqual([]);
+    expect(handoff.resolution.status).toBe("TURN");
+
+    if (handoff.resolution.status !== "TURN") return;
+
+    expect(handoff.resolution.turn.files.map((file) => file.path).sort()).toEqual([
+      "a.ts",
+      "keep.ts",
+    ]);
+    expect(snapshots.count).toBe(2);
   });
 
   test("a member that fails still lets the batch close with the other's change", () => {
