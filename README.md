@@ -446,10 +446,11 @@ Known limitations:
 - Target host is OpenCode `2.2.x` (minimum `2.2.2`). The plugin does not load on
   `2.1.x` or `1.x`. A real-host smoke on `2.2.2` (2026-11-02) covered observe
   and remediation (FAIL review, deny-all proposer). The single-delivery flow
-  (`delivery: agent`) was re-smoked on the real host on `2.2.7` (2026-11-17):
-  one delivery per FAIL unit, at most 3 per session, the turn a delivery causes
-  is reviewed without a new delivery, and the host log carries no task, diff,
-  finding, path or credential.
+  (`delivery: agent`) was re-smoked on the real host on `2.2.7` (2026-11-17,
+  plugin `0.4.0` and `0.4.1`): one delivery per FAIL unit, at most 3 per
+  session, and the turn a delivery causes is reviewed without a new delivery
+  (those turns were SKIPPED). From plugin `0.4.1`, JevGuard's lines in the host
+  log carry no task, diff, finding, path or credential.
 - OpenCode `2.2.2` does not install dependencies for a `file:` plugin spec. Use
   the registry package; a local `file:` build needs its dependencies installed
   next to it.
