@@ -24,8 +24,26 @@ const INHERITED_CONFIG = /^GIT_CONFIG_(PARAMETERS|COUNT)$|^GIT_CONFIG_(KEY|VALUE
  */
 const RUN_DIRECTORY_PREFIX = "jevguard-git-hermetic-run";
 
-export function runSupportDirectory(pid: number = process.ppid): string {
-  return join(tmpdir(), `${RUN_DIRECTORY_PREFIX}-${pid}`);
+/**
+ * The variable through which the run publishes its directory to the workers.
+ *
+ * Naming the directory after the parent process only works in the forks pool, where a
+ * worker's parent is the run. In the threads pool a worker is a thread of the run's own
+ * process, so `process.ppid` is whatever started Vitest and the worker writes outside
+ * the tree the teardown removes: a `--pool=threads` run left its worker directories in
+ * the system temp directory. The run publishes the path here instead, and both pools
+ * inherit the environment.
+ */
+export const RUN_DIRECTORY_VARIABLE = "JEVGUARD_GIT_HERMETIC_RUN";
+
+export function runSupportDirectory(pid?: number): string {
+  if (pid !== undefined) return join(tmpdir(), `${RUN_DIRECTORY_PREFIX}-${pid}`);
+
+  const published = process.env[RUN_DIRECTORY_VARIABLE];
+
+  if (published !== undefined && published !== "") return published;
+
+  return join(tmpdir(), `${RUN_DIRECTORY_PREFIX}-${process.ppid}`);
 }
 
 let supportDirectory: string | undefined;

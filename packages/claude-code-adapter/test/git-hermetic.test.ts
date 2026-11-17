@@ -7,6 +7,7 @@ import {
   emptyGitConfigFile,
   hermeticGitEnv,
   removeSupportDirectory,
+  RUN_DIRECTORY_VARIABLE,
   runSupportDirectory,
 } from "../../../tools/test/hermetic-git";
 import { gitOutput, initRepository } from "./hook-world";
@@ -65,6 +66,27 @@ describe("hermetic Git fixtures", () => {
         stdio: ["ignore", "pipe", "ignore"],
       }),
     ).toBe("");
+  });
+
+  test("the worker writes under the directory the run published", () => {
+    const published = process.env[RUN_DIRECTORY_VARIABLE] ?? "";
+
+    expect(published).not.toBe("");
+    expect(dirname(emptyGitConfigFile())).toBe(join(published, `worker-${process.pid}`));
+  });
+
+  test("without a published directory the run is named after the process that started it", () => {
+    const previous = process.env[RUN_DIRECTORY_VARIABLE];
+
+    delete process.env[RUN_DIRECTORY_VARIABLE];
+
+    try {
+      expect(runSupportDirectory()).toBe(
+        join(tmpdir(), `jevguard-git-hermetic-run-${process.ppid}`),
+      );
+    } finally {
+      if (previous !== undefined) process.env[RUN_DIRECTORY_VARIABLE] = previous;
+    }
   });
 
   test("the per-worker support directory belongs to the run and is made again on demand", () => {

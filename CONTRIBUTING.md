@@ -314,9 +314,13 @@ Git pass the same environment explicitly and also switch hooks off with
 `tools/test/hermetic-git.ts`. That config file and hooks directory live in one
 `jevguard-git-hermetic-run-<pid>/worker-<pid>` directory per worker, inside a run
 directory the global setup (`tools/test/global-setup.ts`) creates before the workers
-are forked and its teardown removes, so a run leaves nothing behind in the system temp
-directory. A worker cannot do that itself: Vitest ends one by terminating its process,
-so no `exit` handler runs there.
+are spawned and its teardown removes, so a run leaves nothing behind in the system temp
+directory. The run hands its directory to the workers through
+`JEVGUARD_GIT_HERMETIC_RUN`, because naming it after the parent process only works in
+the forks pool; in the threads pool a worker is a thread of the run itself, and every
+run with `--pool=threads` left its worker directories behind. A worker cannot clean up
+after itself either: Vitest ends one by terminating the process it runs in, so no `exit`
+handler runs there.
 
 The setup file also yields one macrotask after every test. Vitest's worker rejects a
 slow `onTaskUpdate` RPC call after 60 s, and a file with long synchronous Git work
