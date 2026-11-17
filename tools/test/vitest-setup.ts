@@ -3,6 +3,9 @@ import { installHermeticGitEnv } from "./hermetic-git";
 
 // Every Git process the suite spawns, directly or through the code under test,
 // must use an isolated configuration: the machine's global hooks are not ours.
+// The support directory this creates is per worker, inside the run directory that
+// `global-setup.ts` removes in its teardown, so a run leaves nothing behind in the
+// system temp directory.
 installHermeticGitEnv();
 
 // Captured before any test can install fake timers, so a yield always schedules a

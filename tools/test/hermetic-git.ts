@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -14,18 +14,57 @@ import { join } from "node:path";
  */
 const INHERITED_CONFIG = /^GIT_CONFIG_(PARAMETERS|COUNT)$|^GIT_CONFIG_(KEY|VALUE)_\d+$/;
 
+/**
+ * The directory the whole run owns, named after the process that started it.
+ *
+ * The runner does not let a worker clean up after itself: Vitest's forks pool ends a
+ * worker by terminating the process, so no `exit` handler runs there. A worker
+ * therefore writes inside the run's directory (its parent process is the run) and the
+ * run's teardown removes the tree.
+ */
+const RUN_DIRECTORY_PREFIX = "jevguard-git-hermetic-run";
+
+export function runSupportDirectory(pid: number = process.ppid): string {
+  return join(tmpdir(), `${RUN_DIRECTORY_PREFIX}-${pid}`);
+}
+
 let supportDirectory: string | undefined;
 
 function support(): string {
   if (supportDirectory === undefined) {
-    const directory = join(tmpdir(), `jevguard-git-hermetic-${process.pid}`);
+    const directory = join(runSupportDirectory(), `worker-${process.pid}`);
 
     mkdirSync(join(directory, "hooks"), { recursive: true });
     writeFileSync(join(directory, "gitconfig"), "");
     supportDirectory = directory;
+
+    // A helper used outside the suite (a script, a bench run) has no run teardown, so
+    // it removes its own subtree when its process goes away. Inside the suite this
+    // never fires: the worker is terminated, not exited.
+    process.once("exit", removeSupportDirectory);
   }
 
   return supportDirectory;
+}
+
+/**
+ * Removes the per-worker support directory, if one was created.
+ *
+ * Safe to call more than once: a worker that finished normally leaves nothing behind,
+ * and so does one torn down early.
+ */
+export function removeSupportDirectory(): void {
+  if (supportDirectory === undefined) return;
+
+  try {
+    rmSync(supportDirectory, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
+  } catch {
+    // This runs from a process exit handler: a file another process still holds (Windows
+    // keeps temporary directories busy for a moment) must not fail a green run. The
+    // directory is per worker and lives under the system temp directory either way.
+  }
+
+  supportDirectory = undefined;
 }
 
 /** An empty file Git reads as both the system and the global configuration. */

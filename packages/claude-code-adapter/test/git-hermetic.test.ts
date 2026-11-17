@@ -1,12 +1,17 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { emptyGitConfigFile, hermeticGitEnv } from "../../../tools/test/hermetic-git";
+import {
+  emptyGitConfigFile,
+  hermeticGitEnv,
+  removeSupportDirectory,
+  runSupportDirectory,
+} from "../../../tools/test/hermetic-git";
 import { gitOutput, initRepository } from "./hook-world";
 
-/** The PowerShell-style quoting Git expects in `GIT_CONFIG_PARAMETERS`. */
+/** The single-quoted form Git writes with `sq_quote` into `GIT_CONFIG_PARAMETERS`. */
 function parametersFor(hooks: string): string {
   return `'core.hooksPath=${hooks.replaceAll("\\", "/")}'`;
 }
@@ -60,6 +65,19 @@ describe("hermetic Git fixtures", () => {
         stdio: ["ignore", "pipe", "ignore"],
       }),
     ).toBe("");
+  });
+
+  test("the per-worker support directory belongs to the run and is made again on demand", () => {
+    const directory = dirname(emptyGitConfigFile());
+
+    expect(directory).toBe(join(runSupportDirectory(), `worker-${process.pid}`));
+    expect(existsSync(directory)).toBe(true);
+
+    removeSupportDirectory();
+
+    expect(existsSync(directory)).toBe(false);
+    expect(dirname(emptyGitConfigFile())).toBe(directory);
+    expect(existsSync(directory)).toBe(true);
   });
 
   test("hermeticGitEnv drops the configuration Git would inherit", () => {

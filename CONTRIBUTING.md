@@ -311,7 +311,12 @@ orchestration in `core`.
 commit; that hook costs about 1.5 s per commit instead of 100 ms. Fixtures that spawn
 Git pass the same environment explicitly and also switch hooks off with
 `-c core.hooksPath=<empty directory>`; keep new ones on the helpers in
-`tools/test/hermetic-git.ts`.
+`tools/test/hermetic-git.ts`. That config file and hooks directory live in one
+`jevguard-git-hermetic-run-<pid>/worker-<pid>` directory per worker, inside a run
+directory the global setup (`tools/test/global-setup.ts`) creates before the workers
+are forked and its teardown removes, so a run leaves nothing behind in the system temp
+directory. A worker cannot do that itself: Vitest ends one by terminating its process,
+so no `exit` handler runs there.
 
 The setup file also yields one macrotask after every test. Vitest's worker rejects a
 slow `onTaskUpdate` RPC call after 60 s, and a file with long synchronous Git work
