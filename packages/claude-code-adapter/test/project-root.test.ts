@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { runGit } from "../src/capture/node-ports";
 import { causesOf, HookWorld, initRepository } from "./hook-world";
 
 vi.setConfig({ testTimeout: 20_000 });
@@ -122,6 +123,103 @@ describe("a session that runs outside the repository it edits", () => {
     world.stop();
 
     expect(causesOf(world.onlyHandoff())).toContain("MULTIPLE_REPOSITORIES");
+  });
+});
+
+describe("a nested repository inside the unit's repository", () => {
+  let inner: string;
+
+  beforeEach(() => {
+    initRepository(world.projectRoot);
+    inner = join(world.projectRoot, "inner");
+    initRepository(inner);
+  });
+
+  test("an edit in the nested repository is another repository, not the outer one", () => {
+    world.prompt("change the outer file and the nested one");
+    editByAbsolutePath(world.path("a.ts"), "one\r\ntwo\r\nTHREE\r\n");
+    editByAbsolutePath(join(inner, "a.ts"), "inner\r\nCHANGED\r\n");
+    world.stop();
+
+    expect(causesOf(world.onlyHandoff())).toContain("MULTIPLE_REPOSITORIES");
+  });
+
+  test("an ordinary edit below the root makes no Git call to prove it", () => {
+    mkdirSync(world.path("src"), { recursive: true });
+
+    world.prompt("fix the root, then edit a plain folder");
+    editByAbsolutePath(world.path("a.ts"), "one\r\ntwo\r\nTHREE\r\n");
+
+    const asked: string[] = [];
+
+    world.gitRunner = (args, cwd, options) => {
+      if (args.includes("--show-toplevel")) asked.push(resolve(cwd));
+
+      return runGit(args, cwd, options);
+    };
+
+    editByAbsolutePath(world.path("src", "b.ts"), "plain\r\n");
+    world.stop();
+
+    expect(asked).not.toContain(resolve(world.path("src")));
+    expect(causesOf(world.onlyHandoff())).toEqual([]);
+  });
+
+  test("a shell call whose cwd cannot say where it ran leaves no proof", () => {
+    const id = world.nextToolId();
+    const input = { command: "write" };
+
+    // The nested repository is not safe for this user (on Windows a `rev-parse` there
+    // exits 128): the call cannot say whether it ran in the unit's repository.
+    world.gitRunner = (args, cwd, options) =>
+      args.includes("--show-toplevel") && resolve(cwd) === resolve(inner)
+        ? { ok: false, failure: "EXIT" }
+        : runGit(args, cwd, options);
+
+    world.prompt("the root is the outer repository, the call runs in the nested one");
+    editByAbsolutePath(world.path("a.ts"), "one\r\ntwo\r\nTHREE\r\n");
+    world.hook({
+      hook_event_name: "PreToolUse",
+      tool_name: "Bash",
+      tool_use_id: id,
+      tool_input: input,
+      cwd: inner,
+    });
+    writeFileSync(join(inner, "a.ts"), "inner\r\nCHANGED\r\n");
+    world.hook({
+      hook_event_name: "PostToolUse",
+      tool_name: "Bash",
+      tool_use_id: id,
+      tool_input: input,
+      cwd: inner,
+    });
+    world.stop();
+
+    expect(causesOf(world.onlyHandoff())).toContain("SHELL_GIT_DIFF_UNAVAILABLE");
+  });
+
+  test("a shell call from the agent's folder is still fenced at the unit's root", () => {
+    const id = world.nextToolId();
+    const input = { command: "write" };
+
+    world.prompt("edit the outer file, then call from the workspace");
+    editByAbsolutePath(world.path("a.ts"), "one\r\ntwo\r\nTHREE\r\n");
+    fromWorkspace("PreToolUse", "Bash", id, input);
+    writeFileSync(world.path("keep.ts"), "keep\r\nCHANGED\r\n");
+    fromWorkspace("PostToolUse", "Bash", id, input);
+    world.stop();
+
+    const handoff = world.onlyHandoff();
+
+    expect(causesOf(handoff)).toEqual([]);
+    expect(handoff.resolution.status).toBe("TURN");
+
+    if (handoff.resolution.status !== "TURN") return;
+
+    expect(handoff.resolution.turn.files.map((file) => file.path).sort()).toEqual([
+      "a.ts",
+      "keep.ts",
+    ]);
   });
 });
 

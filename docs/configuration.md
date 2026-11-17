@@ -777,7 +777,8 @@ reviews a smaller set of work that it can prove:
   an MCP call whose Git snapshot fails or exceeds a limit, a batch of MCP calls whose window
   a shell call or an edit shares or that a member joins before its first picture is taken,
   a unit that spans two repositories, a shell or MCP call run from outside every work tree
-  before the unit's repository is known, an unknown tool that may
+  before the unit's repository is known, a shell or MCP call inside the unit's repository
+  whose `cwd` cannot report a work tree, an unknown tool that may
   write, a prompt
   that is not text, or a write by a process that is not attributed to the unit all make
   the unit `UNAVAILABLE`. A unit with no changed file and no write-capable tool is

@@ -1,4 +1,4 @@
-import { resolve } from "node:path";
+import { isAbsolute, relative, resolve } from "node:path";
 import { guardPath, isReadablePath, MAX_CAPTURED_FILE_BYTES, sha256Hex } from "./file-image";
 import { assertStatusEntries, chargeContent, runBounded, text } from "./git-run";
 import { ShellDiffLimitError } from "./shell-diff-limits";
@@ -161,10 +161,24 @@ function snapshotEntries(
  */
 type CallPlace = "INSIDE" | "FOREIGN";
 
-function placeOf(context: GitShellContext, cwd: string, toplevel: string): CallPlace {
+/** Whether `path` is `root` itself or below it, after links and short names are expanded. */
+function isWithin(context: GitShellContext, root: string, path: string): boolean {
+  const inside = relative(resolve(root), context.files.realPath(path) ?? path);
+
+  return inside === "" || (!isAbsolute(inside) && !inside.startsWith(".."));
+}
+
+/**
+ * A `cwd` in no work tree leaves no proof of where the call ran when it is inside the
+ * unit's repository: a `rev-parse` that fails there (a nested repository of another owner,
+ * a `safe.directory` refusal) would otherwise fence a call whose writes nothing observed.
+ * From outside the repository — the agent's own folder — the same failure is expected and
+ * the call is fenced where the unit is judged (ADR 0018).
+ */
+function placeOf(context: GitShellContext, cwd: string, toplevel: string): CallPlace | null {
   const cwdTop = runBounded(context, ["rev-parse", "--show-toplevel"], cwd);
 
-  if (!cwdTop.ok) return "INSIDE";
+  if (!cwdTop.ok) return isWithin(context, toplevel, cwd) ? null : "INSIDE";
 
   return resolve(text(cwdTop.stdout).trim()) === toplevel ? "INSIDE" : "FOREIGN";
 }
@@ -179,6 +193,8 @@ function captureSnapshot(
 
   const toplevel = resolve(text(top.stdout).trim());
   const place = placeOf(context, cwd, toplevel);
+
+  if (place === null) return null;
 
   const headResult = runBounded(context, ["rev-parse", "-q", "--verify", "HEAD"], toplevel);
 

@@ -1,4 +1,4 @@
-import { resolve } from "node:path";
+import { dirname, isAbsolute, relative, resolve } from "node:path";
 import {
   type CaptureProblem,
   type GitShellChange,
@@ -122,6 +122,37 @@ function preRecordOf(context: CaptureContext, repoPath: string): PreRecord {
   return { v: 1, path: repoPath, image: toPostImage(reading.image) };
 }
 
+const MAX_ANCESTOR_STEPS = 40;
+
+function isWithin(root: string, path: string): boolean {
+  const inside = relative(resolve(root), resolve(path));
+
+  return inside === "" || (!isAbsolute(inside) && !inside.startsWith(".."));
+}
+
+/**
+ * The nearest directory strictly below the unit's root that holds a `.git` entry. A file of
+ * a nested repository resolves inside the outer root, so the walk is what tells it apart
+ * before any Git call: an ordinary edit costs a few `stat`s and no Git process (issue #88).
+ */
+function nestedRepositoryOf(context: CaptureContext, start: string): string | null {
+  const root = resolve(context.projectRoot);
+  let current = resolve(start);
+
+  for (let step = 0; step < MAX_ANCESTOR_STEPS; step += 1) {
+    if (!isWithin(root, current) || current === root) return null;
+    if (context.files.stat(resolve(current, ".git")) !== null) return current;
+
+    const parent = dirname(current);
+
+    if (parent === current) return null;
+
+    current = parent;
+  }
+
+  return null;
+}
+
 /**
  * An edit outside the unit's root can still belong to another work tree, and then the unit
  * spans two repositories: the review would judge one repository's change by another's
@@ -129,7 +160,12 @@ function preRecordOf(context: CaptureContext, repoPath: string): PreRecord {
  */
 function noteForeignEdit(event: PreToolUseEvent, context: CaptureContext): void {
   if (event.tool.filePath === null) return;
-  if (context.resolveRepoPath(event.tool.filePath, event.cwd) !== null) return;
+
+  const absolute = resolve(event.cwd, event.tool.filePath);
+
+  if (context.resolveRepoPath(event.tool.filePath, event.cwd) !== null) {
+    if (nestedRepositoryOf(context, dirname(absolute)) === null) return;
+  }
 
   const candidate = rootCandidateOf(event, {
     files: context.files,

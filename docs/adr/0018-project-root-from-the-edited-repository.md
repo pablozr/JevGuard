@@ -96,8 +96,20 @@ the rule lane; neither case turns into a silent `SKIPPED`.
   a call.
 - **Nested repositories** keep today's behaviour: a call made inside a nested work tree is
   not proven by the outer repository's Git (`ADR 0014`), and it now resolves to a
-  different top level, so it is `MULTIPLE_REPOSITORIES`.
-- **Cost.** One `git rev-parse --show-toplevel` per unit, cached in the unit's root record;
-  no per-event Git call is added.
+  different top level, so it is `MULTIPLE_REPOSITORIES`. An edit needs the same check, and
+  its file resolves inside the outer root, so the edit walks up from the file's folder to
+  the root looking for a `.git` entry, with `stat` only; a Git call follows only when one is
+  found and the top level is not the root. A unit whose first edit is in a nested work tree
+  therefore starts there, and an edit in the outer repository afterwards is the one that
+  makes it `MULTIPLE_REPOSITORIES`.
+- **A call that cannot say where it ran.** A shell or MCP call whose `cwd` is inside the
+  unit's repository but whose `rev-parse --show-toplevel` fails is not fenced at the root:
+  the failure can be a nested repository of another owner or a `safe.directory` refusal, and
+  a snapshot keyed elsewhere would attribute a change nobody observed. Such a call leaves
+  the unit `UNAVAILABLE`. A `cwd` outside every work tree is unchanged: it is fenced where
+  the unit is judged, or `PROJECT_ROOT_UNRESOLVED` before the root is known.
+- **Cost.** One `git rev-parse --show-toplevel` per unit, cached in the unit's root record,
+  plus one `stat` per directory between an edited file and the root; a Git call is added
+  only for an edit that sits in a nested repository.
 - **A link cannot move the root.** The path is resolved to its real path before Git reports
   the top level, the same guard the evidence policy already applies.
