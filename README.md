@@ -445,8 +445,11 @@ Known limitations:
 
 - Target host is OpenCode `2.2.x` (minimum `2.2.2`). The plugin does not load on
   `2.1.x` or `1.x`. A real-host smoke on `2.2.2` (2026-11-02) covered observe
-  and remediation (FAIL review, deny-all proposer). The single-delivery flow replaced the
-  earlier chain and has not been re-smoked on the real host.
+  and remediation (FAIL review, deny-all proposer). The single-delivery flow
+  (`delivery: agent`) was re-smoked on the real host on `2.2.7` (2026-11-17):
+  one delivery per FAIL unit, at most 3 per session, the turn a delivery causes
+  is reviewed without a new delivery, and the host log carries no task, diff,
+  finding, path or credential.
 - OpenCode `2.2.2` does not install dependencies for a `file:` plugin spec. Use
   the registry package; a local `file:` build needs its dependencies installed
   next to it.
@@ -739,7 +742,8 @@ strategy-only workflow delivered by the server plugin; it never edits code and n
 applies a change. Only a user who opts in with `delivery: agent` in their own
 `opencode.yaml` gets one visible message per reviewed unit queued into the source
 session, at most 3 per session and never while the session is busy; see
-[OpenCode `delivery: agent`](docs/configuration.md#opencode-delivery-agent-one-delivery-per-unit). A real-host smoke on OpenCode `2.2.2` passed for observe; see
+[OpenCode `delivery: agent`](docs/configuration.md#opencode-delivery-agent-one-delivery-per-unit). A real-host smoke on OpenCode `2.2.2` passed for observe, and `delivery: agent`
+was re-smoked on `2.2.7` (2026-11-17); see
 [OpenCode 2.2.x limitations](#opencode-22x-limitations).
 
 The Claude Code plugin reuses the same core, policy files, gate, and local history. It
