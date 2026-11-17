@@ -3,6 +3,8 @@ import {
   type CaptureProblem,
   type GitShellChange,
   type GitShellDiffFailure,
+  type McpBatch,
+  openMcpBatch,
   type PostImage,
   toPostImage,
 } from "../acquisition";
@@ -28,6 +30,9 @@ import type {
   StoredShellChange,
 } from "./types";
 import {
+  hasShellSnapshot,
+  isShellBatchUnproven,
+  markShellBatchUnproven,
   readStateLines,
   takeShellSnapshot,
   writeBlob,
@@ -141,22 +146,31 @@ function isWriteCapable(event: HookEvent): string | null {
   }
 }
 
-function overlapsAnotherWriter(context: CaptureContext, toolUseId: string): boolean {
+/** The unit's events so far; `null` when the state cannot be read at all. */
+function stateEvents(context: CaptureContext): readonly HookEvent[] | null {
   const lines = readStateLines(context.unit);
 
-  if (lines === null) return true;
+  if (lines === null) return null;
 
+  const events: HookEvent[] = [];
+
+  for (const line of lines) {
+    if ("event" in line) events.push(line.event);
+  }
+
+  return events;
+}
+
+function overlapsAnotherWriter(events: readonly HookEvent[], toolUseId: string): boolean {
   const pending = new Set<string>();
   let started = false;
 
-  for (const line of lines) {
-    if (!("event" in line)) continue;
-
-    const id = isWriteCapable(line.event);
+  for (const event of events) {
+    const id = isWriteCapable(event);
 
     if (id === null) continue;
 
-    if (line.event.name === "PreToolUse" && id === toolUseId) {
+    if (event.name === "PreToolUse" && id === toolUseId) {
       if (pending.size > 0) return true;
 
       started = true;
@@ -165,11 +179,50 @@ function overlapsAnotherWriter(context: CaptureContext, toolUseId: string): bool
 
     if (started) return true;
 
-    if (line.event.name === "PreToolUse") pending.add(id);
+    if (event.name === "PreToolUse") pending.add(id);
     else pending.delete(id);
   }
 
   return !started;
+}
+
+/**
+ * `true` when a call that is not a member of the batch overlaps its window: another shell
+ * call, or an edit whose own pre/post images are a different kind of evidence. The batch's
+ * snapshot cannot separate the two writers, so the batch has no proof.
+ */
+function overlapsForeignWriter(events: readonly HookEvent[], batch: McpBatch): boolean {
+  const members = new Set(batch.memberIds);
+  const pending = new Set<string>();
+  let inside = false;
+
+  for (const event of events) {
+    const id = isWriteCapable(event);
+
+    if (id === null) continue;
+
+    if (!inside) {
+      if (event.name !== "PreToolUse") {
+        pending.delete(id);
+        continue;
+      }
+
+      if (members.has(id) && id === batch.baseId) {
+        inside = true;
+
+        if (pending.size > 0) return true;
+
+        continue;
+      }
+
+      pending.add(id);
+      continue;
+    }
+
+    if (!members.has(id)) return true;
+  }
+
+  return false;
 }
 
 function toStoredChange(change: GitShellChange, context: CaptureContext): StoredShellChange {
@@ -234,11 +287,59 @@ function capturePostShell(
 ): LineCapture | null {
   if (event.tool.runInBackground || !isEnabledShellDiff(context)) return null;
 
-  const pre = takeShellSnapshot(context.unit, event.tool.toolUseId);
+  const events = stateEvents(context);
 
-  if (overlapsAnotherWriter(context, event.tool.toolUseId) || pre.status === "MISSING") {
+  if (events === null) return failedShellCapture("UNPROVEN");
+
+  return event.tool.category === "MCP"
+    ? capturePostMcp(event, events, context)
+    : closingDiff(
+        event.tool.toolUseId,
+        overlapsAnotherWriter(events, event.tool.toolUseId),
+        event,
+        context,
+      );
+}
+
+/**
+ * An MCP call that starts while another MCP call of the unit is open joins its batch and
+ * takes no snapshot of its own: the batch is fenced once, and only its last member holds
+ * the diff (ADR 0017, addendum). A member therefore reports no evidence here, and the
+ * closer diffs the whole batch against the base snapshot.
+ */
+function capturePostMcp(
+  event: PostToolUseEvent | PostToolUseFailureEvent,
+  events: readonly HookEvent[],
+  context: CaptureContext,
+): LineCapture | null {
+  const batch = openMcpBatch(events);
+
+  if (batch === null || !batch.memberIds.includes(event.tool.toolUseId)) {
     return failedShellCapture("UNPROVEN");
   }
+
+  if (batch.openIds.some((id) => id !== event.tool.toolUseId)) return null;
+
+  return closingDiff(
+    batch.baseId,
+    overlapsForeignWriter(events, batch) || isShellBatchUnproven(context.unit, batch.baseId),
+    event,
+    context,
+  );
+}
+
+/** Diffs the closing snapshot against the base one, or says why there is no proof. */
+function closingDiff(
+  baseId: string,
+  unproven: boolean,
+  event: PostToolUseEvent | PostToolUseFailureEvent,
+  context: CaptureContext,
+): LineCapture {
+  if (unproven) return failedShellCapture("UNPROVEN");
+
+  const pre = takeShellSnapshot(context.unit, baseId);
+
+  if (pre.status === "MISSING") return failedShellCapture("UNPROVEN");
 
   if (pre.status === "LIMIT_EXCEEDED") return failedShellCapture("LIMIT_EXCEEDED");
 
@@ -293,12 +394,35 @@ export function captureBeforeAppend(event: HookEvent, context: CaptureContext): 
 }
 
 /**
+ * `true` when this MCP call starts while another MCP call of the unit is still open, so
+ * the open batch already fences it and the call must not fence itself. Hook processes do
+ * not share a lock: a member that arrives while the base snapshot is still being taken
+ * comes before the fence, and a write of its server can land inside that picture. The
+ * batch is then marked without proof instead of silently attributing less than happened.
+ */
+function joinsOpenMcpBatch(event: PreToolUseEvent, context: CaptureContext): boolean {
+  if (event.tool.category !== "MCP") return false;
+
+  const events = stateEvents(context);
+  const open = events === null ? null : openMcpBatch(events);
+
+  if (open === null || !open.openIds.some((id) => id !== event.tool.toolUseId)) return false;
+
+  if (!hasShellSnapshot(context.unit, open.baseId)) {
+    markShellBatchUnproven(context.unit, open.baseId);
+  }
+
+  return true;
+}
+
+/**
  * The shell pre-call snapshot is taken after the event line is appended, so the line
  * marks the start of the window that overlap detection looks at.
  */
 export function captureAfterAppend(event: HookEvent, context: CaptureContext): void {
   if (event.name !== "PreToolUse" || !isShellTool(event)) return;
   if (event.tool.runInBackground || !isEnabledShellDiff(context)) return;
+  if (joinsOpenMcpBatch(event, context)) return;
 
   const result = takeGitSnapshot(shellDiffContext(context), event.cwd);
 

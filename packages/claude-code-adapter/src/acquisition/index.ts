@@ -1,5 +1,7 @@
 export { acquireUnit } from "./acquire-unit";
 export { sameImage, toPostImage } from "./images";
+export { mcpBatches, mcpRoles, openMcpBatch } from "./mcp-batch";
+export type { McpBatch, McpRole } from "./mcp-batch";
 export { isClosingEvent, splitQuiescentUnits } from "./split-units";
 export type {
   AcquiredFile,

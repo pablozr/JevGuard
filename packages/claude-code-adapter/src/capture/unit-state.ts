@@ -393,6 +393,34 @@ export function writeShellSnapshotLimit(unit: UnitState, toolUseId: string): voi
   writeShellRecord(unit, toolUseId, { failed: "LIMIT_EXCEEDED" });
 }
 
+/**
+ * `true` when the pre-call record of this call is already on disk. The record is written
+ * after its pack, so its presence means the snapshot is complete and the fence it makes is
+ * in place.
+ */
+export function hasShellSnapshot(unit: UnitState, toolUseId: string): boolean {
+  return existsSync(shellRecordPath(unit, toolUseId));
+}
+
+function shellBatchUnprovenPath(unit: UnitState, baseId: string): string {
+  return join(unit.shellDirectory, `${keyOf(`batch-unproven:${baseId}`)}.unproven`);
+}
+
+/**
+ * Records that a member of an MCP batch arrived before the batch's base snapshot was on
+ * disk. A write of that member can then be inside the base picture, so the batch's diff
+ * proves nothing and the unit is `UNAVAILABLE`.
+ */
+export function markShellBatchUnproven(unit: UnitState, baseId: string): void {
+  mkdirSync(unit.shellDirectory, { recursive: true, mode: DIR_MODE });
+  writeAtomic(shellBatchUnprovenPath(unit, baseId), "");
+}
+
+/** `true` when a member joined the batch before its base snapshot was on disk. */
+export function isShellBatchUnproven(unit: UnitState, baseId: string): boolean {
+  return existsSync(shellBatchUnprovenPath(unit, baseId));
+}
+
 function contentsOfPack(
   snapshot: GitSnapshot,
   slices: readonly PackSlice[],
