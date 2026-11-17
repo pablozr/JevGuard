@@ -83,6 +83,52 @@ describe("runHook is silent and contained", () => {
     ]);
   });
 
+  test("records the name of a tool the closed list does not know", () => {
+    world.prompt("use a new tool");
+    world.preTool("SomethingNew", "tool-1", { path: MARKER });
+
+    expect(world.hookLog().map((entry) => entry.code)).toEqual(["UNKNOWN_TOOL:SomethingNew"]);
+  });
+
+  test("records no more than a tool name, even a strange one", () => {
+    world.prompt("use a strange tool");
+    world.preTool("bad name/../etc", "tool-1", {});
+
+    const [entry] = world.hookLog();
+
+    expect(entry?.code).toBe("UNKNOWN_TOOL:?");
+    expect(JSON.stringify(entry)).not.toContain("etc");
+  });
+
+  test("records a known name of the longest allowed length and drops a longer one", () => {
+    const longest = `T${"x".repeat(63)}`;
+
+    world.prompt("use a long new tool");
+    world.preTool(longest, "tool-1", {});
+    world.preTool(`T${"x".repeat(64)}`, "tool-2", {});
+
+    expect(world.hookLog().map((entry) => entry.code)).toEqual([
+      `UNKNOWN_TOOL:${longest}`,
+      "UNKNOWN_TOOL:?",
+    ]);
+  });
+
+  test("records an unknown tool once per call, on its Pre", () => {
+    world.prompt("use a new tool twice");
+    world.preTool("SomethingNew", "tool-1", {});
+    world.postTool("SomethingNew", "tool-1", {});
+
+    expect(world.hookLog().map((entry) => entry.code)).toEqual(["UNKNOWN_TOOL:SomethingNew"]);
+  });
+
+  test("records nothing for a tool the closed list knows", () => {
+    initRepository(world.projectRoot);
+    world.prompt("read a file");
+    world.preTool("Read", "tool-1", { file_path: world.path("a.ts") });
+
+    expect(world.hookLog()).toEqual([]);
+  });
+
   test("bounds the log file", () => {
     const file = join(world.stateDirectory(), "hook-log.jsonl");
     const nearLimit = `${"x".repeat(99)}\n`.repeat(Math.ceil((256 * 1024) / 100));

@@ -372,7 +372,10 @@ in "Proposal requests" and "Agent delivery" below.
   `diff-tree`, `ls-tree`, `cat-file`).
 - **Logs.** The hook and worker logs hold only closed codes (for example
   `REVIEW_RECORDED:PASS`), never prompts, patches, paths, findings, session ids, or
-  credentials.
+  credentials. The one value that is not a fixed code is the name of a tool the plugin's
+  list does not know (`UNKNOWN_TOOL:<name>`), written so a missing entry can be reported:
+  it is a bounded identifier of at most 64 characters from `A-Z a-z 0-9 _ . : -`, and any
+  other name is logged as `?`. A tool's input is never logged.
 - **History.** Claude Code reviews are appended to the same local
   `reviews.jsonl` as OpenCode ones, identified by a `claude-code:` turn id. The history
   is owner-only: the file is created with mode `0600` and its directory with `0700` on
