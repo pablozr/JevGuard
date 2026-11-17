@@ -1,5 +1,5 @@
 import type { CredentialProvider, JevEvaluationPort } from "@jevguard/core";
-import { COMPLEXITY_ANSWER, SCOPE_CREEP_ANSWER } from "@jevguard/core";
+import { COMPLEXITY_ANSWER, SCOPE_CREEP_ANSWER, TEST_ADEQUACY_ANSWER } from "@jevguard/core";
 
 /** Model name pinned for the V0.1 Jev judgment. */
 export const JEV_MODEL = "jev-latest";
@@ -27,6 +27,7 @@ export type JevTransportRule = JevTransportCriterion;
 export type JevTransportChecks = {
   readonly scopeCreep: JevTransportCriterion;
   readonly complexity: JevTransportCriterion;
+  readonly testAdequacy: JevTransportCriterion;
 };
 
 export type JevTransportChange = {
@@ -67,6 +68,7 @@ export type TypeSafeRuleQuestions = {
 export type TypeSafeBuiltInQuestions = {
   readonly [SCOPE_CREEP_ANSWER]: TypeSafeNoulQuestion;
   readonly [COMPLEXITY_ANSWER]: TypeSafeNoulQuestion;
+  readonly [TEST_ADEQUACY_ANSWER]: TypeSafeNoulQuestion;
 };
 
 export type TypeSafeQuestions = TypeSafeRuleQuestions | TypeSafeBuiltInQuestions;

@@ -14,10 +14,11 @@ For an applicable rule, JevGuard sends:
 - the full attributed textual diff for changed files within the rule scope;
 - the relevant file paths.
 
-For the built-in batch (`SCOPE-CREEP` and `COMPLEXITY`), JevGuard sends the same task,
-both checks' own definitions, the complete attributed textual diff for every changed
-file with a nonempty patch, and those paths. It sends no rule-scoped subset. The batch
-is a single request with two independent answers; the same complete evidence feeds both.
+For the built-in batch (`SCOPE-CREEP`, `COMPLEXITY`, and `TEST-ADEQUACY`), JevGuard
+sends the same task, every check's own definition, the complete attributed textual diff
+for every changed file with a nonempty patch, and those paths. It sends no rule-scoped
+subset. The batch is a single request with independent answers; the same complete
+evidence feeds all of them.
 
 It does not send repository-wide diffs as a fallback.
 
@@ -122,8 +123,8 @@ genuinely inspects documentation declares `evidence: docs` or `evidence: any`.
 Class filtering removes a file only when its extension belongs to the other class. A
 denied sensitive path and a file whose extension is in neither class are always
 retained, so the blocked-evidence check still rejects them instead of silently
-omitting them. The `SCOPE-CREEP` and `COMPLEXITY` built-ins are turn-level and use
-both classes together.
+omitting them. The `SCOPE-CREEP`, `COMPLEXITY`, and `TEST-ADEQUACY` built-ins are
+turn-level and use both classes together.
 
 Sensitive paths are always rejected, including:
 
@@ -312,9 +313,9 @@ separate, configurable proposal delivered by the server plugin that runs only wh
 review contains a `FAIL` with complete safe evidence and is bounded as described above.
 
 A policy-load or config failure does not suppress the built-in batch: when the turn is
-attributed, both built-ins still evaluate the complete safe patch with their fixed
-thresholds. `SCOPE-CREEP` can fail; `COMPLEXITY` is advisory and can only pass or
-warn. One malformed answer fails only its own check.
+attributed, every built-in still evaluates the complete safe patch with its fixed
+thresholds. `SCOPE-CREEP` can fail; `COMPLEXITY` and `TEST-ADEQUACY` are advisory and
+can only pass or warn. One malformed answer fails only its own check.
 
 ## Claude Code plugin
 

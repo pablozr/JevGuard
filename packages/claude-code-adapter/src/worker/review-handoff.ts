@@ -46,12 +46,12 @@ const NO_JEV: JevEvaluationPort = {
  */
 async function skippedReview(turnId: string): Promise<TurnReview> {
   const turn: Turn = { id: turnId, task: "", files: [] };
-  const { scopeCreep, complexity } = await evaluateBuiltIns(
+  const { scopeCreep, complexity, testAdequacy } = await evaluateBuiltIns(
     { turn, evidencePolicy: DEFAULT_EVIDENCE_POLICY },
     { jev: NO_JEV },
   );
 
-  return aggregateReview(turnId, [scopeCreep, complexity]);
+  return aggregateReview(turnId, [scopeCreep, complexity, testAdequacy]);
 }
 
 async function reviewResolution(

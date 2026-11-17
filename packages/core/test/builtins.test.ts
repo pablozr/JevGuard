@@ -18,6 +18,7 @@ import {
   DEFAULT_EVIDENCE_POLICY,
   evaluateBuiltIns,
   SCOPE_CREEP_CHECK_ID,
+  TEST_ADEQUACY_CHECK_ID,
 } from "../src/index";
 
 const LOGIN_PATCH = "diff --git a/src/auth/login.ts b/src/auth/login.ts\n+const limit = 5;";
@@ -82,8 +83,13 @@ function answerFailed(): JevBuiltInAnswerResult {
 function batchEvaluated(
   scopeCreep: JevBuiltInAnswerResult,
   complexity: JevBuiltInAnswerResult,
+  testAdequacy: JevBuiltInAnswerResult = evaluated(0.1),
 ): JevBuiltInBatchResult {
-  return { kind: "BUILT_IN_BATCH", status: "EVALUATED", answers: { scopeCreep, complexity } };
+  return {
+    kind: "BUILT_IN_BATCH",
+    status: "EVALUATED",
+    answers: { scopeCreep, complexity, testAdequacy },
+  };
 }
 
 function batchFailed(
@@ -122,8 +128,17 @@ const complexityContext = {
   scopedPaths: selectedPaths,
 };
 
+const testAdequacyContext = {
+  kind: "BUILT_IN",
+  turnId: "turn-1",
+  ruleId: null,
+  checkId: TEST_ADEQUACY_CHECK_ID,
+  severity: "warning",
+  scopedPaths: selectedPaths,
+};
+
 describe("built-in batch request", () => {
-  test("builds one request with both named Nouls, the task, and the complete change", () => {
+  test("builds one request with every named Noul, the task, and the complete change", () => {
     const request = buildBuiltInBatchRequest("Add rate limiting.", {
       files: selectedPaths,
       diff: `${LOGIN_PATCH}\n${DOCS_PATCH}`,
@@ -139,6 +154,9 @@ describe("built-in batch request", () => {
     expect(request.questions.complexity.criteria.allowed).toContain(
       "explicitly required by the task",
     );
+    expect(request.questions.testAdequacy.type).toBe("noul");
+    expect(request.questions.testAdequacy.criteria.id).toBe(TEST_ADEQUACY_CHECK_ID);
+    expect(request.questions.testAdequacy.criteria.allowed).toContain("changes with no behavior");
     expect(request.change).toEqual({
       files: selectedPaths,
       diff: `${LOGIN_PATCH}\n${DOCS_PATCH}`,
@@ -172,7 +190,7 @@ describe("built-in batch evaluation", () => {
     expect(request.change.diff).toBe(`${LOGIN_PATCH}\n${DOCS_PATCH}\n${CONFIG_PATCH}`);
   });
 
-  test("selects evidence once and issues exactly one request for both checks", async () => {
+  test("selects evidence once and issues exactly one request for every check", async () => {
     const port = new FakeJevPort(batchEvaluated(evaluated(0.1), evaluated(0.1)));
 
     const result = await evaluateBuiltIns(makeInput(), { jev: port });
@@ -181,6 +199,7 @@ describe("built-in batch evaluation", () => {
     expect(result).toEqual({
       scopeCreep: { ...scopeCreepContext, outcome: "PASS", violationProbability: 0.1 },
       complexity: { ...complexityContext, outcome: "PASS", violationProbability: 0.1 },
+      testAdequacy: { ...testAdequacyContext, outcome: "PASS", violationProbability: 0.1 },
     });
   });
 
@@ -229,18 +248,43 @@ describe("built-in batch evaluation", () => {
     },
   );
 
-  test("reports both kinds, check ids, severities, and selected paths", async () => {
+  test.each([
+    [0, "PASS"],
+    [0.599, "PASS"],
+    [0.6, "WARN"],
+    [0.999, "WARN"],
+    [1, "WARN"],
+  ] as const)(
+    "maps a test-adequacy answer of %s to %s on the fixed advisory gate and never fails",
+    async (probability, outcome) => {
+      const port = new FakeJevPort(
+        batchEvaluated(evaluated(0.1), evaluated(0.1), evaluated(probability)),
+      );
+
+      const result = await evaluateBuiltIns(makeInput(), { jev: port });
+
+      expect(result.testAdequacy).toEqual({
+        ...testAdequacyContext,
+        outcome,
+        violationProbability: probability,
+      });
+      expect(result.testAdequacy.outcome).not.toBe("FAIL");
+    },
+  );
+
+  test("reports every kind, check id, severity, and selected paths", async () => {
     const port = new FakeJevPort(batchEvaluated(evaluated(0.1), evaluated(0.1)));
 
     const result = await evaluateBuiltIns(makeInput(), { jev: port });
 
     expect(result.scopeCreep).toMatchObject(scopeCreepContext);
     expect(result.complexity).toMatchObject(complexityContext);
+    expect(result.testAdequacy).toMatchObject(testAdequacyContext);
   });
 });
 
 describe("built-in batch short-circuits", () => {
-  test("skips both checks without calling the port when the turn has no attributed patch", async () => {
+  test("skips every check without calling the port when the turn has no attributed patch", async () => {
     const port = new FakeJevPort(batchEvaluated(evaluated(0.1), evaluated(0.1)));
 
     const result = await evaluateBuiltIns(makeInput({ turn: makeTurn({ files: [] }) }), {
@@ -260,11 +304,17 @@ describe("built-in batch short-circuits", () => {
         outcome: "SKIPPED",
         reason: "NO_ATTRIBUTED_PATCH",
       },
+      testAdequacy: {
+        ...testAdequacyContext,
+        scopedPaths: [],
+        outcome: "SKIPPED",
+        reason: "NO_ATTRIBUTED_PATCH",
+      },
     });
     expect(port.requests).toHaveLength(0);
   });
 
-  test("reports both checks blocked without calling the port", async () => {
+  test("reports every check blocked without calling the port", async () => {
     const port = new FakeJevPort(batchEvaluated(evaluated(0.1), evaluated(0.1)));
     const turn = makeTurn({ files: [file("src/.env", "SECRET=1")] });
 
@@ -282,10 +332,16 @@ describe("built-in batch short-circuits", () => {
       outcome: "UNAVAILABLE",
       reason: "BLOCKED_EVIDENCE",
     });
+    expect(result.testAdequacy).toEqual({
+      ...testAdequacyContext,
+      scopedPaths: [],
+      outcome: "UNAVAILABLE",
+      reason: "BLOCKED_EVIDENCE",
+    });
     expect(port.requests).toHaveLength(0);
   });
 
-  test("reports both checks oversized without calling the port", async () => {
+  test("reports every check oversized without calling the port", async () => {
     const port = new FakeJevPort(batchEvaluated(evaluated(0.1), evaluated(0.1)));
     const evidencePolicy = { ...DEFAULT_EVIDENCE_POLICY, maxDiffLength: 4 };
 
@@ -293,12 +349,16 @@ describe("built-in batch short-circuits", () => {
 
     expect(result.scopeCreep).toMatchObject({ outcome: "UNAVAILABLE", reason: "OVERSIZED_DIFF" });
     expect(result.complexity).toMatchObject({ outcome: "UNAVAILABLE", reason: "OVERSIZED_DIFF" });
+    expect(result.testAdequacy).toMatchObject({
+      outcome: "UNAVAILABLE",
+      reason: "OVERSIZED_DIFF",
+    });
     expect(port.requests).toHaveLength(0);
   });
 });
 
 describe("built-in batch failures", () => {
-  test("maps a request-level typed failure to UNAVAILABLE for both checks", async () => {
+  test("maps a request-level typed failure to UNAVAILABLE for every check", async () => {
     const port = new FakeJevPort(batchFailed("MISSING_CREDENTIAL"));
 
     const result = await evaluateBuiltIns(makeInput(), { jev: port });
@@ -306,11 +366,12 @@ describe("built-in batch failures", () => {
     expect(result).toEqual({
       scopeCreep: { ...scopeCreepContext, outcome: "UNAVAILABLE", reason: "JEV_FAILURE" },
       complexity: { ...complexityContext, outcome: "UNAVAILABLE", reason: "JEV_FAILURE" },
+      testAdequacy: { ...testAdequacyContext, outcome: "UNAVAILABLE", reason: "JEV_FAILURE" },
     });
     expect(port.requests).toHaveLength(1);
   });
 
-  test("contains a rejected port promise as UNAVAILABLE for both checks", async () => {
+  test("contains a rejected port promise as UNAVAILABLE for every check", async () => {
     const port = new FakeJevPort(new Error("transport down"));
 
     const result = await evaluateBuiltIns(makeInput(), { jev: port });
@@ -318,11 +379,12 @@ describe("built-in batch failures", () => {
     expect(result).toEqual({
       scopeCreep: { ...scopeCreepContext, outcome: "UNAVAILABLE", reason: "JEV_FAILURE" },
       complexity: { ...complexityContext, outcome: "UNAVAILABLE", reason: "JEV_FAILURE" },
+      testAdequacy: { ...testAdequacyContext, outcome: "UNAVAILABLE", reason: "JEV_FAILURE" },
     });
     expect(port.requests).toHaveLength(1);
   });
 
-  test("keeps a failed complexity answer from suppressing a valid scope-creep answer", async () => {
+  test("keeps a failed complexity answer from suppressing its valid siblings", async () => {
     const port = new FakeJevPort(batchEvaluated(evaluated(0.1), answerFailed()));
 
     const result = await evaluateBuiltIns(makeInput(), { jev: port });
@@ -337,10 +399,15 @@ describe("built-in batch failures", () => {
       outcome: "UNAVAILABLE",
       reason: "JEV_FAILURE",
     });
+    expect(result.testAdequacy).toEqual({
+      ...testAdequacyContext,
+      outcome: "PASS",
+      violationProbability: 0.1,
+    });
     expect(port.requests).toHaveLength(1);
   });
 
-  test("keeps a failed scope-creep answer from suppressing a valid complexity answer", async () => {
+  test("keeps a failed scope-creep answer from suppressing its valid siblings", async () => {
     const port = new FakeJevPort(batchEvaluated(answerFailed(), evaluated(0.1)));
 
     const result = await evaluateBuiltIns(makeInput(), { jev: port });
@@ -355,6 +422,34 @@ describe("built-in batch failures", () => {
       outcome: "PASS",
       violationProbability: 0.1,
     });
+    expect(result.testAdequacy).toEqual({
+      ...testAdequacyContext,
+      outcome: "PASS",
+      violationProbability: 0.1,
+    });
+  });
+
+  test("keeps a failed test-adequacy answer from suppressing its valid siblings", async () => {
+    const port = new FakeJevPort(batchEvaluated(evaluated(0.1), evaluated(0.1), answerFailed()));
+
+    const result = await evaluateBuiltIns(makeInput(), { jev: port });
+
+    expect(result.scopeCreep).toEqual({
+      ...scopeCreepContext,
+      outcome: "PASS",
+      violationProbability: 0.1,
+    });
+    expect(result.complexity).toEqual({
+      ...complexityContext,
+      outcome: "PASS",
+      violationProbability: 0.1,
+    });
+    expect(result.testAdequacy).toEqual({
+      ...testAdequacyContext,
+      outcome: "UNAVAILABLE",
+      reason: "JEV_FAILURE",
+    });
+    expect(port.requests).toHaveLength(1);
   });
 
   test.each([1.5, -0.1, Number.NaN])(
@@ -377,4 +472,21 @@ describe("built-in batch failures", () => {
       expect(port.requests).toHaveLength(1);
     },
   );
+
+  test("treats an out-of-range test-adequacy probability as UNAVAILABLE for that check only", async () => {
+    const port = new FakeJevPort(batchEvaluated(evaluated(0.1), evaluated(0.1), evaluated(1.5)));
+
+    const result = await evaluateBuiltIns(makeInput(), { jev: port });
+
+    expect(result.testAdequacy).toEqual({
+      ...testAdequacyContext,
+      outcome: "UNAVAILABLE",
+      reason: "JEV_FAILURE",
+    });
+    expect(result.scopeCreep).toEqual({
+      ...scopeCreepContext,
+      outcome: "PASS",
+      violationProbability: 0.1,
+    });
+  });
 });

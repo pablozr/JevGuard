@@ -90,6 +90,7 @@ function batch(scope: number, complexity: number): JevEvaluationResult {
     answers: {
       scopeCreep: { status: "EVALUATED", noul: { violationProbability: scope } },
       complexity: { status: "EVALUATED", noul: { violationProbability: complexity } },
+      testAdequacy: { status: "EVALUATED", noul: { violationProbability: complexity } },
     },
   };
 }
@@ -101,6 +102,7 @@ function batchWithFailedComplexity(scope: number): JevEvaluationResult {
     answers: {
       scopeCreep: { status: "EVALUATED", noul: { violationProbability: scope } },
       complexity: { status: "FAILED", reason: "INVALID_RESPONSE" },
+      testAdequacy: { status: "EVALUATED", noul: { violationProbability: scope } },
     },
   };
 }
@@ -186,7 +188,11 @@ describe("bulk evaluation", () => {
       expect(item.kind).toBe("BUILT_IN_BATCH");
 
       if (item.kind === "BUILT_IN_BATCH") {
-        expect(Object.keys(item.questions).sort()).toEqual(["complexity", "scopeCreep"]);
+        expect(Object.keys(item.questions).sort()).toEqual([
+          "complexity",
+          "scopeCreep",
+          "testAdequacy",
+        ]);
       }
     }
   });
@@ -367,12 +373,14 @@ function typeSafeRequest(): TypeSafeSystemOneRequest {
       checks: {
         scopeCreep: { id: "SCOPE-CREEP", description: "d", violation: "v" },
         complexity: { id: "COMPLEXITY", description: "d", violation: "v" },
+        testAdequacy: { id: "TEST-ADEQUACY", description: "d", violation: "v" },
       },
       change: { files: ["src/a.ts"], diff: "+x" },
     },
     questions: {
       scopeCreep: { type: "noul", instructions: "i", criteria: { true: "t", false: "f" } },
       complexity: { type: "noul", instructions: "i", criteria: { true: "t", false: "f" } },
+      testAdequacy: { type: "noul", instructions: "i", criteria: { true: "t", false: "f" } },
     },
     model: "jev-latest",
   };

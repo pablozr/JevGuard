@@ -40,6 +40,11 @@ function batchRequest(): JevBuiltInBatchRequest {
         instructions: "Complexity?",
         criteria: { ...criteria, id: "COMPLEXITY" },
       },
+      testAdequacy: {
+        type: "noul",
+        instructions: "Tested?",
+        criteria: { ...criteria, id: "TEST-ADEQUACY" },
+      },
     },
     change: { files: ["src/health.ts"], diff: "+ return ok" },
   };

@@ -14,7 +14,7 @@ import type {
   JevRuleEvaluationResult,
   JevRuleRequest,
 } from "@jevguard/core";
-import { COMPLEXITY_ANSWER, SCOPE_CREEP_ANSWER } from "@jevguard/core";
+import { COMPLEXITY_ANSWER, SCOPE_CREEP_ANSWER, TEST_ADEQUACY_ANSWER } from "@jevguard/core";
 import { TypeSafeClient } from "@typesafe-ai/sdk";
 import {
   JEV_MODEL,
@@ -223,27 +223,32 @@ function toRuleSystemOneRequest(request: JevRuleRequest): TypeSafeSystemOneReque
 }
 
 function toBatchSystemOneRequest(request: JevBuiltInBatchRequest): TypeSafeSystemOneRequest {
-  const scopeCreep = request.questions.scopeCreep;
-  const complexity = request.questions.complexity;
+  const { scopeCreep, complexity, testAdequacy } = request.questions;
 
   return {
     state: {
       task: request.task,
-      checks: toChecks(scopeCreep.criteria, complexity.criteria),
+      checks: toChecks(scopeCreep.criteria, complexity.criteria, testAdequacy.criteria),
       change: toChange(request.change),
     },
     questions: {
       [SCOPE_CREEP_ANSWER]: toTypeSafeQuestion(scopeCreep.instructions, scopeCreep.criteria),
       [COMPLEXITY_ANSWER]: toTypeSafeQuestion(complexity.instructions, complexity.criteria),
+      [TEST_ADEQUACY_ANSWER]: toTypeSafeQuestion(testAdequacy.instructions, testAdequacy.criteria),
     },
     model: JEV_MODEL,
   };
 }
 
-function toChecks(scopeCreep: JevRuleCriteria, complexity: JevRuleCriteria): JevTransportChecks {
+function toChecks(
+  scopeCreep: JevRuleCriteria,
+  complexity: JevRuleCriteria,
+  testAdequacy: JevRuleCriteria,
+): JevTransportChecks {
   return {
     scopeCreep: toCriterion(scopeCreep),
     complexity: toCriterion(complexity),
+    testAdequacy: toCriterion(testAdequacy),
   };
 }
 
@@ -314,6 +319,7 @@ function readBatchAnswers(response: unknown): JevBuiltInBatchResult {
     answers: {
       [SCOPE_CREEP_ANSWER]: readAnswer(answers, SCOPE_CREEP_ANSWER),
       [COMPLEXITY_ANSWER]: readAnswer(answers, COMPLEXITY_ANSWER),
+      [TEST_ADEQUACY_ANSWER]: readAnswer(answers, TEST_ADEQUACY_ANSWER),
     },
   };
 }

@@ -26,6 +26,7 @@ export interface JevChange {
  */
 export const SCOPE_CREEP_ANSWER = "scopeCreep";
 export const COMPLEXITY_ANSWER = "complexity";
+export const TEST_ADEQUACY_ANSWER = "testAdequacy";
 
 /**
  * State for one rule judgment. One complete evidence slice of an applicable rule maps
@@ -39,8 +40,8 @@ export interface JevRuleRequest {
 }
 
 /**
- * State for the single built-in batch. Two independent named Nouls share one task
- * and one change, so one request answers both checks.
+ * State for the single built-in batch. Independent named Nouls share one task
+ * and one change, so one request answers every check.
  */
 export interface JevBuiltInBatchRequest {
   readonly kind: "BUILT_IN_BATCH";
@@ -48,6 +49,7 @@ export interface JevBuiltInBatchRequest {
   readonly questions: {
     readonly scopeCreep: JevNoulQuestion;
     readonly complexity: JevNoulQuestion;
+    readonly testAdequacy: JevNoulQuestion;
   };
   readonly change: JevChange;
 }
@@ -84,6 +86,7 @@ export type JevBuiltInBatchResult =
       readonly answers: {
         readonly scopeCreep: JevBuiltInAnswerResult;
         readonly complexity: JevBuiltInAnswerResult;
+        readonly testAdequacy: JevBuiltInAnswerResult;
       };
     }
   | {

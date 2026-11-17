@@ -33,6 +33,7 @@ export async function reviewTurn(
     ...ruleLane.results,
     builtIns.scopeCreep,
     builtIns.complexity,
+    builtIns.testAdequacy,
   ]);
 
   return { review, rules: ruleLane.rules, remediation: config.remediation };
