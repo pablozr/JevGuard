@@ -24,7 +24,7 @@ const BUILD_SENTINEL_VARIABLE = "JEVGUARD_ARTIFACT_BUILD_SENTINEL";
 const BUILD_SENTINEL_VALUE = "JEVGUARD_ARTIFACT_BUILD_SENTINEL_7f3c9d2a";
 
 const PLUGIN_PACKAGE_NAME = "@pablozrrrr/jevguard";
-const PLUGIN_VERSION = "0.4.0";
+const PLUGIN_VERSION = "0.4.1";
 const RULES_SKILL_PREFIX = "skills/jevguard-rules";
 const INIT_SKILL_PREFIX = "skills/jev-init";
 const EXPECTED_DIST_FILES = [
@@ -204,6 +204,7 @@ interface ArtifactManifest {
   readonly dependencies?: Readonly<Record<string, string>>;
   readonly peerDependencies?: Readonly<Record<string, string>>;
   readonly peerDependenciesMeta?: Readonly<Record<string, { readonly optional?: boolean }>>;
+  readonly build?: { readonly commit?: string; readonly dirty?: boolean };
   readonly scripts?: Readonly<Record<string, string>>;
 }
 
@@ -486,6 +487,34 @@ describe("local package artifact", () => {
   test("ships no CLI entry", () => {
     expect(existsSync(join(DIST_DIR, "cli"))).toBe(false);
     expect(existsSync(join(extractedDir, "package", "cli"))).toBe(false);
+  });
+
+  test("stamps the commit the bundle was built from", () => {
+    const manifest = readJson<ArtifactManifest>(join(extractedDir, "package", "package.json"));
+    const head = execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: REPO_ROOT,
+      encoding: "utf8",
+    }).trim();
+
+    expect(manifest.build?.commit).toBe(head);
+    expect(typeof manifest.build?.dirty).toBe("boolean");
+  });
+
+  test("ships the proposer model fallback in the bundled artifact", () => {
+    // Guard for the bundles this repo builds: without the fallback, a proposer on a
+    // session using the default model reports REMEDIATION_PROPOSAL_SKIPPED_NO_MODEL.
+    // The published 0.4.0 tarball matches this pattern too, so it says nothing about
+    // what that release carried.
+    for (const bundlePath of [
+      join(DIST_DIR, "index.js"),
+      join(extractedDir, "package", "index.js"),
+    ]) {
+      const bundle = readFileSync(bundlePath, "utf8");
+
+      expect(bundle).toMatch(
+        /async originModel\(sessionID\) \{[\s\S]*?lastAssistantModel\(messages\)/,
+      );
+    }
   });
 
   test("does not embed build-process environment values", () => {

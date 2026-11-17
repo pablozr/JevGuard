@@ -352,6 +352,25 @@ any intentional deviation from `SPEC.md` or an ADR.
 Keep pull requests reviewable. If a change introduces a hard-to-reverse boundary,
 technology commitment, or non-obvious trade-off, propose an ADR with it.
 
+## Releases
+
+The plugin is published from a built artifact, never from the sources. Bump the
+version in `packages/plugin/package.json`, then build and pack it:
+
+```sh
+pnpm artifact:build
+pnpm artifact:publish:check
+```
+
+`dist/package.json` carries a `build` object naming the commit the bundle came from
+and whether the tracked tree was clean. Check it against the commit being released
+(`git rev-parse HEAD`, `git status --porcelain --untracked-files=no`) before
+publishing: a tarball gives no sign of where its bundle came from, so a bundle older
+than the version it claims — built before a fix landed, or a stale local `file:`
+install loaded in place of the published package — looks exactly like a correct one.
+Untracked files never enter the bundle, so only tracked changes make the tree dirty.
+Publishing itself waits for the repository owner's approval.
+
 ## Code style
 
 Write small, readable TypeScript modules. Prefer strong types, explicit names, and
