@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import {
   mkdirSync,
   mkdtempSync,
@@ -22,17 +21,14 @@ import { diffGitSnapshots } from "../src/capture/git-shell-diff";
 import { createNodeFileReader, runGit } from "../src/capture/node-ports";
 import { createShellDiffMeter, DEFAULT_SHELL_DIFF_LIMITS } from "../src/capture/shell-diff-limits";
 import type { GitShellContext } from "../src/capture/types";
-import { git, initRepository, ORIGINAL, takenSnapshot } from "./hook-world";
+import { git, gitOutput, initRepository, ORIGINAL, takenSnapshot } from "./hook-world";
 
 function currentBranch(root: string): string {
-  return execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
-    cwd: root,
-    encoding: "utf8",
-  }).trim();
+  return gitOutput(root, "rev-parse", "--abbrev-ref", "HEAD");
 }
 
 function currentCommit(root: string): string {
-  return execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
+  return gitOutput(root, "rev-parse", "HEAD");
 }
 
 function present(content: string) {
