@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { cpus, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, beforeAll, describe, test, vi } from "vitest";
+import { emptyHooksDirectory, hermeticGitEnv } from "../../../tools/test/hermetic-git";
 import { createBudget } from "../src/capture/budget";
 import { createRepoPathResolver } from "../src/capture/file-image";
 import { takeGitSnapshot } from "../src/capture/git-shell";
@@ -120,8 +121,9 @@ function specs(): readonly Spec[] {
 }
 
 function git(cwd: string, args: readonly string[], input?: string): void {
-  execFileSync("git", [...args], {
+  execFileSync("git", ["-c", `core.hooksPath=${emptyHooksDirectory()}`, ...args], {
     cwd,
+    env: hermeticGitEnv(),
     input,
     stdio: ["pipe", "ignore", "ignore"],
     maxBuffer: 1024 * 1024 * 1024,

@@ -301,6 +301,33 @@ defect. Contract-test attribution and presentation behavior in the adapter with
 fakes; unit-test pure parsing, scope, evidence safety, gates, and
 orchestration in `core`.
 
+### Test isolation
+
+`pnpm test` runs every worker with a hermetic Git configuration. The setup file
+(`tools/test/vitest-setup.ts`) drops the inherited `GIT_CONFIG_PARAMETERS`,
+`GIT_CONFIG_COUNT` and `GIT_CONFIG_KEY_*`/`GIT_CONFIG_VALUE_*` variables and points
+`GIT_CONFIG_GLOBAL` and `GIT_CONFIG_SYSTEM` at an empty file, so a machine-wide
+`core.hooksPath` (husky, pre-commit, an agent runner) never runs inside a fixture
+commit; that hook costs about 1.5 s per commit instead of 100 ms. Fixtures that spawn
+Git pass the same environment explicitly and also switch hooks off with
+`-c core.hooksPath=<empty directory>`; keep new ones on the helpers in
+`tools/test/hermetic-git.ts`. That config file and hooks directory live in one
+`jevguard-git-hermetic-run-<pid>/worker-<pid>` directory per worker, inside a run
+directory the global setup (`tools/test/global-setup.ts`) creates before the workers
+are spawned and its teardown removes, so a run leaves nothing behind in the system temp
+directory. The run hands its directory to the workers through
+`JEVGUARD_GIT_HERMETIC_RUN`, because naming it after the parent process only works in
+the forks pool; in the threads pool a worker is a thread of the run itself, and every
+run with `--pool=threads` left its worker directories behind. A worker cannot clean up
+after itself either: Vitest ends one by terminating the process it runs in, so no `exit`
+handler runs there.
+
+The setup file also yields one macrotask after every test. Vitest's worker rejects a
+slow `onTaskUpdate` RPC call after 60 s, and a file with long synchronous Git work
+could keep the worker in microtasks until the expired timer fired before the message
+carrying the answer, ending the run with `Timeout calling "onTaskUpdate"` on exit 1
+even though every test passed. The yield bounds that starvation to a single test.
+
 ## Contribution expectations
 
 - Keep changes focused and preserve package dependency direction.

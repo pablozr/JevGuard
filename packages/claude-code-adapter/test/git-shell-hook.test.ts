@@ -1,23 +1,19 @@
-import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { MAX_CAPTURED_FILE_BYTES } from "../src/capture/file-image";
 import { runGit } from "../src/capture/node-ports";
 import { DEFAULT_SHELL_DIFF_LIMITS } from "../src/capture/shell-diff-limits";
-import { causesOf, git, HookWorld, initRepository } from "./hook-world";
+import { causesOf, git, gitOutput, HookWorld, initRepository } from "./hook-world";
 
 const SECRET_CONTENT = "SHELL_LIMIT_SECRET_4471";
 
 function currentBranch(root: string): string {
-  return execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
-    cwd: root,
-    encoding: "utf8",
-  }).trim();
+  return gitOutput(root, "rev-parse", "--abbrev-ref", "HEAD");
 }
 
 function currentCommit(root: string): string {
-  return execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
+  return gitOutput(root, "rev-parse", "HEAD");
 }
 
 function shellFiles(world: HookWorld): readonly string[] {
