@@ -151,10 +151,12 @@ diff or by another file's patch.
 
 The server plugin also appends every review to a local, bounded JSON Lines history so
 operators can aggregate outcomes without parsing the host's log file. Each record is
-exactly the structured-log projection allowlist plus an ISO 8601 timestamp: the
-aggregate counts, each result's rule or check ID, its outcome, its severity, its
-scoped paths, its raw probability or typed reason, and its slice metadata. It stores
-no task, diff, prompt, model output, credential, API key, or environment value.
+exactly the review-log projection allowlist plus an ISO 8601 timestamp: the aggregate
+counts, each result's rule or check ID, its outcome, its severity, its scoped paths,
+its raw probability or typed reason, and its slice metadata. This is the only surface
+that keeps file paths and slice detail: the structured host log carries ids, outcomes,
+severities, probabilities and typed reason codes only, never a path. The history
+stores no task, diff, prompt, model output, credential, API key, or environment value.
 
 The file lives at `<XDG_DATA_HOME>/jevguard/reviews.jsonl` when `XDG_DATA_HOME` is set
 to a non-empty absolute path, and otherwise at `~/.local/share/jevguard/reviews.jsonl`

@@ -499,9 +499,11 @@ pass 1 · warn 1 · fail 1 · skipped 0 · unavailable 0
 ```
 
 The structured log (and, on hosts with a toast channel, one toast per turn) shows
-the aggregate outcome and the outcome counts; the structured log carries every rule's result, its raw violation probability or typed
-reason, and its scoped paths. The counts include every entry, including the single
-synthetic entry a review-level failure produces.
+the aggregate outcome and the outcome counts; the structured log carries every rule's
+result with its raw violation probability or typed reason, and no file path — scoped
+paths and per-slice detail stay in the local review history described below. The
+counts include every entry, including the single synthetic entry a review-level
+failure produces.
 
 `PASS`, `WARN`, and `FAIL` are per-rule semantic outcomes. `SKIPPED` means that
 rule had no applicable change to evaluate. `UNAVAILABLE` means JevGuard could not
@@ -517,9 +519,10 @@ structured-log projection plus an ISO 8601 timestamp to one JSON Lines file:
 <XDG_DATA_HOME or ~/.local/share>/jevguard/reviews.jsonl
 ```
 
-The file holds the aggregate counts, each result's rule or check ID, its outcome, and
-its typed reason or raw probability — the same allowlist as the structured log. It
-never holds a task, diff, prompt, model output, credential, or environment value. It
+The file holds the aggregate counts, each result's rule or check ID, its outcome, its
+typed reason or raw probability, plus the scoped paths and slice metadata the host log
+leaves out. It never holds a task, diff, prompt, model output, credential, or
+environment value. It
 is local-only, bounded (it rewrites itself once it passes 5 MB, keeping the newest
 records), and safe to delete at any time; the next review recreates it.
 
