@@ -480,6 +480,11 @@ export function captureBeforeAppend(event: HookEvent, context: CaptureContext): 
  * not share a lock: a member that arrives while the base snapshot is still being taken
  * comes before the fence, and a write of its server can land inside that picture. The
  * batch is then marked without proof instead of silently attributing less than happened.
+ *
+ * The base call never joins its own batch. Its line can be followed by a member's line
+ * before its state read, and then `openIds` holds another id while this call is still the
+ * one that must take the fence (#89): skipping here would leave the whole batch without a
+ * base snapshot and make every member `UNAVAILABLE`.
  */
 function joinsOpenMcpBatch(event: PreToolUseEvent, context: CaptureContext): boolean {
   if (event.tool.category !== "MCP") return false;
@@ -487,7 +492,9 @@ function joinsOpenMcpBatch(event: PreToolUseEvent, context: CaptureContext): boo
   const events = stateEvents(context);
   const open = events === null ? null : openMcpBatch(events);
 
-  if (open === null || !open.openIds.some((id) => id !== event.tool.toolUseId)) return false;
+  if (open === null || event.tool.toolUseId === open.baseId) return false;
+
+  if (!open.openIds.some((id) => id !== event.tool.toolUseId)) return false;
 
   if (!hasShellSnapshot(context.unit, open.baseId)) {
     markShellBatchUnproven(context.unit, open.baseId);

@@ -94,7 +94,9 @@ What keeps a verdict honest:
   already be inside the base picture. A call therefore only joins the batch when the base
   snapshot record is already written; otherwise the batch is marked and the unit is
   `UNAVAILABLE`. Waiting for the snapshot instead was rejected: a hook cannot hold the
-  host's tool call open while it waits.
+  host's tool call open while it waits. The first call of the run is the exception on the
+  other side: it never joins its own batch, even when a member's line landed before its
+  state read, because its snapshot is the fence the batch depends on (#89).
 - **The batch's pre-images are the ones before its first call**, so a file written and
   rewritten across the batch is reviewed as one net change from the state before the run.
 - **The cost is one fence per run**: two snapshots for a batch of any size, instead of two
