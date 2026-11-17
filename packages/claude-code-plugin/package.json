@@ -1,6 +1,6 @@
 {
   "name": "@jevguard/claude-code-plugin",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Claude Code plugin composition and artifact for JevGuard.",
   "license": "MIT",

@@ -1,6 +1,6 @@
 {
   "name": "jevguard",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Background semantic review of Claude Code work units against repository rules, using Jev, with opt-in remediation proposals.",
   "author": {
     "name": "pablozr"
