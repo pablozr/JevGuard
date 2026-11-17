@@ -612,11 +612,15 @@ describe("OpenCode sinks", () => {
     expect(serialized).not.toMatch(/scopedPaths|"path"|slices|evidence/);
     expect(results.length).toBeGreaterThan(0);
     for (const result of results) {
-      expect(Object.keys(result).sort()).toEqual(
-        expect.arrayContaining(["kind", "outcome", "severity"]),
-      );
+      expect(Object.keys(result)).toEqual(expect.arrayContaining(["kind", "outcome"]));
       expect(result).not.toHaveProperty("scopedPaths");
       expect(result).not.toHaveProperty("evidence");
+    }
+    // Only RULE and BUILT_IN carry a severity; a REVIEW result has just kind and outcome.
+    const withSeverity = results.filter((result) => result.kind !== "REVIEW");
+    expect(withSeverity.length).toBeGreaterThan(0);
+    for (const result of withSeverity) {
+      expect(result).toHaveProperty("severity");
     }
   });
 
