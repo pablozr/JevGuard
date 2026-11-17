@@ -81,6 +81,11 @@ function toResultExtra(result: ReviewLogResult): Record<string, unknown> {
   return { ...toIdentityExtra(result), ...toOutcomeExtra(result) };
 }
 
+/**
+ * Identity half of a host-log result. The host log carries ids, severities, outcomes and
+ * typed codes only: the scoped paths and the slice metadata stay in the local review
+ * history (ADR 0014 allowlist), so a host log line never holds a file path.
+ */
 function toIdentityExtra(result: ReviewLogResult): Record<string, unknown> {
   switch (result.kind) {
     case "RULE":
@@ -88,14 +93,12 @@ function toIdentityExtra(result: ReviewLogResult): Record<string, unknown> {
         kind: result.kind,
         ruleId: result.ruleId,
         severity: result.severity,
-        scopedPaths: [...result.scopedPaths],
       };
     case "BUILT_IN":
       return {
         kind: result.kind,
         checkId: result.checkId,
         severity: result.severity,
-        scopedPaths: [...result.scopedPaths],
       };
     case "REVIEW":
       return { kind: result.kind };

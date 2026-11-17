@@ -356,12 +356,12 @@ execution is not reviewed; the plugin logs `JevGuard skipped · interrupted|fail
   `FAIL`/`UNAVAILABLE`. The entry carries the turn ID, the aggregate summary
   (highest verdict, whether any result was unavailable, and per-outcome counts), and
   the full result list. Each result carries its identity — `ruleId` for a rule or
-  `checkId` for a built-in — its severity, scoped paths, and either the raw
-  violation probability or the typed reason. A sliced rule result also carries its
-  slice metadata: `evidenceMode`, planned and evaluated/failed/not-evaluated counts,
-  ordered slice summaries (index, path, `FILE`/`HUNK`, hunk ordinal), and per-slice
-  probabilities and gate outcomes for a complete result. The log never carries diff
-  content. Results have a fixed order: the rules in source order, then the
+  `checkId` for a built-in — its severity, and either the raw violation probability or
+  the typed reason. The host log carries no file path and no slice metadata: scoped
+  paths and per-slice detail (mode, counts, ordered slice summaries, per-slice
+  probabilities and gate outcomes) exist only in the local review history described
+  below. The log never carries diff content. Results have a fixed order: the rules in
+  source order, then the
   `SCOPE-CREEP`, `COMPLEXITY`, and `TEST-ADEQUACY` built-ins. A review-level failure
   contributes its single synthetic entry (null rule ID and severity). All of them are
   included in the counts.
@@ -381,9 +381,11 @@ contains a `FAIL` into a proposal, as described below.
 Every review is also appended to a bounded local history at
 `~/.local/share/jevguard/reviews.jsonl`, or at
 `<XDG_DATA_HOME>/jevguard/reviews.jsonl` when `XDG_DATA_HOME` is a non-empty absolute
-path (a relative `XDG_DATA_HOME` is ignored). It stores only the structured-log
-allowlist plus a timestamp, is local-only, rewrites itself once it passes 5 MB keeping
-the newest records, and is safe to delete at any time. `jevguard report` and
+path (a relative `XDG_DATA_HOME` is ignored). It stores only the review-log
+projection allowlist plus a timestamp — the same entries as the host log, plus the
+scoped paths and the slice metadata the host log leaves out — is local-only, rewrites
+itself once it passes 5 MB keeping the newest records, and is safe to delete at any
+time. `jevguard report` and
 `jevguard report --json` aggregate it into outcome totals, reason breakdowns,
 per-rule counts, slice coverage, and the per-rule feedback calibration (see
 `jevguard feedback` below); a missing or empty file is a normal empty report.

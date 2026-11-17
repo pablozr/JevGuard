@@ -543,7 +543,6 @@ describe("OpenCode sinks", () => {
             kind: "RULE",
             ruleId: "ARCH-001",
             severity: "error",
-            scopedPaths: ["src/a.ts", "src/b.ts"],
             outcome: "FAIL",
             violationProbability: 0.91,
           },
@@ -551,7 +550,6 @@ describe("OpenCode sinks", () => {
             kind: "RULE",
             ruleId: "ARCH-001",
             severity: "error",
-            scopedPaths: ["src/a.ts", "src/b.ts"],
             outcome: "WARN",
             violationProbability: 0.4,
           },
@@ -559,7 +557,6 @@ describe("OpenCode sinks", () => {
             kind: "RULE",
             ruleId: null,
             severity: null,
-            scopedPaths: [],
             outcome: "UNAVAILABLE",
             reason: "JEV_FAILURE",
           },
@@ -567,7 +564,6 @@ describe("OpenCode sinks", () => {
             kind: "RULE",
             ruleId: null,
             severity: null,
-            scopedPaths: [],
             outcome: "SKIPPED",
             reason: "NO_SCOPE_MATCH",
           },
@@ -594,12 +590,34 @@ describe("OpenCode sinks", () => {
           kind: "BUILT_IN",
           checkId: "SCOPE-CREEP",
           severity: "error",
-          scopedPaths: ["src/a.ts", "src/b.ts"],
           outcome: "PASS",
           violationProbability: 0.2,
         },
       ],
     });
+  });
+
+  test("keeps paths out of the host log, including scoped paths and slice paths", async () => {
+    const client = new FakeLogWriter();
+    const sink = createOpenCodeLogSink(client);
+
+    await sink.write(toReviewLogEntry(reviewOf([slicedRuleResult(), builtInResult("FAIL", 0.9)])));
+
+    const record = client.calls[0];
+    const serialized = JSON.stringify(record);
+    const results = (record?.extra?.results ?? []) as readonly Record<string, unknown>[];
+
+    expect(serialized).not.toContain("src/a.ts");
+    expect(serialized).not.toContain("src/b.ts");
+    expect(serialized).not.toMatch(/scopedPaths|"path"|slices|evidence/);
+    expect(results.length).toBeGreaterThan(0);
+    for (const result of results) {
+      expect(Object.keys(result).sort()).toEqual(
+        expect.arrayContaining(["kind", "outcome", "severity"]),
+      );
+      expect(result).not.toHaveProperty("scopedPaths");
+      expect(result).not.toHaveProperty("evidence");
+    }
   });
 
   test("sends only kind and outcome for a review-level result", async () => {
