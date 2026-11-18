@@ -3,7 +3,10 @@
 Status: accepted — 2026-11-16 (issue #71); extended 2026-11-17 with F1, the hook's unit
 lifecycle. Accepted: the F0 payload contract (the host encodings typeset in
 `src/hook-payload.ts` and enforced by `test/hook-contract.test.ts`) and F1 (the lifecycle
-described below, implemented in `src/hook/`). F2–F4 stay as proposed: the decision below
+described below, implemented in `src/hook/`). F1 was started on the owner's delegation of
+2026-11-17 — "pode mergear oq der e decidir as proximas tasks baseado no que temos
+anotado de plano" — which handed the choice of the next slice to the plan recorded for it
+rather than to a new review of F0. F2–F4 stay as proposed: the decision below
 applies
 [ADR 0014](0014-claude-code-tool-attributed-turn-profile.md), the MCP fence of
 [ADR 0017](0017-mcp-calls-fenced-by-git-snapshot.md) and the project root of
@@ -76,8 +79,10 @@ the later slices cannot start from a looser contract:
   the install, and lands with F4.
 - **Broken pairing marks the unit.** A `PostToolUse` with no `PreToolUse`, a `PreToolUse`
   that never gets its `PostToolUse` (the refused calls of the captured session), or the
-  same half twice. `Stop` closes the unit; a turn replaced before its `Stop` keeps its
-  predecessor marked `TURN_NOT_CLOSED` and closed.
+  same half twice. A half with no counterpart is `TOOL_CALL_UNPAIRED`; a half of a call
+  already seen is `TOOL_CALL_DUPLICATED`, whichever half it is. `Stop` closes the unit; a
+  turn replaced before its `Stop` keeps its predecessor marked `TURN_NOT_CLOSED` and
+  closed.
 - **The state is local and bounded.** Under the `PLUGIN_DATA` directory the host gives the
   plugin hook: one append-only lifecycle file per session, keyed by a digest of the
   session id, plus a heartbeat. Lines hold ids, timestamps and closed codes — never a
@@ -85,9 +90,14 @@ the later slices cannot start from a looser contract:
   concurrent hooks only ever append, and a session idle for a day is swept. The file is
   only bounded away from an open unit, when the replayed state has none: the bound is the
   single read-modify-write of the file, and an append another hook makes beside it would
-  be lost with the replacement. The rewrite re-reads the file just before replacing it and
-  gives up on any sign that another hook wrote in between; the file then stays over its
-  bound, which costs a larger read and nothing else, until the next safe point.
+  be lost with the replacement. The rewrite and every append of the session share a short
+  write lock (a `lifecycle.lock` created exclusively, retried for about 50 ms, and broken
+  when it is older than five seconds), so no append can fall between the rewrite's re-read
+  and its rename. A hook that cannot take the lock never waits for long: the rewrite leaves
+  the file over its bound until the next safe point, which costs a larger read and nothing
+  else, and an append goes on exactly as it did before the lock existed. The rewrite also
+  re-reads the file just before replacing it and gives up on any sign that a writer that
+  bypassed the lock changed it.
 - **An unreadable line marks the unit it fell in.** A line that is not exactly one this
   slice wrote puts `STATE_DAMAGED` on the unit open at that point, or on the next unit to
   open when there was none, and that unit can only end `UNAVAILABLE`. The mark is
@@ -96,6 +106,22 @@ the later slices cannot start from a looser contract:
 - **The log is a closed code set.** The hook writes `{ code, event, at }` and nothing else;
   `prompt`, `last_assistant_message`, `transcript_path`, `cwd`, `tool_input` and
   `tool_response` never leave the decoder.
+
+### Gaps F1 leaves to F2
+
+Two cases leave no trace at all. Neither weakens a unit its own events marked — a unit can
+only be closed by the `Stop` that carries its ids — but both are recorded here so the next
+slice does not start from a stronger promise than the hook keeps:
+
+- **A call whose payload has no `session_id`.** The hook writes `PARSE_FAILED:MISSING_SESSION_ID`
+  to its log and keeps no state, because there is no session to mark. A unit open at that
+  moment can still close `TURN_CLOSED`, and the call it never saw is invisible. F2 has to
+  decide between a marker in the data directory that taints every open unit and leaving
+  the case uncovered on purpose.
+- **The same `PreToolUse` seen twice while it runs.** Two hooks of the same call can read
+  the same state before either appends, so both record a `CALL` and the duplication is not
+  charged to the unit. The host would have to repeat a `tool_use_id` in parallel for this
+  to happen; the lifecycle keeps the best pairing the file shows and does not guess.
 
 ## Alternatives considered
 
@@ -119,6 +145,9 @@ the later slices cannot start from a looser contract:
   at and comes with F4.
 - `SessionEnd` is best-effort and was missing from one captured run: `Stop` is the only
   closing event the adapter may rely on.
+- The write lock costs one exclusive create and one removal per hook, and the two writers
+  never overlap: the hook's own writes stay synchronous and it never blocks the host for
+  more than the retry window.
 - Hosted tools (`WebSearch`) never reach the hook path. Any such tool that one day writes
   a file would be invisible, which is why the tool classification stays closed and the
   unknown case is `UNAVAILABLE`.
