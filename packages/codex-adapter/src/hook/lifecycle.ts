@@ -155,7 +155,9 @@ function callStep(
     unit = { ...unit, calls: [...unit.calls, call] };
     lines.push({ v: 1, kind: "CALL", turn: unit.turnId, call: call.toolUseId });
   } else if (opening || existing === undefined || existing.paired) {
-    const reason: CodexTaintReason = opening ? "TOOL_CALL_DUPLICATED" : "TOOL_CALL_UNPAIRED";
+    // A half with no counterpart is unpaired; a half seen again is the same call twice.
+    const reason: CodexTaintReason =
+      existing === undefined ? "TOOL_CALL_UNPAIRED" : "TOOL_CALL_DUPLICATED";
 
     unit = { ...unit, taints: [...unit.taints, reason] };
     lines.push(taintLine(unit.turnId, reason));

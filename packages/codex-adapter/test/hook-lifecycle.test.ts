@@ -87,6 +87,14 @@ describe("a turn that the hook sees from its opening", () => {
     expect(codes).toContain("TOOL_CALL_DUPLICATED");
     expect(onlyUnit(state).taints).toEqual(["TOOL_CALL_DUPLICATED"]);
   });
+
+  test("calls a second Post a duplicate, not an unpaired half", () => {
+    const { state, codes } = run([open, pre("c-1"), post("c-1"), post("c-1"), close]);
+
+    expect(codes).toContain("TOOL_CALL_DUPLICATED");
+    expect(codes).not.toContain("TOOL_CALL_UNPAIRED");
+    expect(onlyUnit(state).taints).toEqual(["TOOL_CALL_DUPLICATED"]);
+  });
 });
 
 describe("a turn whose evidence cannot be complete", () => {
