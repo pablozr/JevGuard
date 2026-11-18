@@ -91,13 +91,16 @@ the later slices cannot start from a looser contract:
   only bounded away from an open unit, when the replayed state has none: the bound is the
   single read-modify-write of the file, and an append another hook makes beside it would
   be lost with the replacement. The rewrite and every append of the session share a short
-  write lock (a `lifecycle.lock` created exclusively, retried for about 50 ms, and broken
-  when it is older than five seconds), so no append can fall between the rewrite's re-read
-  and its rename. A hook that cannot take the lock never waits for long: the rewrite leaves
-  the file over its bound until the next safe point, which costs a larger read and nothing
-  else, and an append goes on exactly as it did before the lock existed. The rewrite also
-  re-reads the file just before replacing it and gives up on any sign that a writer that
-  bypassed the lock changed it.
+  write lock (a `lifecycle.lock` created exclusively, retried until a 50 ms deadline on the
+  clock — never a count of sleeps, which the platform rounds up to its timer granularity —
+  and broken when it is older than five seconds), so no append can fall between the
+  rewrite's re-read and its rename. The replacement is written before the lock is taken, so
+  the lock covers only the re-read and the rename, the two steps that must not be split. A
+  hook that cannot take the lock never waits for long: the rewrite leaves the file over its
+  bound until the next safe point, which costs a larger read and nothing else, and an append
+  goes on exactly as it did before the lock existed. The rewrite also re-reads the file just
+  before replacing it and gives up on any sign that a writer that bypassed the lock changed
+  it.
 - **An unreadable line marks the unit it fell in.** A line that is not exactly one this
   slice wrote puts `STATE_DAMAGED` on the unit open at that point, or on the next unit to
   open when there was none, and that unit can only end `UNAVAILABLE`. The mark is
@@ -123,6 +126,14 @@ slice does not start from a stronger promise than the hook keeps:
   charged to the unit. The host would have to repeat a `tool_use_id` in parallel for this
   to happen; the lifecycle keeps the best pairing the file shows and does not guess.
 
+The write lock has one race of its own, kept here for the same reason:
+
+- **A stale lock that two hooks break at once.** `breakStaleLock` stats the lock and then
+  removes it, so two hooks that find the same dead lock can have one remove the file the
+  other has just recreated and taken. It takes a lock left by a hook that died, five
+  seconds of silence, and two hooks retrying in the same instant; F2, which wants a lease
+  instead of age, inherits the case.
+
 ## Alternatives considered
 
 - **Review the repository diff at `Stop`.** Rejected: it is the worktree, not the turn,
@@ -147,7 +158,7 @@ slice does not start from a stronger promise than the hook keeps:
   closing event the adapter may rely on.
 - The write lock costs one exclusive create and one removal per hook, and the two writers
   never overlap: the hook's own writes stay synchronous and it never blocks the host for
-  more than the retry window.
+  more than the retry window — about 50 ms for each write that finds the lock held.
 - Hosted tools (`WebSearch`) never reach the hook path. Any such tool that one day writes
   a file would be invisible, which is why the tool classification stays closed and the
   unknown case is `UNAVAILABLE`.
