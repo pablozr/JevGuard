@@ -85,8 +85,9 @@ export function runCodexHook(stdin: string, dependencies: CodexHookDependencies)
   try {
     const state = readSessionState(sessionDirectory);
 
-    // Bounding the file rewrites it, so it only runs where no unit is open: a line another
-    // hook appends for an open unit would be lost with it. Damage stays where it fell.
+    // Bounding the file rewrites it, so it only runs where no unit is open and under the
+    // lock every append shares: a line another hook appends would otherwise be lost with
+    // the replacement. Damage stays where it fell.
     boundStateFile(sessionDirectory, state);
 
     const step = stepLifecycle(state, event, now);

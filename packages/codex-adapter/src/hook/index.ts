@@ -11,6 +11,8 @@ export {
   hookLogFileOf,
   keyOf,
   lifecycleFileOf,
+  LOCK_STALE_MS,
+  LOCK_WAIT_MS,
   MAX_LIFECYCLE_BYTES,
   readSessionState,
   SESSION_TTL_MS,

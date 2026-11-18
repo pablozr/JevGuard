@@ -2,33 +2,43 @@ import {
   appendFileSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
+  appendStateLines,
   boundStateFile,
   dataDirectoryOf,
   hookLogFileOf,
   lifecycleFileOf,
+  LOCK_STALE_MS,
   MAX_LIFECYCLE_BYTES,
   readSessionState,
   runCodexHook,
   sessionDirectoryOf,
+  sessionTaintLine,
 } from "../src/hook";
 import type { CodexSessionState } from "../src/hook";
 
 /**
- * The two ways the local state used to go quiet about something that happened: an append
- * another hook made while the file was being bounded, and an unreadable line that only
- * marked the unit it first appeared in. Both are guards — each one fails without its fix.
+ * The three ways the local state used to go quiet about something that happened: an append
+ * another hook made while the file was being bounded, the same append one system call
+ * later — between the re-read and the rename, where only the session's write lock covers
+ * it — and an unreadable line that only marked the unit it first appeared in. Each one is
+ * a guard: it fails without its fix.
  */
 
-/** Runs where the bounding rewrite writes its temporary file: another hook's append. */
-const seam = vi.hoisted(() => ({ appendWhileBounding: null as null | (() => void) }));
+/** Where the bounding rewrite can be interrupted by another hook, in one place or another. */
+const seam = vi.hoisted(() => ({
+  appendWhileBounding: null as null | (() => void),
+  appendBeforeRename: null as null | (() => void),
+}));
 
 vi.mock("node:fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs")>();
@@ -50,6 +60,23 @@ vi.mock("node:fs", async (importOriginal) => {
       }
 
       actual.writeFileSync(...args);
+    },
+    renameSync: (...args: Parameters<typeof actual.renameSync>): void => {
+      const [from, to] = args;
+      const append = seam.appendBeforeRename;
+
+      if (
+        append !== null &&
+        typeof from === "string" &&
+        from.endsWith(".tmp") &&
+        typeof to === "string" &&
+        to.includes("lifecycle.jsonl")
+      ) {
+        seam.appendBeforeRename = null;
+        append();
+      }
+
+      actual.renameSync(...args);
     },
   };
 });
@@ -116,6 +143,7 @@ beforeEach(() => {
 
 afterEach(() => {
   seam.appendWhileBounding = null;
+  seam.appendBeforeRename = null;
   rmSync(pluginData, { recursive: true, force: true });
 });
 
@@ -165,6 +193,47 @@ describe("bounding the lifecycle file", () => {
     expect(unit?.taints).toEqual(["UNSUPPORTED_EVENT"]);
     expect(logCodes()).toContain("UNIT_UNAVAILABLE");
     expect(logCodes()).not.toContain("TURN_CLOSED");
+  });
+
+  test("an append landing between the re-read and the rename is not dropped", () => {
+    fillWithClosedUnits(MAX_LIFECYCLE_BYTES + 2_000);
+
+    // The other hook appends at the last moment of the rewrite, past the re-read: only
+    // the lock it and the rewrite share can keep its line out of the replaced file.
+    seam.appendBeforeRename = () => {
+      appendStateLines(session, [sessionTaintLine("UNSUPPORTED_EVENT")]);
+    };
+
+    hook("UserPromptSubmit", { turn_id: "t-1" });
+
+    expect(readFileSync(lifecycle, "utf8")).toContain('"SESSION_TAINT"');
+
+    hook("PreToolUse", { turn_id: "t-1", tool_use_id: "c-1" });
+    hook("PostToolUse", { turn_id: "t-1", tool_use_id: "c-1" });
+    hook("Stop", { turn_id: "t-1" });
+
+    const unit = readSessionState(session).units.at(-1);
+
+    expect(unit?.turnId).toBe("t-1");
+    expect(unit?.taints).toEqual(["UNSUPPORTED_EVENT"]);
+    expect(logCodes()).toContain("UNIT_UNAVAILABLE");
+    expect(logCodes()).not.toContain("TURN_CLOSED");
+    expect(readdirSync(session)).not.toContain("lifecycle.lock");
+  });
+
+  test("a lock left by a hook that died is broken once it is old enough", () => {
+    hook("UserPromptSubmit", { turn_id: "t-1" });
+
+    const lock = join(session, "lifecycle.lock");
+    const longAgo = new Date(Date.now() - LOCK_STALE_MS - 1_000);
+
+    writeFileSync(lock, "");
+    utimesSync(lock, longAgo, longAgo);
+
+    hook("PreToolUse", { turn_id: "t-1", tool_use_id: "c-1" });
+
+    expect(readFileSync(lifecycle, "utf8")).toContain('"CALL"');
+    expect(readdirSync(session)).not.toContain("lifecycle.lock");
   });
 });
 
