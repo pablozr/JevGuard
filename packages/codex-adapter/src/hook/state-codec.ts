@@ -4,8 +4,10 @@ import type { CodexSessionState, CodexStateLine, CodexTaintReason, CodexUnitStat
  * Reads the session's lifecycle file back into units.
  *
  * The file is written by this slice alone, so a line that does not match exactly is a
- * damaged file, never a reason to guess: the state is marked damaged and every unit that
- * can still be read keeps only the taints it already had, plus `STATE_DAMAGED`.
+ * damaged file, never a reason to guess: `STATE_DAMAGED` is applied to the unit that was
+ * open where the unreadable line appeared, or to the next unit to open when there was
+ * none. A later unit never inherits an earlier unit's damage, and the mark is re-derived
+ * from the same line on every read, so it is logged once per unit it reaches.
  */
 
 const TAINTS: readonly CodexTaintReason[] = [
@@ -93,7 +95,7 @@ function updateOpenUnit(
   return true;
 }
 
-/** Replays the lines in order; a line that cannot be read marks the state damaged. */
+/** Replays the lines in order; a line that cannot be read marks the unit it fell in. */
 export function replayState(lines: readonly (CodexStateLine | null)[]): CodexSessionState {
   const units: CodexUnitState[] = [];
   let pendingTaints: CodexTaintReason[] = [];
@@ -102,6 +104,11 @@ export function replayState(lines: readonly (CodexStateLine | null)[]): CodexSes
   for (const line of lines) {
     if (line === null) {
       damaged = true;
+
+      if (!updateOpenUnit(units, (unit) => tainted(unit, ["STATE_DAMAGED"]))) {
+        pendingTaints = [...new Set([...pendingTaints, "STATE_DAMAGED" as const])];
+      }
+
       continue;
     }
 

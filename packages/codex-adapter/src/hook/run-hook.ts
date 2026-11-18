@@ -3,6 +3,7 @@ import { sessionTaintLine, stepLifecycle } from "./lifecycle";
 import { appendHookLog } from "./log";
 import {
   appendStateLines,
+  boundStateFile,
   dataDirectoryOf,
   readSessionState,
   removeSession,
@@ -10,12 +11,7 @@ import {
   sweepExpiredSessions,
   writeHeartbeat,
 } from "./state";
-import type {
-  CodexHookLogCode,
-  CodexSessionState,
-  CodexTaintReason,
-  CodexTurnEvent,
-} from "./types";
+import type { CodexHookLogCode, CodexTaintReason, CodexTurnEvent } from "./types";
 
 /**
  * One hook invocation, start to end: read what the host sent, keep the session's unit in
@@ -39,13 +35,6 @@ const HOST_EVENT_NAME: Readonly<Record<CodexTurnEvent["kind"], string>> = {
   TURN_CLOSE: "Stop",
   SESSION_END: "SessionEnd",
 };
-
-/** Whether the session already recorded this mark, so a damaged file is named once. */
-function hasTaint(state: CodexSessionState, reason: CodexTaintReason): boolean {
-  return (
-    state.pendingTaints.includes(reason) || state.units.some((unit) => unit.taints.includes(reason))
-  );
-}
 
 function failureCode(reason: string): CodexHookLogCode | `PARSE_FAILED:${string}` {
   return reason === "UNSUPPORTED_EVENT" ? "UNSUPPORTED_EVENT" : `PARSE_FAILED:${reason}`;
@@ -95,13 +84,14 @@ export function runCodexHook(stdin: string, dependencies: CodexHookDependencies)
 
   try {
     const state = readSessionState(sessionDirectory);
-    const damaged = state.damaged && !hasTaint(state, "STATE_DAMAGED");
+
+    // Bounding the file rewrites it, so it only runs where no unit is open: a line another
+    // hook appends for an open unit would be lost with it. Damage stays where it fell.
+    boundStateFile(sessionDirectory, state);
+
     const step = stepLifecycle(state, event, now);
-    const lines = damaged ? [sessionTaintLine("STATE_DAMAGED"), ...step.lines] : step.lines;
 
-    if (damaged) log("STATE_READ_FAILED");
-
-    appendStateLines(sessionDirectory, lines);
+    appendStateLines(sessionDirectory, step.lines);
     writeHeartbeat(sessionDirectory, now);
 
     if (event.kind === "SESSION_START") sweepExpiredSessions(dataDirectory, now, event.sessionId);

@@ -65,7 +65,6 @@ export type CodexHookLogCode =
   | "STATE_DAMAGED"
   | "PARSE_FAILED"
   | "STDIN_TOO_LARGE"
-  | "STATE_READ_FAILED"
   | "STATE_WRITE_FAILED"
   | "INTERNAL";
 
@@ -112,7 +111,10 @@ export interface CodexSessionState {
   readonly units: readonly CodexUnitState[];
   /** A session-level taint that has no unit yet, absorbed by the next one opened. */
   readonly pendingTaints: readonly CodexTaintReason[];
-  /** At least one line could not be read; nothing after it can be trusted. */
+  /**
+   * At least one line could not be read. The mark itself (`STATE_DAMAGED`) sits on the
+   * unit it fell in, not here: this only says the file was not readable end to end.
+   */
   readonly damaged: boolean;
 }
 

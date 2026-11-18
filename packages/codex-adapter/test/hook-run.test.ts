@@ -189,7 +189,7 @@ describe("what the hook does when it cannot read the host", () => {
     expect(logCodes()).toEqual([
       "SESSION_START",
       "TURN_OPENED",
-      "STATE_READ_FAILED",
+      "STATE_DAMAGED",
       "HOOK_NOT_TRUSTED",
       "UNIT_UNAVAILABLE",
     ]);

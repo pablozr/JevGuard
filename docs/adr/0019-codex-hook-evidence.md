@@ -82,7 +82,17 @@ the later slices cannot start from a looser contract:
   plugin hook: one append-only lifecycle file per session, keyed by a digest of the
   session id, plus a heartbeat. Lines hold ids, timestamps and closed codes — never a
   task, a path, a tool input or a diff. Every rule is decided by replaying the file, so
-  concurrent hooks only ever append, and a session idle for a day is swept.
+  concurrent hooks only ever append, and a session idle for a day is swept. The file is
+  only bounded away from an open unit, when the replayed state has none: the bound is the
+  single read-modify-write of the file, and an append another hook makes beside it would
+  be lost with the replacement. The rewrite re-reads the file just before replacing it and
+  gives up on any sign that another hook wrote in between; the file then stays over its
+  bound, which costs a larger read and nothing else, until the next safe point.
+- **An unreadable line marks the unit it fell in.** A line that is not exactly one this
+  slice wrote puts `STATE_DAMAGED` on the unit open at that point, or on the next unit to
+  open when there was none, and that unit can only end `UNAVAILABLE`. The mark is
+  re-derived from the same line on every read: it is logged once per unit it reaches and
+  never leaks into the units that follow it.
 - **The log is a closed code set.** The hook writes `{ code, event, at }` and nothing else;
   `prompt`, `last_assistant_message`, `transcript_path`, `cwd`, `tool_input` and
   `tool_response` never leave the decoder.

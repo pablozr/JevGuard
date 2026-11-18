@@ -5,6 +5,7 @@ export { MAX_STDIN_BYTES, readLimitedStdin } from "./read-stdin";
 export { runCodexHook, type CodexHookDependencies } from "./run-hook";
 export {
   appendStateLines,
+  boundStateFile,
   dataDirectoryOf,
   heartbeatFileOf,
   hookLogFileOf,

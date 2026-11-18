@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   appendFileSync,
   mkdirSync,
@@ -113,18 +113,62 @@ function newestLines(contents: string): string {
   return kept.length === 0 ? "" : `${kept.join("\n")}\n`;
 }
 
+/** A name only this process can hold, so two hooks writing at once never share a file. */
 function writeAtomic(path: string, text: string): void {
-  const temporary = `${path}.tmp`;
+  const temporary = `${path}.${randomUUID()}.tmp`;
 
   writeFileSync(temporary, text, { mode: FILE_MODE });
   renameSync(temporary, path);
 }
 
+function hasOpenUnit(state: CodexSessionState): boolean {
+  return state.units.at(-1)?.closedAt === null;
+}
+
 /**
- * Appends the event's lines as one write each, then bounds the file by keeping its newest
- * lines. Several hooks run at once on this host; an append is the only cross-process
- * write, and every rule is decided by replaying the file, so no reader holds a lock and
- * no update is a read-modify-write of another process's state.
+ * Keeps the lifecycle file under its bound, and only ever away from an open unit.
+ *
+ * Bounding is the one read-modify-write of this file, and every other hook of the session
+ * only appends: an append made between the read and the replacement would be dropped,
+ * which is how a mark goes missing. So the rewrite runs only when the state has no open
+ * unit, re-reads the file just before replacing it, and gives up on the first sign that
+ * another hook wrote in between. The file then stays over its bound, which costs nothing
+ * but a larger read, until the next safe point.
+ */
+export function boundStateFile(sessionDirectory: string, state: CodexSessionState): void {
+  if (hasOpenUnit(state)) return;
+
+  const file = lifecycleFileOf(sessionDirectory);
+  let before: string;
+
+  try {
+    before = readFileSync(file, "utf8");
+  } catch (error) {
+    if (isMissingPath(error)) return;
+
+    throw error;
+  }
+
+  if (Buffer.byteLength(before) <= MAX_LIFECYCLE_BYTES) return;
+
+  const temporary = `${file}.${randomUUID()}.tmp`;
+
+  writeFileSync(temporary, newestLines(before), { mode: FILE_MODE });
+
+  if (readFileSync(file, "utf8") !== before) {
+    rmSync(temporary, { force: true });
+
+    return;
+  }
+
+  renameSync(temporary, file);
+}
+
+/**
+ * Appends the event's lines as one write each. Several hooks run at once on this host; an
+ * append is the only cross-process write, and every rule is decided by replaying the file,
+ * so no reader holds a lock and no update is a read-modify-write of another process's
+ * state. Bounding the file is `boundStateFile`'s job, never an append's.
  */
 export function appendStateLines(sessionDirectory: string, lines: readonly CodexStateLine[]): void {
   if (lines.length === 0) return;
@@ -135,10 +179,6 @@ export function appendStateLines(sessionDirectory: string, lines: readonly Codex
   const payload = lines.map((line) => `${JSON.stringify(line)}\n`).join("");
 
   appendFileSync(file, payload, { mode: FILE_MODE });
-
-  if (statSync(file).size <= MAX_LIFECYCLE_BYTES) return;
-
-  writeAtomic(file, newestLines(readFileSync(file, "utf8")));
 }
 
 /** Records that the hook ran for this session; a failure only costs the `doctor` hint. */
