@@ -5,7 +5,8 @@
   "type": "module",
   "types": "./src/index.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./hook": "./src/hook/index.ts"
   },
   "scripts": {
     "format": "biome format --write .",
