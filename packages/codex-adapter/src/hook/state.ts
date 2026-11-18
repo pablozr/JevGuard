@@ -157,9 +157,15 @@ function breakStaleLock(lock: string): void {
  * rename. It is advisory and per session: exclusive creation is the only primitive, so a
  * lock left by a dead hook is broken by age rather than by a lease. Waiting stays under a
  * few dozen milliseconds on purpose: a hook must never stand in the host's way.
+ *
+ * The window is a deadline on the clock, never a count of sleeps: `Atomics.wait` rounds a
+ * 1 ms sleep up to the platform's timer granularity — about 15 ms on Windows — so counting
+ * loops turned the same 50 ms of retries into three quarters of a second.
  */
 function takeLock(lock: string): boolean {
-  for (let waited = 0; ; waited += 1) {
+  const deadline = performance.now() + LOCK_WAIT_MS;
+
+  for (;;) {
     try {
       closeSync(openSync(lock, "wx", FILE_MODE));
 
@@ -168,7 +174,7 @@ function takeLock(lock: string): boolean {
 
     breakStaleLock(lock);
 
-    if (waited >= LOCK_WAIT_MS) return false;
+    if (performance.now() >= deadline) return false;
 
     sleepSync(1);
   }
@@ -240,17 +246,23 @@ export function boundStateFile(sessionDirectory: string, state: CodexSessionStat
   if (Buffer.byteLength(before) <= MAX_LIFECYCLE_BYTES) return;
 
   const lock = lockFileOf(sessionDirectory);
+  const temporary = `${file}.${randomUUID()}.tmp`;
+
+  // The replacement is written before the lock is taken: it is the slow half of the
+  // rewrite, and holding the session's lock through it would make every append of the
+  // session wait on a write it gains nothing from waiting on.
+  writeFileSync(temporary, newestLines(before), { mode: FILE_MODE });
 
   // Another hook is writing right now: the file stays over its bound until the next one.
-  if (!takeLock(lock)) return;
+  if (!takeLock(lock)) {
+    rmSync(temporary, { force: true });
+
+    return;
+  }
 
   rewriting.add(file);
 
   try {
-    const temporary = `${file}.${randomUUID()}.tmp`;
-
-    writeFileSync(temporary, newestLines(before), { mode: FILE_MODE });
-
     if (readFileSync(file, "utf8") !== before) {
       rmSync(temporary, { force: true });
 

@@ -18,6 +18,7 @@ import {
   hookLogFileOf,
   lifecycleFileOf,
   LOCK_STALE_MS,
+  LOCK_WAIT_MS,
   MAX_LIFECYCLE_BYTES,
   readSessionState,
   runCodexHook,
@@ -27,11 +28,13 @@ import {
 import type { CodexSessionState } from "../src/hook";
 
 /**
- * The three ways the local state used to go quiet about something that happened: an append
+ * The ways the local state used to go quiet about something that happened: an append
  * another hook made while the file was being bounded, the same append one system call
  * later — between the re-read and the rename, where only the session's write lock covers
- * it — and an unreadable line that only marked the unit it first appeared in. Each one is
- * a guard: it fails without its fix.
+ * it — an unreadable line that only marked the unit it first appeared in, and a hook that
+ * stood in the host's way for three quarters of a second waiting for a lock it never got,
+ * because its window counted sleeps instead of milliseconds. Each one is a guard: it
+ * fails without its fix.
  */
 
 /** Where the bounding rewrite can be interrupted by another hook, in one place or another. */
@@ -123,6 +126,22 @@ function fillWithClosedUnits(size: number): void {
   }
 
   writeFileSync(lifecycle, `${lines.join("\n")}\n`);
+}
+
+/**
+ * Makes one sleep of the code under test last `times` what it asked for, the way a 1 ms
+ * `Atomics.wait` lasts about 15 ms on Windows. Undoes itself at the end of the test.
+ */
+function slowSleeps(times: number): () => void {
+  const original = Atomics.wait;
+  const slow = (array: Int32Array, index: number, value: number, timeout?: number): string =>
+    original(array, index, value, (timeout ?? 0) * times);
+
+  (Atomics as { wait: typeof Atomics.wait }).wait = slow as typeof Atomics.wait;
+
+  return () => {
+    (Atomics as { wait: typeof Atomics.wait }).wait = original;
+  };
 }
 
 function closedUnit(turnId: string): CodexSessionState["units"][number] {
@@ -234,6 +253,35 @@ describe("bounding the lifecycle file", () => {
 
     expect(readFileSync(lifecycle, "utf8")).toContain('"CALL"');
     expect(readdirSync(session)).not.toContain("lifecycle.lock");
+  });
+
+  test("a lock another hook holds is waited for by the clock, not by a count of sleeps", () => {
+    fillWithClosedUnits(MAX_LIFECYCLE_BYTES + 2_000);
+
+    const before = readFileSync(lifecycle, "utf8");
+    const lock = join(session, "lifecycle.lock");
+
+    // A lock taken this instant cannot be broken by age: every attempt fails, and the
+    // rewrite has to give up within its window.
+    writeFileSync(lock, "");
+
+    // A sleep of 1 ms lasts about 15 ms on Windows, which is what made a window counted in
+    // sleeps last three quarters of a second. Making every sleep ten times what it asks
+    // for shows the same difference on a platform whose sleeps are true milliseconds.
+    const restore = slowSleeps(10);
+    const started = performance.now();
+
+    try {
+      boundStateFile(session, { units: [closedUnit("t-9")], pendingTaints: [], damaged: false });
+    } finally {
+      restore();
+    }
+
+    const waited = performance.now() - started;
+
+    expect(waited).toBeLessThan(LOCK_WAIT_MS * 4);
+    expect(readFileSync(lifecycle, "utf8")).toBe(before);
+    expect(readdirSync(session)).toContain("lifecycle.lock");
   });
 });
 
