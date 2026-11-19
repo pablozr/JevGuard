@@ -1161,6 +1161,26 @@ describe("JevGuardPlugin event returns before background work", () => {
       TEST_ADEQUACY_ID,
     ]);
   });
+
+  test("a shutdown that cuts a review in flight closes the unit once and drops the late verdict", async () => {
+    const { runtime, presenter, jev } = harness();
+    jev.block = true;
+
+    send(runtime, turnEvents());
+    await jev.waitForActivations(2);
+
+    await runtime.abandon();
+
+    expect(presenter.reviews).toHaveLength(1);
+    expect(lastResults(presenter)).toEqual([reviewUnavailable(SESSION_ID, "REVIEW_INTERRUPTED")]);
+
+    jev.release();
+    await runtime.drain();
+
+    // The verdict that finished after the handoff is never presented: one unit, one line.
+    expect(presenter.reviews).toHaveLength(1);
+    expect(lastResults(presenter)[0]?.outcome).toBe("UNAVAILABLE");
+  });
 });
 
 describe("JevGuardPlugin operational failures", () => {
@@ -2543,6 +2563,29 @@ describe("JevGuardPlugin setup (2.2.x)", () => {
     expect(host.runAgentTransforms().list()).toEqual([]);
 
     await cleanup();
+  });
+
+  test("cleanup at the shutdown budget closes an in-flight review UNAVAILABLE instead of dropping it", async () => {
+    const values = harness();
+    values.jev.block = true;
+    const host = createFakeOpenCodeContext();
+    const { cleanup } = await startPlugin(host.context, values.dependencies, [], {
+      shutdownDrainMs: 20,
+    });
+
+    host.emit(hostEvent("started", SESSION_ID));
+    host.emit(hostEvent("succeeded", SESSION_ID));
+    await values.jev.waitForActivations(2);
+
+    await cleanup();
+
+    expect(values.presenter.reviews).toHaveLength(1);
+    expect(lastResults(values.presenter)).toEqual([
+      reviewUnavailable(SESSION_ID, "REVIEW_INTERRUPTED"),
+    ]);
+
+    values.jev.release();
+    await settle();
   });
 
   test("cleanup never throws when a registration fails to dispose", async () => {

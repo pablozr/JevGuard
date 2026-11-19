@@ -1,10 +1,23 @@
 import { unavailableReview } from "@jevguard/core";
-import type { OperationalEvent, OperationalLogSink } from "../index";
+import type {
+  OperationalEvent,
+  OperationalLogSink,
+  PresentationDelivery,
+  ReviewPresenter,
+} from "../index";
 import { presentReview } from "./present";
 import { createSessionIdleWaiter } from "./remediation/idle-waiter";
 import { reviewAttributedTurn } from "./review";
 import { parseTurnEvent } from "./turn-event";
-import type { PluginRuntime, PluginRuntimeDependencies } from "./types";
+import type { PluginRuntime, PluginRuntimeDependencies, ReviewDependencies } from "./types";
+
+/**
+ * Delivery reported to a caller that is no longer there. A unit closed by `abandon`
+ * has already been presented as `REVIEW_INTERRUPTED`; a verdict that arrives after
+ * that is dropped so the unit never carries two lines, and this value is never
+ * observed (presentation discards it).
+ */
+const DROPPED_DELIVERY: PresentationDelivery = { log: "DELIVERED", toast: "DELIVERED" };
 
 /**
  * Builds the plugin runtime for one setup. Each lifecycle event is handled at once:
@@ -34,6 +47,22 @@ export function createPluginRuntime(dependencies: PluginRuntimeDependencies): Pl
   const reviewDependencies = { ...dependencies, idle };
   let tail: Promise<void> = Promise.resolve();
   const backgroundJobs = new Set<Promise<void>>();
+  /** Units whose attribution or review still runs: a shutdown that cuts them owes a line each. */
+  const activeUnits = new Set<string>();
+  /** Units the shutdown already closed as `REVIEW_INTERRUPTED`: a late verdict is dropped. */
+  const interrupted = new Set<string>();
+
+  function presenterFor(sessionID: string): ReviewPresenter {
+    return {
+      present(review) {
+        if (interrupted.has(sessionID)) {
+          return Promise.resolve(DROPPED_DELIVERY);
+        }
+
+        return dependencies.presenter.present(review);
+      },
+    };
+  }
 
   function track(work: Promise<void>): void {
     const contained = work.then(ignore, ignore);
@@ -52,13 +81,14 @@ export function createPluginRuntime(dependencies: PluginRuntimeDependencies): Pl
     track(writeOperational(dependencies.operational, event));
   }
 
-  async function finish(sessionID: string): Promise<void> {
+  /** Returns whether a detached review job now owns the unit. */
+  async function finish(sessionID: string): Promise<boolean> {
     const attribution = await tracker.finish(sessionID);
 
     switch (attribution.status) {
       case "NONE":
       case "ALREADY_PROCESSED":
-        return;
+        return false;
       case "UNAVAILABLE":
         log({ kind: "ATTRIBUTION_UNAVAILABLE", reason: attribution.reason });
         track(
@@ -67,17 +97,23 @@ export function createPluginRuntime(dependencies: PluginRuntimeDependencies): Pl
             unavailableReview(sessionID, "MISSING_ATTRIBUTED_DIFF"),
           ),
         );
-        return;
-      case "ATTRIBUTED":
+        return false;
+      case "ATTRIBUTED": {
+        const unitDependencies: ReviewDependencies = {
+          ...reviewDependencies,
+          presenter: presenterFor(sessionID),
+        };
+
         track(
           reviewAttributedTurn(
             attribution.turn,
             sessionID,
             attribution.delivery,
-            reviewDependencies,
-          ),
+            unitDependencies,
+          ).finally(() => activeUnits.delete(sessionID)),
         );
-        return;
+        return true;
+      }
     }
   }
 
@@ -114,7 +150,14 @@ export function createPluginRuntime(dependencies: PluginRuntimeDependencies): Pl
         case "SUCCEEDED":
           openExecutions.delete(sessionID);
           idle.notifyIdle(sessionID);
-          enqueue(() => finish(sessionID));
+          // Active from the event itself: a shutdown may cut the unit before its turn
+          // in the queue comes.
+          activeUnits.add(sessionID);
+          enqueue(async () => {
+            if (!(await finish(sessionID))) {
+              activeUnits.delete(sessionID);
+            }
+          });
           return;
         case "ENDED_OTHER":
           openExecutions.delete(sessionID);
@@ -138,6 +181,22 @@ export function createPluginRuntime(dependencies: PluginRuntimeDependencies): Pl
 
         await Promise.all([...backgroundJobs]);
       }
+    },
+
+    async abandon() {
+      const units = [...activeUnits].filter((sessionID) => !interrupted.has(sessionID));
+
+      for (const sessionID of units) {
+        interrupted.add(sessionID);
+      }
+
+      activeUnits.clear();
+
+      await Promise.all(
+        units.map((sessionID) =>
+          presentReview(dependencies.presenter, unavailableReview(sessionID, "REVIEW_INTERRUPTED")),
+        ),
+      );
     },
   };
 }

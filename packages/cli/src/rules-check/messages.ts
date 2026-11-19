@@ -134,6 +134,8 @@ function hintFor(reason: SkippedReason | UnavailableReason): string | null {
   switch (reason) {
     case "JEV_FAILURE":
       return "Jev could not evaluate (credential or network). Run `jevguard doctor`.";
+    case "REVIEW_INTERRUPTED":
+      return "The host shut down before the review finished; nothing was judged for this unit.";
     case "BLOCKED_EVIDENCE":
       return "A scoped file is on the sensitive-path denylist or has a non-allowlisted extension; it was not sent.";
     case "SLICE_LIMIT_EXCEEDED":

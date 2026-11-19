@@ -25,4 +25,10 @@ export interface PluginRuntimeDependencies extends Omit<ReviewDependencies, "idl
 export interface PluginRuntime {
   onEvent(event: unknown): void;
   drain(): Promise<void>;
+  /**
+   * Stops waiting for detached work: every unit still in flight is presented once as
+   * `UNAVAILABLE/REVIEW_INTERRUPTED`, and a verdict that arrives afterwards is dropped
+   * so a unit never carries two lines. Used when the host shuts down mid-review.
+   */
+  abandon(): Promise<void>;
 }
