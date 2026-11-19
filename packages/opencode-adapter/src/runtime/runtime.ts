@@ -1,23 +1,10 @@
 import { unavailableReview } from "@jevguard/core";
-import type {
-  OperationalEvent,
-  OperationalLogSink,
-  PresentationDelivery,
-  ReviewPresenter,
-} from "../index";
-import { presentReview } from "./present";
+import type { OperationalEvent, OperationalLogSink, ReviewPresenter } from "../index";
+import { DROPPED_DELIVERY, presentReview } from "./present";
 import { createSessionIdleWaiter } from "./remediation/idle-waiter";
 import { reviewAttributedTurn } from "./review";
 import { parseTurnEvent } from "./turn-event";
 import type { PluginRuntime, PluginRuntimeDependencies, ReviewDependencies } from "./types";
-
-/**
- * Delivery reported to a caller that is no longer there. A unit closed by `abandon`
- * has already been presented as `REVIEW_INTERRUPTED`; a verdict that arrives after
- * that is dropped so the unit never carries two lines, and this value is never
- * observed (presentation discards it).
- */
-const DROPPED_DELIVERY: PresentationDelivery = { log: "DELIVERED", toast: "DELIVERED" };
 
 /**
  * Builds the plugin runtime for one setup. Each lifecycle event is handled at once:
@@ -51,6 +38,8 @@ export function createPluginRuntime(dependencies: PluginRuntimeDependencies): Pl
   const activeUnits = new Set<string>();
   /** Units the shutdown already closed as `REVIEW_INTERRUPTED`: a late verdict is dropped. */
   const interrupted = new Set<string>();
+  /** Units whose verdict line is being written right now: it will land, so no second line. */
+  const presenting = new Set<string>();
 
   function presenterFor(sessionID: string): ReviewPresenter {
     return {
@@ -59,12 +48,17 @@ export function createPluginRuntime(dependencies: PluginRuntimeDependencies): Pl
           return Promise.resolve(DROPPED_DELIVERY);
         }
 
-        return dependencies.presenter.present(review);
+        presenting.add(sessionID);
+
+        return dependencies.presenter.present(review).finally(() => {
+          presenting.delete(sessionID);
+          activeUnits.delete(sessionID);
+        });
       },
     };
   }
 
-  function track(work: Promise<void>): void {
+  function track(work: Promise<unknown>): void {
     const contained = work.then(ignore, ignore);
 
     backgroundJobs.add(contained);
@@ -184,7 +178,9 @@ export function createPluginRuntime(dependencies: PluginRuntimeDependencies): Pl
     },
 
     async abandon() {
-      const units = [...activeUnits].filter((sessionID) => !interrupted.has(sessionID));
+      const units = [...activeUnits].filter(
+        (sessionID) => !interrupted.has(sessionID) && !presenting.has(sessionID),
+      );
 
       for (const sessionID of units) {
         interrupted.add(sessionID);

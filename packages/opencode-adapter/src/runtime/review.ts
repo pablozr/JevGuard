@@ -9,7 +9,7 @@ import {
 } from "@jevguard/core";
 import { parsePolicyConfig } from "@jevguard/node-infra";
 import type { TurnDelivery } from "../index";
-import { presentReview } from "./present";
+import { DROPPED_DELIVERY, presentReview } from "./present";
 import { proposeForTurn } from "./remediation/propose";
 import { deliverOnce } from "./remediation/remediate";
 import type { ReviewDependencies } from "./types";
@@ -36,7 +36,14 @@ export async function reviewAttributedTurn(
     jev: dependencies.jev,
   });
 
-  await presentReview(dependencies.presenter, outcome.review);
+  const presentation = await presentReview(dependencies.presenter, outcome.review);
+
+  // The shutdown already closed this unit as `REVIEW_INTERRUPTED`: a late verdict must
+  // not open a proposer child session (in observe) or queue a message into a session
+  // that is going away (in agent) for a review nobody will read.
+  if (presentation === DROPPED_DELIVERY) {
+    return;
+  }
 
   const config = remediationConfigOf(outcome);
 
