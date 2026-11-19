@@ -87,7 +87,7 @@ export function createPluginRuntime(dependencies: PluginRuntimeDependencies): Pl
         log({ kind: "ATTRIBUTION_UNAVAILABLE", reason: attribution.reason });
         track(
           presentReview(
-            dependencies.presenter,
+            presenterFor(sessionID),
             unavailableReview(sessionID, "MISSING_ATTRIBUTED_DIFF"),
           ),
         );

@@ -1294,6 +1294,47 @@ describe("JevGuardPlugin event returns before background work", () => {
     expect(lastResults(values.presenter)[0]?.outcome).toBe("UNAVAILABLE");
   });
 
+  test("a late UNAVAILABLE attribution must not add a second line over the interrupted one", async () => {
+    const values = harness();
+    const tracker = values.dependencies.tracker;
+    let finishStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      finishStarted = resolve;
+    });
+    let releaseFinish!: () => void;
+    const finishGate = new Promise<void>((resolve) => {
+      releaseFinish = resolve;
+    });
+
+    tracker.finish = async () => {
+      finishStarted();
+      await finishGate;
+
+      // The attribution runs after the shutdown already closed the unit: evidence
+      // read mid-shutdown is what actually fails, so UNAVAILABLE is realistic.
+      return { status: "UNAVAILABLE" as const, reason: "DIFF_READ_FAILURE" as const };
+    };
+
+    send(values.runtime, turnEvents());
+    await started;
+
+    await values.runtime.abandon();
+
+    expect(values.presenter.reviews).toHaveLength(1);
+    expect(lastResults(values.presenter)).toEqual([
+      reviewUnavailable(SESSION_ID, "REVIEW_INTERRUPTED"),
+    ]);
+
+    releaseFinish();
+    await values.runtime.drain();
+
+    // One unit, one line: the late UNAVAILABLE must not write over the interrupted one.
+    expect(values.presenter.reviews).toHaveLength(1);
+    expect(lastResults(values.presenter)).toEqual([
+      reviewUnavailable(SESSION_ID, "REVIEW_INTERRUPTED"),
+    ]);
+  });
+
   test("a verdict dropped by the shutdown starts no proposer child session", async () => {
     const values = harness();
     errorFailSetup(values);
