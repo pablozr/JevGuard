@@ -19,6 +19,8 @@ import type {
   FeedbackMarkRequest,
   FeedbackMarkResult,
 } from "../src/feedback/types";
+import type { InitRequest, InitResult } from "../src/init/types";
+import type { ReplayRequest, ReplayResult } from "../src/replay/types";
 import type { RulesCheckRequest, RulesCheckResult } from "../src/rules-check/types";
 import { runCli } from "../src/run-cli";
 import type { SetupRequest, SetupResult } from "../src/setup/types";
@@ -152,6 +154,25 @@ class StubDependencies implements CliDependencies {
   };
   readonly setupRequests: SetupRequest[] = [];
   setupResult: SetupResult = { status: "APPLIED", lines: ["setup done"] };
+  readonly initRequests: InitRequest[] = [];
+  initResult: InitResult = {
+    status: "CREATED",
+    host: "opencode",
+    detection: {
+      host: "opencode",
+      status: "SUPPORTED",
+      version: "2.3.0",
+      supportedRange: ">=2.2.2 <2.4",
+    },
+    install: { status: "CHANGED", code: "INSTALLED", lines: ["registered"] },
+    rules: "CREATED",
+    rulesPath: "C:/repo/.jev/rules.md",
+    lines: ["init done"],
+  };
+  initError: Error | null = null;
+  readonly replayRequests: ReplayRequest[] = [];
+  replayResult: ReplayResult = { status: "REPLAYED", commits: [] };
+  replayError: Error | null = null;
   rulesCheckCalls = 0;
   rulesCheckError: Error | null = null;
   readonly rulesCheckRequests: RulesCheckRequest[] = [];
@@ -163,6 +184,22 @@ class StubDependencies implements CliDependencies {
   login(): Promise<LoginOutcome> {
     this.loginCalls += 1;
     return Promise.resolve(this.loginOutcome);
+  }
+
+  init(request: InitRequest): Promise<InitResult> {
+    this.initRequests.push(request);
+
+    return this.initError === null
+      ? Promise.resolve(this.initResult)
+      : Promise.reject(this.initError);
+  }
+
+  replay(request: ReplayRequest): Promise<ReplayResult> {
+    this.replayRequests.push(request);
+
+    return this.replayError === null
+      ? Promise.resolve(this.replayResult)
+      : Promise.reject(this.replayError);
   }
 
   install(host: HostId, scope: HostInstallScope): Promise<HostInstallOutcome> {

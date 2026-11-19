@@ -154,10 +154,10 @@ describe("parseSetupArguments", () => {
 });
 
 describe("starter rules", () => {
-  test("parse as one valid rule", () => {
+  test("parse as four valid example rules", () => {
     const results = parseRules(STARTER_RULES);
 
-    expect(results).toHaveLength(1);
+    expect(results).toHaveLength(4);
     expect(results.every((result) => result.status !== "INVALID")).toBe(true);
   });
 });
