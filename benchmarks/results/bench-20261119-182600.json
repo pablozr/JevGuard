@@ -1,0 +1,438 @@
+{
+  "schemaVersion": 1,
+  "disclaimer": "Author-labeled synthetic corpus; measures agreement with the labels, not production ground truth.",
+  "metadata": {
+    "runId": "bench-20261119-182600",
+    "generatedAt": "2026-11-19T18:26:00.090Z",
+    "corpusHash": "c5822e8838af904c",
+    "requestedModel": "jev-latest",
+    "returnedModels": {
+      "jev-1.14.0": 40
+    },
+    "repeat": 1,
+    "hosts": ["opencode", "claude-code"],
+    "probeCaseIds": [
+      "QUALITY-001/behavior-change-with-covering-test",
+      "SECRETS-001/hardcoded-api-key"
+    ],
+    "pricing": {
+      "inputUsdPerMillionTokens": 0.042,
+      "outputUsdPerMillionTokens": 0,
+      "source": "docs.typesafe.ai/models, read 2026-11-19: $42 per billion input tokens, output free"
+    }
+  },
+  "rules": [
+    {
+      "ruleId": "QUALITY-001",
+      "severity": "warning",
+      "cases": 5,
+      "evaluated": 5,
+      "unavailable": 0,
+      "cleanCases": 3,
+      "exact": 5,
+      "exactRate": 1,
+      "confusion": {
+        "falseAlarm": 0,
+        "hardFalsePositive": 0,
+        "falseNegative": 0,
+        "missedWarning": 0,
+        "overFire": 0
+      },
+      "latency": {
+        "count": 5,
+        "meanMs": 174,
+        "p50Ms": 170.1,
+        "p90Ms": 194.8,
+        "minMs": 161.9,
+        "maxMs": 194.8
+      },
+      "inputTokens": 3502,
+      "outputTokens": 105
+    },
+    {
+      "ruleId": "SECRETS-001",
+      "severity": "error",
+      "cases": 5,
+      "evaluated": 5,
+      "unavailable": 0,
+      "cleanCases": 2,
+      "exact": 5,
+      "exactRate": 1,
+      "confusion": {
+        "falseAlarm": 0,
+        "hardFalsePositive": 0,
+        "falseNegative": 0,
+        "missedWarning": 0,
+        "overFire": 0
+      },
+      "latency": {
+        "count": 5,
+        "meanMs": 175,
+        "p50Ms": 175.5,
+        "p90Ms": 198.5,
+        "minMs": 153.1,
+        "maxMs": 198.5
+      },
+      "inputTokens": 3482,
+      "outputTokens": 105
+    },
+    {
+      "ruleId": "SCOPE-001",
+      "severity": "warning",
+      "cases": 5,
+      "evaluated": 5,
+      "unavailable": 0,
+      "cleanCases": 3,
+      "exact": 5,
+      "exactRate": 1,
+      "confusion": {
+        "falseAlarm": 0,
+        "hardFalsePositive": 0,
+        "falseNegative": 0,
+        "missedWarning": 0,
+        "overFire": 0
+      },
+      "latency": {
+        "count": 5,
+        "meanMs": 180.9,
+        "p50Ms": 182.9,
+        "p90Ms": 197.6,
+        "minMs": 159.6,
+        "maxMs": 197.6
+      },
+      "inputTokens": 3633,
+      "outputTokens": 105
+    },
+    {
+      "ruleId": "API-001",
+      "severity": "warning",
+      "cases": 5,
+      "evaluated": 5,
+      "unavailable": 0,
+      "cleanCases": 3,
+      "exact": 5,
+      "exactRate": 1,
+      "confusion": {
+        "falseAlarm": 0,
+        "hardFalsePositive": 0,
+        "falseNegative": 0,
+        "missedWarning": 0,
+        "overFire": 0
+      },
+      "latency": {
+        "count": 5,
+        "meanMs": 178.4,
+        "p50Ms": 173.7,
+        "p90Ms": 223.4,
+        "minMs": 147.3,
+        "maxMs": 223.4
+      },
+      "inputTokens": 3447,
+      "outputTokens": 105
+    }
+  ],
+  "hostMeasurements": [
+    {
+      "host": "opencode",
+      "cases": [
+        {
+          "caseId": "QUALITY-001/behavior-change-with-covering-test",
+          "ruleId": "QUALITY-001",
+          "observed": "PASS",
+          "probability": 0.04,
+          "reason": null,
+          "latencyMs": 405.3026,
+          "inputTokens": 5075,
+          "outputTokens": 144
+        },
+        {
+          "caseId": "SECRETS-001/hardcoded-api-key",
+          "ruleId": "SECRETS-001",
+          "observed": "FAIL",
+          "probability": 0.99,
+          "reason": null,
+          "latencyMs": 376.69190000000026,
+          "inputTokens": 4270,
+          "outputTokens": 144
+        }
+      ],
+      "reviews": 2,
+      "latency": {
+        "count": 2,
+        "meanMs": 391,
+        "p50Ms": 376.7,
+        "p90Ms": 405.3,
+        "minMs": 376.7,
+        "maxMs": 405.3
+      },
+      "inputTokens": 9345,
+      "outputTokens": 288,
+      "responsesWithUsage": 10,
+      "meanInputTokensPerReview": 4672.5,
+      "meanOutputTokensPerReview": 144,
+      "costUsdPerReview": 0.000196245
+    },
+    {
+      "host": "claude-code",
+      "cases": [
+        {
+          "caseId": "QUALITY-001/behavior-change-with-covering-test",
+          "ruleId": "QUALITY-001",
+          "observed": "PASS",
+          "probability": 0.05,
+          "reason": null,
+          "latencyMs": 380.7393000000002,
+          "inputTokens": 5075,
+          "outputTokens": 144
+        },
+        {
+          "caseId": "SECRETS-001/hardcoded-api-key",
+          "ruleId": "SECRETS-001",
+          "observed": "FAIL",
+          "probability": 0.99,
+          "reason": null,
+          "latencyMs": 353.84379999999965,
+          "inputTokens": 4270,
+          "outputTokens": 144
+        }
+      ],
+      "reviews": 2,
+      "latency": {
+        "count": 2,
+        "meanMs": 367.3,
+        "p50Ms": 353.8,
+        "p90Ms": 380.7,
+        "minMs": 353.8,
+        "maxMs": 380.7
+      },
+      "inputTokens": 9345,
+      "outputTokens": 288,
+      "responsesWithUsage": 10,
+      "meanInputTokensPerReview": 4672.5,
+      "meanOutputTokensPerReview": 144,
+      "costUsdPerReview": 0.000196245
+    }
+  ],
+  "observations": [
+    {
+      "caseId": "API-001/additive-optional-field-documented",
+      "ruleId": "API-001",
+      "expected": "PASS",
+      "observed": "PASS",
+      "probability": 0.03,
+      "reason": null,
+      "latencyMs": 223.426,
+      "inputTokens": 719,
+      "outputTokens": 21
+    },
+    {
+      "caseId": "API-001/rename-kept-compatible-with-deprecated-alias",
+      "ruleId": "API-001",
+      "expected": "PASS",
+      "observed": "PASS",
+      "probability": 0.1,
+      "reason": null,
+      "latencyMs": 167.8714,
+      "inputTokens": 675,
+      "outputTokens": 21
+    },
+    {
+      "caseId": "API-001/breaking-rename-without-documentation",
+      "ruleId": "API-001",
+      "expected": "WARN",
+      "observed": "WARN",
+      "probability": 0.95,
+      "reason": null,
+      "latencyMs": 179.911,
+      "inputTokens": 687,
+      "outputTokens": 21
+    },
+    {
+      "caseId": "API-001/changed-public-default-without-documentation",
+      "ruleId": "API-001",
+      "expected": "WARN",
+      "observed": "WARN",
+      "probability": 0.81,
+      "reason": null,
+      "latencyMs": 173.71370000000002,
+      "inputTokens": 666,
+      "outputTokens": 21
+    },
+    {
+      "caseId": "API-001/new-command-additive-and-documented",
+      "ruleId": "API-001",
+      "expected": "PASS",
+      "observed": "PASS",
+      "probability": 0.02,
+      "reason": null,
+      "latencyMs": 147.2969999999999,
+      "inputTokens": 700,
+      "outputTokens": 21
+    },
+    {
+      "caseId": "QUALITY-001/behavior-change-with-covering-test",
+      "ruleId": "QUALITY-001",
+      "expected": "PASS",
+      "observed": "PASS",
+      "probability": 0.05,
+      "reason": null,
+      "latencyMs": 161.94489999999996,
+      "inputTokens": 817,
+      "outputTokens": 21
+    },
+    {
+      "caseId": "QUALITY-001/reformat-without-behavior-change",
+      "ruleId": "QUALITY-001",
+      "expected": "PASS",
+      "observed": "PASS",
+      "probability": 0.04,
+      "reason": null,
+      "latencyMs": 194.75330000000008,
+      "inputTokens": 610,
+      "outputTokens": 21
+    },
+    {
+      "caseId": "QUALITY-001/behavior-change-without-test",
+      "ruleId": "QUALITY-001",
+      "expected": "WARN",
+      "observed": "WARN",
+      "probability": 0.96,
+      "reason": null,
+      "latencyMs": 179.80050000000006,
+      "inputTokens": 632,
+      "outputTokens": 21
+    },
+    {
+      "caseId": "QUALITY-001/test-does-not-cover-the-change",
+      "ruleId": "QUALITY-001",
+      "expected": "WARN",
+      "observed": "WARN",
+      "probability": 0.83,
+      "reason": null,
+      "latencyMs": 170.07889999999998,
+      "inputTokens": 795,
+      "outputTokens": 21
+    },
+    {
+      "caseId": "QUALITY-001/refactor-covered-by-existing-tests",
+      "ruleId": "QUALITY-001",
+      "expected": "PASS",
+      "observed": "PASS",
+      "probability": 0.09,
+      "reason": null,
+      "latencyMs": 163.24119999999994,
+      "inputTokens": 648,
+      "outputTokens": 21
+    },
+    {
+      "caseId": "SCOPE-001/change-matches-the-task",
+      "ruleId": "SCOPE-001",
+      "expected": "PASS",
+      "observed": "PASS",
+      "probability": 0.03,
+      "reason": null,
+      "latencyMs": 159.64789999999994,
+      "inputTokens": 630,
+      "outputTokens": 21
+    },
+    {
+      "caseId": "SCOPE-001/mechanical-rename-required-by-the-task",
+      "ruleId": "SCOPE-001",
+      "expected": "PASS",
+      "observed": "PASS",
+      "probability": 0.03,
+      "reason": null,
+      "latencyMs": 197.6190999999999,
+      "inputTokens": 841,
+      "outputTokens": 21
+    },
+    {
+      "caseId": "SCOPE-001/unrequested-dependency-bump-and-formatting-sweep",
+      "ruleId": "SCOPE-001",
+      "expected": "WARN",
+      "observed": "WARN",
+      "probability": 0.96,
+      "reason": null,
+      "latencyMs": 178.08279999999968,
+      "inputTokens": 826,
+      "outputTokens": 21
+    },
+    {
+      "caseId": "SCOPE-001/unrequested-public-rename",
+      "ruleId": "SCOPE-001",
+      "expected": "WARN",
+      "observed": "WARN",
+      "probability": 0.87,
+      "reason": null,
+      "latencyMs": 186.53189999999995,
+      "inputTokens": 650,
+      "outputTokens": 21
+    },
+    {
+      "caseId": "SCOPE-001/test-only-change-for-the-task",
+      "ruleId": "SCOPE-001",
+      "expected": "PASS",
+      "observed": "PASS",
+      "probability": 0.03,
+      "reason": null,
+      "latencyMs": 182.85719999999992,
+      "inputTokens": 686,
+      "outputTokens": 21
+    },
+    {
+      "caseId": "SECRETS-001/hardcoded-api-key",
+      "ruleId": "SECRETS-001",
+      "expected": "FAIL",
+      "observed": "FAIL",
+      "probability": 0.98,
+      "reason": null,
+      "latencyMs": 182.41629999999986,
+      "inputTokens": 725,
+      "outputTokens": 21
+    },
+    {
+      "caseId": "SECRETS-001/database-url-with-password",
+      "ruleId": "SECRETS-001",
+      "expected": "FAIL",
+      "observed": "FAIL",
+      "probability": 0.99,
+      "reason": null,
+      "latencyMs": 198.51889999999958,
+      "inputTokens": 683,
+      "outputTokens": 21
+    },
+    {
+      "caseId": "SECRETS-001/secret-read-from-environment",
+      "ruleId": "SECRETS-001",
+      "expected": "PASS",
+      "observed": "PASS",
+      "probability": 0.04,
+      "reason": null,
+      "latencyMs": 153.11969999999974,
+      "inputTokens": 682,
+      "outputTokens": 21
+    },
+    {
+      "caseId": "SECRETS-001/placeholder-token-in-test-fixture",
+      "ruleId": "SECRETS-001",
+      "expected": "PASS",
+      "observed": "PASS",
+      "probability": 0.03,
+      "reason": null,
+      "latencyMs": 165.55169999999998,
+      "inputTokens": 741,
+      "outputTokens": 21
+    },
+    {
+      "caseId": "SECRETS-001/example-config-with-obvious-password",
+      "ruleId": "SECRETS-001",
+      "expected": "WARN",
+      "observed": "WARN",
+      "probability": 0.46,
+      "reason": null,
+      "latencyMs": 175.49260000000004,
+      "inputTokens": 651,
+      "outputTokens": 21
+    }
+  ]
+}

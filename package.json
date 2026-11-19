@@ -22,6 +22,7 @@
     "claude-artifact:publish:check": "bun packages/claude-code-plugin/scripts/build-artifact.ts && npm publish --dry-run ./packages/claude-code-plugin/dist --access public",
     "calibration:generate": "bun tools/calibration/main.ts generate",
     "calibration:run": "bun tools/calibration/main.ts run",
+    "benchmark": "bun tools/benchmark/main.ts run",
     "check": "pnpm format && pnpm lint && pnpm typecheck && pnpm test"
   },
   "devDependencies": {
