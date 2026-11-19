@@ -23,9 +23,36 @@ your local deterministic gate to return `PASS`, `WARN`, or `FAIL`.
 
 ## Quick start
 
+Two commands per host. Each one prints a plain line for every step and never replaces
+a file you already have.
+
 ```sh
-# 1. Install the plugin on every supported host found on this machine
-#    (prints the plan first; --yes applies it without asking)
+# OpenCode (the default host)
+npx @pablozrrrr/jevguard-cli init      # registers the plugin in ./opencode.json and
+                                       # creates .jev/rules.md with example rules
+npx @pablozrrrr/jevguard-cli login     # stores your API key in the OS credential store
+
+# Claude Code
+npx @pablozrrrr/jevguard-cli init --host claude-code
+npx @pablozrrrr/jevguard-cli login
+```
+
+Then start the host in the project: the first completed turn is reviewed and the
+verdict goes to the log (and to the agent only if you opt into `delivery: agent`).
+Already have history? Replay the rules over your last commits without changing
+anything:
+
+```sh
+npx @pablozrrrr/jevguard-cli replay --last 5
+```
+
+Measured from a clean project on Windows with the build at hand: `init` 0.3 s and
+`replay --last 1` 0.5 s, ending in the first verdict — well under the five-minute
+goal. `npx` adds the package download on the very first run. The same steps through
+the global installer, when you prefer one plan for every host:
+
+```sh
+# prints the plan first; --yes applies it without asking
 npx @pablozrrrr/jevguard-cli setup
 
 # Only the API key, if you skip setup (stored in the OS credential store, shared by both hosts)

@@ -40,7 +40,7 @@ export function nextSteps(
 
 const MARKERS = { PENDING: "[todo]", DONE: "[done]", SKIPPED: "[skip]" } as const;
 
-function describeDetection(extension: HostCliExtension, detection: HostDetection): string {
+export function describeDetection(extension: HostCliExtension, detection: HostDetection): string {
   const name = extension.displayName;
 
   switch (detection.status) {

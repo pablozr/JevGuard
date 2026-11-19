@@ -94,8 +94,9 @@ cli ─────────────────────────�
   `@jevguard/opencode-adapter/runtime`; `plugin` only wires it. The package ships no
   `bin`.
 - `cli` is the host-neutral command line (`@pablozrrrr/jevguard-cli`, bin `jevguard`,
-  runs on Node): `login`, `report`, `feedback`, `rules check`, `doctor`, `install` and
-  `setup`. Host-specific behavior (detect, install, doctor checks, the user config file)
+  runs on Node): `login`, `report`, `feedback`, `rules check`, `doctor`, `install`,
+  `init`, `replay` and `setup`. Host-specific behavior (detect, install, doctor checks,
+  the user config file)
   lives behind `HostCliExtension`: `opencode-adapter/src/cli` and
   `claude-code-plugin/src/cli` each export one extension, and `cli` imports them only
   through their `./cli` subpaths. `cli` never imports a host SDK, `plugin`,

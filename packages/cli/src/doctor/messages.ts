@@ -120,7 +120,7 @@ function describeRules(check: RulesCheck): DescribedCheck {
     case "RULES_MISSING":
       return checkLine(
         ".jev/rules.md is absent.",
-        checkHint("Create .jev/rules.md (the `jev-init` skill can draft it)."),
+        checkHint("Run `jevguard init` to create it with example rules."),
       );
     case "RULES_READ_FAILURE":
       return checkLine(

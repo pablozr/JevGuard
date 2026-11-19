@@ -393,9 +393,32 @@ See the [security model](./security.md) for exactly what it stores.
 
 ## CLI diagnostics and on-demand rule checks
 
-Two CLI commands work from the terminal, outside any agent turn. Both resolve the
+These commands work from the terminal, outside any agent turn. They resolve the
 project root as the first ancestor of the current directory that contains `.git` (a
 file or a directory), or the current directory when none does.
+
+### `jevguard init [--host <id>] [--global]`
+
+The one-command onboarding. It detects the host (OpenCode by default, `--host
+claude-code` for the other), registers the plugin in the project's host config
+(`opencode.json`, or the Claude Code plugin at project scope) and creates
+`.jev/rules.md` with four commented example rules: `QUALITY-001` (tests),
+`SECRETS-001`, `SCOPE-001` and `API-001`. `--global` registers the plugin at user
+scope instead. It never asks and never replaces an existing file; a host that is
+installed but outside the supported range is reported with the pin command and
+nothing is written. Exit codes: `0` when it set something up or found it in place,
+`2` when no supported host was found or the registration failed.
+
+### `jevguard replay [--last <1-50>] [--rule <id>] [--json]`
+
+Replays the repository rules over the newest commits, newest first (5 by default),
+so a project sees what JevGuard would have said before it reviews a live turn. Each
+commit's own patch is the unit and its subject is the task; merge commits and commits
+without a patch are listed as skipped. It writes nothing: no review history, no file,
+no repository change, and neither a diff nor a task reaches a log; the terminal shows
+a short revision, the verdict and each rule's outcome. It costs one Jev call per rule
+per reviewed commit, so `--last` is bounded to 50. Exit codes: `0` when it replayed,
+`1` for invalid arguments, `2` when Git could not be read or the Jev port failed.
 
 ### `jevguard setup [--host <id>] [--project] [--init] [--yes] [--agent-delivery]`
 

@@ -15,6 +15,8 @@ export const USAGE = [
   "Usage: jevguard login",
   `       jevguard install [--project] [--host <${HOST_CHOICE}>]`,
   `       jevguard setup [--host <${HOST_CHOICE}>] [--project] [--init] [--yes] [--agent-delivery]`,
+  `       jevguard init [--host <${HOST_CHOICE}>] [--global]`,
+  "       jevguard replay [--last <1-50>] [--rule <id>] [--json]",
   "       jevguard report [--json]",
   `       jevguard doctor [--json] [--host <${HOST_CHOICE}>]`,
   "       jevguard rules check --diff <file|-> [--task <text>] [--rule <id>] [--json]",
@@ -22,7 +24,7 @@ export const USAGE = [
   "       jevguard feedback <number> <right|wrong>",
   "",
   "`jev-init` and `jevguard-rules` are OpenCode skills, not CLI commands. Register",
-  "the plugin in opencode.json (or run `jevguard install`) and invoke them from",
+  "the plugin in opencode.json (or run `jevguard init`) and invoke them from",
   "OpenCode.",
 ].join("\n");
 

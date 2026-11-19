@@ -17,6 +17,9 @@ import {
   serializeFeedbackList,
 } from "./feedback/messages";
 import type { FeedbackListResult, FeedbackMarkRequest } from "./feedback/types";
+import { parseInitArguments } from "./init/arguments";
+import { INIT_FAILURE_MESSAGE } from "./init/messages";
+import type { InitResult } from "./init/types";
 import {
   describeLoginFailure,
   describeReport,
@@ -26,6 +29,14 @@ import {
   serializeReport,
   USAGE,
 } from "./messages";
+import { parseReplayArguments } from "./replay/arguments";
+import {
+  describeReplay,
+  REPLAY_FAILURE_MESSAGE,
+  REPLAY_USAGE,
+  serializeReplay,
+} from "./replay/messages";
+import type { ReplayResult } from "./replay/types";
 import { parseRulesCheckArguments } from "./rules-check/arguments";
 import { rulesCheckExitCode } from "./rules-check/exit-code";
 import {
@@ -66,6 +77,14 @@ export async function runCli(
 
   if (argv[0] === "setup") {
     return runSetupCommand(argv.slice(1), io, dependencies);
+  }
+
+  if (argv[0] === "init") {
+    return runInitCommand(argv.slice(1), io, dependencies);
+  }
+
+  if (argv[0] === "replay") {
+    return runReplayCommand(argv.slice(1), io, dependencies);
   }
 
   if (argv.length === 1 && argv[0] === "report") {
@@ -218,6 +237,79 @@ async function runSetupCommand(
   }
 
   return reportSetup(io, await dependencies.setup(request));
+}
+
+async function runInitCommand(
+  args: readonly string[],
+  io: CliIO,
+  dependencies: CliDependencies,
+): Promise<number> {
+  const request = parseInitArguments(args);
+
+  if (request === null) {
+    io.writeErr(USAGE);
+
+    return 1;
+  }
+
+  try {
+    return reportInit(io, await dependencies.init(request));
+  } catch {
+    io.writeErr(INIT_FAILURE_MESSAGE);
+
+    return 2;
+  }
+}
+
+function reportInit(io: CliIO, result: InitResult): number {
+  const message = result.lines.join("\n");
+
+  if (result.status === "NO_HOST" || result.status === "FAILED") {
+    io.writeErr(message);
+
+    return 2;
+  }
+
+  io.writeOut(message);
+
+  return 0;
+}
+
+async function runReplayCommand(
+  args: readonly string[],
+  io: CliIO,
+  dependencies: CliDependencies,
+): Promise<number> {
+  const parsed = parseReplayArguments(args);
+
+  if (parsed === null) {
+    io.writeErr(REPLAY_USAGE);
+
+    return 1;
+  }
+
+  let result: ReplayResult;
+
+  try {
+    result = await dependencies.replay(parsed.request);
+  } catch {
+    io.writeErr(REPLAY_FAILURE_MESSAGE);
+
+    return 2;
+  }
+
+  if (result.status === "FAILED") {
+    io.writeErr(describeReplay(result, parsed.request.last).join("\n"));
+    io.writeErr(REPLAY_FAILURE_MESSAGE);
+
+    return 2;
+  }
+
+  io.writeOut(
+    parsed.json ? serializeReplay(result) : describeReplay(result, parsed.request.last).join("\n"),
+  );
+
+  return 0;
 }
 
 function reportSetup(io: CliIO, result: SetupResult): number {
