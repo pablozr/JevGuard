@@ -1161,6 +1161,200 @@ describe("JevGuardPlugin event returns before background work", () => {
       TEST_ADEQUACY_ID,
     ]);
   });
+
+  test("a shutdown that cuts a review in flight closes the unit once and drops the late verdict", async () => {
+    const { runtime, presenter, jev } = harness();
+    jev.block = true;
+
+    send(runtime, turnEvents());
+    await jev.waitForActivations(2);
+
+    await runtime.abandon();
+
+    expect(presenter.reviews).toHaveLength(1);
+    expect(lastResults(presenter)).toEqual([reviewUnavailable(SESSION_ID, "REVIEW_INTERRUPTED")]);
+
+    jev.release();
+    await runtime.drain();
+
+    // The verdict that finished after the handoff is never presented: one unit, one line.
+    expect(presenter.reviews).toHaveLength(1);
+    expect(lastResults(presenter)[0]?.outcome).toBe("UNAVAILABLE");
+  });
+
+  test("a verdict already being written when shutdown hits is not joined by an interrupted line", async () => {
+    const values = harness();
+    errorFailSetup(values);
+    const presenter = values.presenter;
+    const original = presenter.present.bind(presenter);
+    let presentStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      presentStarted = resolve;
+    });
+    let releasePresent!: () => void;
+    const presentGate = new Promise<void>((resolve) => {
+      releasePresent = resolve;
+    });
+    let first = true;
+
+    presenter.present = async (review: TurnReview): Promise<PresentationDelivery> => {
+      if (first) {
+        first = false;
+        presentStarted();
+        await presentGate;
+      }
+
+      return original(review);
+    };
+
+    send(values.runtime, turnEvents());
+    await started;
+
+    // The line is on its way to disk: the shutdown must not claim the unit as unjudged.
+    await values.runtime.abandon();
+    expect(presenter.reviews).toHaveLength(0);
+
+    releasePresent();
+    await values.runtime.drain();
+
+    expect(presenter.reviews).toHaveLength(1);
+    expect(lastReview(presenter).summary.verdict).toBe("FAIL");
+  });
+
+  test("a unit already judged, only waiting on its remediation, keeps its verdict line", async () => {
+    const values = harness();
+    errorFailSetup(values);
+    const facade = values.proposalFacade;
+    const originalPrompt = facade.prompt.bind(facade);
+    let promptStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      promptStarted = resolve;
+    });
+    let releasePrompt!: () => void;
+    const promptGate = new Promise<void>((resolve) => {
+      releasePrompt = resolve;
+    });
+
+    facade.prompt = async (input: { readonly sessionID: string; readonly text: string }) => {
+      promptStarted();
+      await promptGate;
+
+      return originalPrompt(input);
+    };
+
+    send(values.runtime, turnEvents());
+    await started;
+
+    await values.runtime.abandon();
+
+    expect(values.presenter.reviews).toHaveLength(1);
+    expect(lastReview(values.presenter).summary.verdict).toBe("FAIL");
+
+    releasePrompt();
+    await values.runtime.drain();
+
+    expect(values.presenter.reviews).toHaveLength(1);
+    expect(lastReview(values.presenter).summary.verdict).toBe("FAIL");
+  });
+
+  test("a unit cut before its attribution ran still owes exactly one interrupted line", async () => {
+    const values = harness();
+    const tracker = values.dependencies.tracker;
+    const original = tracker.finish.bind(tracker);
+    let finishStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      finishStarted = resolve;
+    });
+    let releaseFinish!: () => void;
+    const finishGate = new Promise<void>((resolve) => {
+      releaseFinish = resolve;
+    });
+
+    tracker.finish = async (sessionID: string) => {
+      finishStarted();
+      await finishGate;
+
+      return original(sessionID);
+    };
+
+    send(values.runtime, turnEvents());
+    await started;
+
+    await values.runtime.abandon();
+
+    expect(values.presenter.reviews).toHaveLength(1);
+    expect(lastResults(values.presenter)).toEqual([
+      reviewUnavailable(SESSION_ID, "REVIEW_INTERRUPTED"),
+    ]);
+
+    releaseFinish();
+    await values.runtime.drain();
+
+    expect(values.presenter.reviews).toHaveLength(1);
+    expect(lastResults(values.presenter)[0]?.outcome).toBe("UNAVAILABLE");
+  });
+
+  test("a late UNAVAILABLE attribution must not add a second line over the interrupted one", async () => {
+    const values = harness();
+    const tracker = values.dependencies.tracker;
+    let finishStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      finishStarted = resolve;
+    });
+    let releaseFinish!: () => void;
+    const finishGate = new Promise<void>((resolve) => {
+      releaseFinish = resolve;
+    });
+
+    tracker.finish = async () => {
+      finishStarted();
+      await finishGate;
+
+      // The attribution runs after the shutdown already closed the unit: evidence
+      // read mid-shutdown is what actually fails, so UNAVAILABLE is realistic.
+      return { status: "UNAVAILABLE" as const, reason: "DIFF_READ_FAILURE" as const };
+    };
+
+    send(values.runtime, turnEvents());
+    await started;
+
+    await values.runtime.abandon();
+
+    expect(values.presenter.reviews).toHaveLength(1);
+    expect(lastResults(values.presenter)).toEqual([
+      reviewUnavailable(SESSION_ID, "REVIEW_INTERRUPTED"),
+    ]);
+
+    releaseFinish();
+    await values.runtime.drain();
+
+    // One unit, one line: the late UNAVAILABLE must not write over the interrupted one.
+    expect(values.presenter.reviews).toHaveLength(1);
+    expect(lastResults(values.presenter)).toEqual([
+      reviewUnavailable(SESSION_ID, "REVIEW_INTERRUPTED"),
+    ]);
+  });
+
+  test("a verdict dropped by the shutdown starts no proposer child session", async () => {
+    const values = harness();
+    errorFailSetup(values);
+    values.jev.block = true;
+
+    send(values.runtime, turnEvents());
+    await values.jev.waitForActivations(2);
+
+    await values.runtime.abandon();
+    values.jev.release();
+    await values.runtime.drain();
+
+    // The interrupted line is the unit's only line, and a review nobody will read never
+    // creates, navigates, or prompts a child session on a host that is going away.
+    expect(values.presenter.reviews).toHaveLength(1);
+    expect(lastResults(values.presenter)[0]?.outcome).toBe("UNAVAILABLE");
+    expect(values.proposalFacade.created).toEqual([]);
+    expect(values.proposalFacade.prompts).toEqual([]);
+    expect(values.navigator.calls).toEqual([]);
+  });
 });
 
 describe("JevGuardPlugin operational failures", () => {
@@ -2543,6 +2737,29 @@ describe("JevGuardPlugin setup (2.2.x)", () => {
     expect(host.runAgentTransforms().list()).toEqual([]);
 
     await cleanup();
+  });
+
+  test("cleanup at the shutdown budget closes an in-flight review UNAVAILABLE instead of dropping it", async () => {
+    const values = harness();
+    values.jev.block = true;
+    const host = createFakeOpenCodeContext();
+    const { cleanup } = await startPlugin(host.context, values.dependencies, [], {
+      shutdownDrainMs: 20,
+    });
+
+    host.emit(hostEvent("started", SESSION_ID));
+    host.emit(hostEvent("succeeded", SESSION_ID));
+    await values.jev.waitForActivations(2);
+
+    await cleanup();
+
+    expect(values.presenter.reviews).toHaveLength(1);
+    expect(lastResults(values.presenter)).toEqual([
+      reviewUnavailable(SESSION_ID, "REVIEW_INTERRUPTED"),
+    ]);
+
+    values.jev.release();
+    await settle();
   });
 
   test("cleanup never throws when a registration fails to dispose", async () => {

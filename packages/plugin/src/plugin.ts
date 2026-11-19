@@ -44,6 +44,13 @@ import { readBundledSkills, registerSkills } from "./skills/register-skills";
 import { resolveInstalledSkillDirectories } from "./skills/skill-directory";
 
 const PLUGIN_ID = "jevguard";
+
+/**
+ * How long shutdown waits for reviews in flight. The host kills the server on a short
+ * grace after unloading plugins (three seconds in the 2.2.x/2.3.x CLI), so this stays
+ * well inside it: whatever is still running at the cap is closed as an interrupted unit
+ * rather than extended.
+ */
 const SHUTDOWN_DRAIN_MS = 2_000;
 
 type Registration = { readonly dispose: () => Promise<void> };
@@ -126,6 +133,11 @@ export function createPluginDependencies(
   };
 }
 
+/** Options for one setup; `shutdownDrainMs` exists for tests of the interrupted path. */
+export interface StartPluginOptions {
+  readonly shutdownDrainMs?: number;
+}
+
 /**
  * Wires a runtime into the host: the proposer retry guard, write-tool path tracking,
  * the bundled skills, and the lifecycle event loop. Returns the cleanup, which stops
@@ -135,6 +147,7 @@ export async function startPlugin(
   context: Plugin.Context,
   dependencies: PluginRuntimeDependencies,
   skillDirectories: readonly string[],
+  options: StartPluginOptions = {},
 ): Promise<{ readonly runtime: PluginRuntime; readonly cleanup: () => Promise<void> }> {
   const root = context.location.project.canonical;
   const runtime = createPluginRuntime(dependencies);
@@ -172,7 +185,17 @@ export async function startPlugin(
       abort.abort();
 
       try {
-        await Promise.race([Promise.all([loop, runtime.drain()]), delay(SHUTDOWN_DRAIN_MS)]);
+        const drained = await Promise.race([
+          Promise.all([loop, runtime.drain()]).then(() => true),
+          delay(options.shutdownDrainMs ?? SHUTDOWN_DRAIN_MS).then(() => false),
+        ]);
+
+        // The host ends the process a few seconds after it asks plugins to unload, so a
+        // review still waiting on Jev here is cut. Close it with one typed line instead
+        // of letting the unit vanish from the history.
+        if (!drained) {
+          await runtime.abandon();
+        }
       } catch {
         // Shutdown never throws into the host.
       }

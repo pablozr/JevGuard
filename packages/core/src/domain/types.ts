@@ -97,7 +97,8 @@ export type UnavailableReason =
   | "OVERSIZED_DIFF"
   | "BLOCKED_EVIDENCE"
   | "SLICE_LIMIT_EXCEEDED"
-  | "JEV_FAILURE";
+  | "JEV_FAILURE"
+  | "REVIEW_INTERRUPTED";
 
 /**
  * Gate result for a rule that reached Jev. `violationProbability` is the raw Noul
