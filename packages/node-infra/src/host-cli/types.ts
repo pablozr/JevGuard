@@ -62,6 +62,10 @@ export interface HostDetection {
   readonly status: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN_VERSION" | "NOT_FOUND";
   readonly version: string | null;
   readonly supportedRange: string;
+  /** The newest supported line, when the probe named one. */
+  readonly latestSupported?: string;
+  /** How to pin that line, when the probe named one. */
+  readonly pinCommand?: string;
 }
 
 export type HostInstallScope = "global" | "project";
@@ -93,6 +97,10 @@ export interface HostVersionProbe {
   readonly command: string;
   readonly range: string;
   readonly timeoutMs: number;
+  /** The newest supported line (`2.3.x`), named when the installed version is unsupported. */
+  readonly latestSupported?: string;
+  /** How to pin that line, named when the installed version is unsupported. */
+  readonly pinCommand?: string;
 }
 
 /** How a host's version check is named and worded in `doctor`. */

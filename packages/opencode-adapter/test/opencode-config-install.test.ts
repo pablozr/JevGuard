@@ -10,6 +10,8 @@ import {
   install,
   JEVGUARD_PLUGIN_ENTRY,
   OPENCODE_ENGINE_RANGE,
+  OPENCODE_LATEST_SUPPORTED,
+  OPENCODE_PIN_COMMAND,
   resolveConfigPath,
 } from "../src/index";
 import type { ConfigFileSystem, InstallDependencies, InstallTarget } from "../src/index";
@@ -190,10 +192,12 @@ describe("checkOpenCodeVersion", () => {
     ["2.2.2", "SUPPORTED"],
     ["opencode 2.2.9\n", "SUPPORTED"],
     ["2.2.1", "UNSUPPORTED"],
-    ["2.3.0", "UNSUPPORTED"],
+    ["2.3.0", "SUPPORTED"],
+    ["2.3.9", "SUPPORTED"],
+    ["2.4.0", "UNSUPPORTED"],
     ["2.1.1", "UNSUPPORTED"],
     ["3.2.2", "UNSUPPORTED"],
-    ["2.2.3-beta.1", "UNSUPPORTED"],
+    ["2.3.1-beta.1", "UNSUPPORTED"],
   ] as const)("classifies %j as %s", (output, status) => {
     expect(checkOpenCodeVersion(output).status).toBe(status);
   });
@@ -204,7 +208,12 @@ describe("checkOpenCodeVersion", () => {
   });
 
   test("names the range the package declares", () => {
-    expect(OPENCODE_ENGINE_RANGE).toBe(">=2.2.2 <2.3");
+    expect(OPENCODE_ENGINE_RANGE).toBe(">=2.2.2 <2.4");
+  });
+
+  test("names the newest supported line and how to pin it", () => {
+    expect(OPENCODE_LATEST_SUPPORTED).toBe("2.3.x");
+    expect(OPENCODE_PIN_COMMAND).toBe("npm install --global @opencode/cli@2.3");
   });
 });
 

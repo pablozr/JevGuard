@@ -2,7 +2,7 @@
 name: jev-init
 description: Use when a repository has no JevGuard policy yet and the user wants to bootstrap `.jev/rules.md` and `.jev/config.yaml` from explicit constraints and strong local evidence. Bounded, read-only inventory; stops if either file already exists; previews both files and requires explicit confirmation before writing. Do not use to edit an existing policy, for credentials, or to run a review.
 license: MIT
-compatibility: opencode >=2.2.2 <2.3
+compatibility: opencode >=2.2.2 <2.4
 ---
 
 # JevGuard init

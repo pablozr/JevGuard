@@ -61,7 +61,7 @@ const FORBIDDEN_DEPENDENCIES = [
   "@opencode-ai/sdk",
 ];
 /** Host-provided packages: declared as peers, never bundled or listed as dependencies. */
-const EXPECTED_PEER_DEPENDENCIES = { "@opencode/plugin": "2.2.2", effect: "4.0.6" };
+const EXPECTED_PEER_DEPENDENCIES = { "@opencode/plugin": ">=2.2.2 <2.4", effect: "4.0.6" };
 const EXPECTED_REPOSITORY = {
   type: "git",
   url: "git+https://github.com/pablozr/JevGuard.git",
@@ -69,7 +69,7 @@ const EXPECTED_REPOSITORY = {
 };
 const EXPECTED_HOMEPAGE = "https://github.com/pablozr/JevGuard#readme";
 const EXPECTED_BUGS = { url: "https://github.com/pablozr/JevGuard/issues" };
-const EXPECTED_ENGINES = { bun: ">=1.1.0", opencode: ">=2.2.2 <2.3" };
+const EXPECTED_ENGINES = { bun: ">=1.1.0", opencode: ">=2.2.2 <2.4" };
 const EXPECTED_PUBLISH_CONFIG = { access: "public", registry: "https://registry.npmjs.org" };
 
 const LOCAL_SHIM = 'export { default } from "@pablozrrrr/jevguard";\n';

@@ -26,3 +26,4 @@ consequences; later records can supersede earlier ones. References to "SPEC" or
 | [0017](0017-mcp-calls-fenced-by-git-snapshot.md) | MCP calls are fenced by the same Git snapshot as the shell | Accepted |
 | [0018](0018-project-root-from-the-edited-repository.md) | A unit's project root is the repository its files belong to | Accepted |
 | [0019](0019-codex-hook-evidence.md) | Codex hook evidence follows the Claude Code turn profile | Accepted |
+| [0020](0020-opencode-2.3-supported-line.md) | OpenCode 2.3 is a supported line alongside 2.2 | Accepted |

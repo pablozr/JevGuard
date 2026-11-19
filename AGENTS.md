@@ -81,8 +81,8 @@ cli ─────────────────────────�
   the host's `PLUGIN_DATA`, and a log of closed codes. It acquires no evidence, calls no
   Jev and produces no verdict yet; Git fences, review, install and `doctor --host codex`
   arrive with the next slices. Hooks never write to stdout or stderr.
-- `plugin` is composition plus the single public OpenCode 2.2.x server plugin entrypoint
-  (V2 `Plugin.Plugin`, engine range `>=2.2.2 <2.3`). It registers the bundled
+- `plugin` is composition plus the single public OpenCode 2.2.x/2.3.x server plugin
+  entrypoint (V2 `Plugin.Plugin`, engine range `>=2.2.2 <2.4`). It registers the bundled
   `jevguard-rules` and `jev-init` skills through `skill.transform`; there is no command
   hook and no apply path. In `observe` (the default) a `FAIL` prepares one strategy-only
   proposal in a deny-all child session. Only when the user's own `opencode.yaml` opts

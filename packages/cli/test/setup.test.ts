@@ -286,6 +286,30 @@ describe("runSetup", () => {
     expect(memory.writes).toEqual([]);
   });
 
+  test("an unsupported host names the newest supported line and how to pin it", async () => {
+    const host = fakeHost({ id: "opencode", fileName: "opencode.yaml", detection: "UNSUPPORTED" });
+    const extension: HostCliExtension = {
+      ...host.extension,
+      detect: async () => ({
+        host: "opencode",
+        status: "UNSUPPORTED",
+        version: "2.4.0",
+        supportedRange: ">=2.2.2 <2.4",
+        latestSupported: "2.3.x",
+        pinCommand: "npm install --global @opencode/cli@2.3",
+      }),
+    };
+    const { ports } = scenario({ hosts: [extension] });
+
+    const result = await runSetup(ports, { ...REQUEST, yes: true, init: true });
+
+    expect(result.status).toBe("NO_HOST");
+    expect(result.lines.join("\n")).toContain(
+      "[skip] OpenCode 2.4.0: unsupported (needs >=2.2.2 <2.4, latest 2.3.x), skipped; " +
+        "pin it with `npm install --global @opencode/cli@2.3`.",
+    );
+  });
+
   test("reports NOTHING_TO_DO when everything is already in place", async () => {
     const host = fakeHost({ id: "opencode", fileName: "opencode.yaml", state: "INSTALLED" });
     const { ports, logins } = scenario({

@@ -30,7 +30,12 @@ export async function detectHostVersion(
   });
   const output = result.kind === "EXITED" && result.exitCode === 0 ? result.stdout : null;
   const version = parseVersion(output);
-  const base = { host: probe.host, supportedRange: probe.range } as const;
+  const base = {
+    host: probe.host,
+    supportedRange: probe.range,
+    ...(probe.latestSupported === undefined ? {} : { latestSupported: probe.latestSupported }),
+    ...(probe.pinCommand === undefined ? {} : { pinCommand: probe.pinCommand }),
+  } as const;
 
   if (version === null) {
     return { ...base, status: output === null ? "NOT_FOUND" : "UNKNOWN_VERSION", version: null };
@@ -70,7 +75,7 @@ function describeVersion(
     case "UNSUPPORTED":
       return checkLine(
         `${displayName} ${detection.version} is not supported.`,
-        checkHint(`JevGuard needs ${displayName} ${range}.`),
+        checkHint(describeUnsupportedHint(detection, displayName, range)),
       );
     case "UNKNOWN_VERSION":
     case "NOT_FOUND":
@@ -79,4 +84,21 @@ function describeVersion(
         checkHint(`Check that ${displayName} ${range} is installed and on PATH.`),
       );
   }
+}
+
+/**
+ * The unsupported hint names the newest supported line and how to pin it when the probe
+ * supplied them, so a user on a newer host knows what to install and has a command for it.
+ */
+function describeUnsupportedHint(
+  detection: HostDetection,
+  displayName: string,
+  range: string,
+): string {
+  const latest = detection.latestSupported;
+  const line = latest === undefined ? "" : ` The newest supported line is ${latest}.`;
+  const pin = detection.pinCommand;
+  const how = pin === undefined ? "" : ` To pin it: ${pin}.`;
+
+  return `JevGuard needs ${displayName} ${range}.${line}${how}`;
 }

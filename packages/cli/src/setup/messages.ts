@@ -49,10 +49,20 @@ function describeDetection(extension: HostCliExtension, detection: HostDetection
     case "UNKNOWN_VERSION":
       return `${name}: version could not be read, skipped`;
     case "UNSUPPORTED":
-      return `${name} ${detection.version}: unsupported (needs ${detection.supportedRange}), skipped`;
+      return `${name} ${detection.version}: unsupported (needs ${detection.supportedRange}${describeLatest(detection)}), skipped${describePin(detection)}`;
     case "SUPPORTED":
       return `${name} ${detection.version}: supported`;
   }
+}
+
+/** Names the newest supported line inside the parenthesis, when the host supplies it. */
+function describeLatest(detection: HostDetection): string {
+  return detection.latestSupported === undefined ? "" : `, latest ${detection.latestSupported}`;
+}
+
+/** Names the command that pins that line, when the host supplies one. */
+function describePin(detection: HostDetection): string {
+  return detection.pinCommand === undefined ? "" : `; pin it with \`${detection.pinCommand}\``;
 }
 
 function describeDelivery(

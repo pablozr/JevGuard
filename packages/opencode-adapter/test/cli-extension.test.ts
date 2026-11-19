@@ -95,7 +95,8 @@ describe("OpenCode CLI extension detect", () => {
   test.each([
     ["2.2.2\n", "SUPPORTED", "2.2.2"],
     ["2.1.1", "UNSUPPORTED", "2.1.1"],
-    ["2.3.0", "UNSUPPORTED", "2.3.0"],
+    ["2.3.0", "SUPPORTED", "2.3.0"],
+    ["2.4.0", "UNSUPPORTED", "2.4.0"],
   ] as const)("classifies %j", async (stdout, status, version) => {
     const processes = new FakeProcesses(exited(stdout));
 
@@ -237,8 +238,10 @@ describe("OpenCode CLI extension doctor", () => {
   test.each([
     ["2.2.2\n", "OK", "VERSION_SUPPORTED", "2.2.2"],
     ["2.2.7", "OK", "VERSION_SUPPORTED", "2.2.7"],
+    ["2.3.0", "OK", "VERSION_SUPPORTED", "2.3.0"],
+    ["2.3.9", "OK", "VERSION_SUPPORTED", "2.3.9"],
     ["2.1.1", "FAIL", "VERSION_UNSUPPORTED", "2.1.1"],
-    ["2.3.0", "FAIL", "VERSION_UNSUPPORTED", "2.3.0"],
+    ["2.4.0", "FAIL", "VERSION_UNSUPPORTED", "2.4.0"],
   ] as const)("classifies the version output %j", async (stdout, status, code, version) => {
     const [, versionCheck] = await doctor(new FakeFiles(), new FakeProcesses(exited(stdout)));
 
@@ -266,6 +269,23 @@ describe("OpenCode CLI extension doctor", () => {
     const text = `${versionCheck?.message}\n${versionCheck?.annotation}`;
 
     expect(text).toContain("OpenCode 2.1.1 is not supported.");
-    expect(text).toContain(">=2.2.2 <2.3");
+    expect(text).toContain(">=2.2.2 <2.4");
+  });
+
+  test("the unsupported hint names the newest supported line and how to pin it", async () => {
+    const [, versionCheck] = await doctor(new FakeFiles(), new FakeProcesses(exited("2.4.0")));
+
+    const text = `${versionCheck?.message}\n${versionCheck?.annotation}`;
+
+    expect(text).toContain("OpenCode 2.4.0 is not supported.");
+    expect(text).toContain("The newest supported line is 2.3.x.");
+    expect(text).toContain("To pin it: npm install --global @opencode/cli@2.3.");
+  });
+
+  test("a supported 2.3.x host needs no pin advice", async () => {
+    const [, versionCheck] = await doctor(new FakeFiles(), new FakeProcesses(exited("2.3.0")));
+
+    expect(versionCheck?.message).toContain("OpenCode 2.3.0 is supported.");
+    expect(versionCheck?.annotation).toBeNull();
   });
 });
