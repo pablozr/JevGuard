@@ -435,7 +435,7 @@ A local diagnosis: no network, no Jev transport, no writes. Checks, in order:
 | `claude-node` | `VERSION_SUPPORTED`, `VERSION_UNSUPPORTED`, `VERSION_UNKNOWN` |
 
 A missing credential, missing or invalid rules, an invalid or unreadable config, and an
-OpenCode version outside `>=2.2.2 <2.3` (pre-releases included) are `FAIL`. An
+OpenCode version outside `>=2.2.2 <2.4` (pre-releases included) are `FAIL`. An
 unregistered or uninspectable OpenCode plugin is `WARN`, and so is an OpenCode version
 that `opencode --version` could not report, and a check skipped because the other
 policy file could not be read. The overall status is the worst check. The OpenCode
@@ -638,9 +638,11 @@ proposal in the child session but never another automatic delivery, so there is 
 At most 3 messages are sent per session for the plugin's lifetime, and a message that did
 not reach the agent does not count.
 
-### OpenCode 2.2.x scope
+### OpenCode 2.2.x and 2.3.x scope
 
-- The plugin requires OpenCode `2.2.2` or later within `2.2.x` (`>=2.2.2 <2.3`).
+- The plugin requires OpenCode `2.2.2` or later, within `2.2.x` or `2.3.x`
+  (`>=2.2.2 <2.4`). The `2.3` plugin API only adds to the `2.2` one, and the host
+  events the plugin reads keep their `data` shape.
 - The unit of review is one execution (`session.execution.started` to
   `session.execution.succeeded`). Its patch is the host working-tree diff at the end
   minus the changes already present at the start.

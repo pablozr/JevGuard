@@ -19,5 +19,7 @@ export type {
 export {
   checkOpenCodeVersion,
   OPENCODE_ENGINE_RANGE,
+  OPENCODE_LATEST_SUPPORTED,
+  OPENCODE_PIN_COMMAND,
   type OpenCodeVersionVerdict,
 } from "./version";

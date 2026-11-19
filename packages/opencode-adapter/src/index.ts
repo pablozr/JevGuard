@@ -55,6 +55,8 @@ export {
   install,
   JEVGUARD_PLUGIN_ENTRY,
   OPENCODE_ENGINE_RANGE,
+  OPENCODE_LATEST_SUPPORTED,
+  OPENCODE_PIN_COMMAND,
   resolveConfigPath,
 } from "./opencode-config";
 export type {

@@ -54,7 +54,7 @@ describe("plugin development manifest", () => {
     const engines = readManifest().engines;
 
     expect(engines?.bun).toBe(">=1.1.0");
-    expect(engines?.opencode).toBe(">=2.2.2 <2.3");
+    expect(engines?.opencode).toBe(">=2.2.2 <2.4");
     // The doctor's version check reads the same range the manifest declares.
     expect(engines?.opencode).toBe(OPENCODE_ENGINE_RANGE);
   });
@@ -79,7 +79,10 @@ describe("plugin development manifest", () => {
       "@jevguard/opencode-adapter": "workspace:*",
     });
     expect(manifest.devDependencies).toEqual({ "@opencode/plugin": "2.2.2" });
-    expect(manifest.peerDependencies).toEqual({ "@opencode/plugin": "2.2.2", effect: "4.0.6" });
+    expect(manifest.peerDependencies).toEqual({
+      "@opencode/plugin": ">=2.2.2 <2.4",
+      effect: "4.0.6",
+    });
   });
 
   test("declares no npm lifecycle scripts", () => {

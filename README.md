@@ -17,7 +17,7 @@ your local deterministic gate to return `PASS`, `WARN`, or `FAIL`.
 
 | Host | Package | Status |
 | --- | --- | --- |
-| [OpenCode](https://opencode.ai) | `@pablozrrrr/jevguard` | Available, targets OpenCode `2.2.x` (`>=2.2.2 <2.3`) |
+| [OpenCode](https://opencode.ai) | `@pablozrrrr/jevguard` | Available, targets OpenCode `2.2.x` and `2.3.x` (`>=2.2.2 <2.4`) |
 | [Claude Code](https://claude.com/claude-code) | `@pablozrrrr/jevguard-claude-code` | Available through this repository's plugin marketplace |
 | Codex | — | Planned |
 
@@ -68,14 +68,15 @@ specific policy, and leaves planning, code generation, and correction with the
 coding agent.
 
 > [!WARNING]
-> JevGuard is in active development. The OpenCode plugin targets OpenCode `2.2.x`
-> (minimum `2.2.2`, `>=2.2.2 <2.3`) through the V2 plugin API and evaluates every rule
+> JevGuard is in active development. The OpenCode plugin targets OpenCode `2.2.x` and
+> `2.3.x` (minimum `2.2.2`, `>=2.2.2 <2.4`) through the V2 plugin API and evaluates every rule
 > block declared in `.jev/rules.md` plus the `SCOPE-CREEP`, `COMPLEXITY`, and
 > `TEST-ADEQUACY` built-ins.
 > Reviews are background and observe-only: they report results but never alter the
 > agent context or block a task. When remediation is enabled and a review has any
 > `FAIL`, the plugin asks for a proposal in an isolated, deny-all child session; the
-> proposal never edits code. See [OpenCode 2.2.x limitations](#opencode-22x-limitations).
+> proposal never edits code. See
+> [OpenCode 2.2.x and 2.3.x limitations](#opencode-22x-and-23x-limitations).
 > On Claude Code and OpenCode, a user who opts in with `delivery: agent` in their own
 > `claude-code.yaml` or `opencode.yaml` gets at most one visible message per reviewed unit
 > to the agent (the failing findings and the strategy), at most 3 per session; see
@@ -300,7 +301,7 @@ idempotent. It never writes the legacy `plugin` key, but an entry already there 
 as installed. It only edits a `plugins` array of package strings or
 `{ "package": "..." }` objects; any other shape is left unchanged and the installer
 prints the manual snippet instead. `jevguard doctor` also checks that
-`opencode --version` is in the supported range `>=2.2.2 <2.3`. The plugin package no
+`opencode --version` is in the supported range `>=2.2.2 <2.4`. The plugin package no
 longer ships a `jevguard` binary; every command below runs through the CLI package, as
 `npx @pablozrrrr/jevguard-cli <command>` or, once installed globally, as `jevguard <command>`.
 
@@ -443,7 +444,7 @@ jevguard login
 
 Known limitations:
 
-- Target host is OpenCode `2.2.x` (minimum `2.2.2`). The plugin does not load on
+- Target host is OpenCode `2.2.x` or `2.3.x` (minimum `2.2.2`). The plugin does not load on
   `2.1.x` or `1.x`. A real-host smoke on `2.2.2` (2026-11-02) covered observe
   and remediation (FAIL review, deny-all proposer). The single-delivery flow
   (`delivery: agent`) was re-smoked on the real host on `2.2.7` (2026-11-17,
@@ -457,10 +458,12 @@ Known limitations:
 - The plugin and CLI run on Bun, and the packed `jevguard` bin keeps a Bun
   shebang. Install and run the artifact with the Bun runtime.
 
-### OpenCode 2.2.x limitations
+### OpenCode 2.2.x and 2.3.x limitations
 
-- **Minimum version `2.2.2`.** The plugin declares `engines.opencode` `>=2.2.2 <2.3`
-  and is pinned to the `2.2.x` plugin API.
+- **Supported lines `2.2.x` and `2.3.x`, minimum version `2.2.2`.** The plugin declares
+  `engines.opencode` `>=2.2.2 <2.4`; the `2.3` plugin API only adds to the `2.2` one
+  ([ADR 0020](docs/adr/0020-opencode-2.3-supported-line.md)). A newer line fails the
+  version check, and the message names the newest supported line and how to pin it.
 - **Git-ignored files are out of scope.** The execution snapshot comes from the host's
   working-tree diff, which leaves out files ignored by Git; a write the diff cannot
   show makes the execution `UNAVAILABLE` (`INCOMPLETE_FILE_DIFF`) instead of reviewing
@@ -745,7 +748,7 @@ applies a change. Only a user who opts in with `delivery: agent` in their own
 session, at most 3 per session and never while the session is busy; see
 [OpenCode `delivery: agent`](docs/configuration.md#opencode-delivery-agent-one-delivery-per-unit). A real-host smoke on OpenCode `2.2.2` passed for observe, and `delivery: agent`
 was re-smoked on `2.2.7` (2026-11-17); see
-[OpenCode 2.2.x limitations](#opencode-22x-limitations).
+[OpenCode 2.2.x and 2.3.x limitations](#opencode-22x-and-23x-limitations).
 
 The Claude Code plugin reuses the same core, policy files, gate, and local history. It
 reviews closed units of work in a detached worker and shows results in the session
