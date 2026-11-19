@@ -130,17 +130,25 @@ function fillWithClosedUnits(size: number): void {
 
 /**
  * Makes one sleep of the code under test last `times` what it asked for, the way a 1 ms
- * `Atomics.wait` lasts about 15 ms on Windows. Undoes itself at the end of the test.
+ * `Atomics.wait` lasts about 15 ms on Windows, and counts how many it took. Undoes itself
+ * when the test calls `restore`.
  */
-function slowSleeps(times: number): () => void {
+function slowSleeps(times: number): { restore: () => void; count: () => number } {
   const original = Atomics.wait;
-  const slow = (array: Int32Array, index: number, value: number, timeout?: number): string =>
-    original(array, index, value, (timeout ?? 0) * times);
+  let sleeps = 0;
+  const slow = (array: Int32Array, index: number, value: number, timeout?: number): string => {
+    sleeps += 1;
+
+    return original(array, index, value, (timeout ?? 0) * times);
+  };
 
   (Atomics as { wait: typeof Atomics.wait }).wait = slow as typeof Atomics.wait;
 
-  return () => {
-    (Atomics as { wait: typeof Atomics.wait }).wait = original;
+  return {
+    restore: () => {
+      (Atomics as { wait: typeof Atomics.wait }).wait = original;
+    },
+    count: () => sleeps,
   };
 }
 
@@ -268,18 +276,27 @@ describe("bounding the lifecycle file", () => {
     // A sleep of 1 ms lasts about 15 ms on Windows, which is what made a window counted in
     // sleeps last three quarters of a second. Making every sleep ten times what it asks
     // for shows the same difference on a platform whose sleeps are true milliseconds.
-    const restore = slowSleeps(10);
+    const sleeping = slowSleeps(10);
     const started = performance.now();
 
     try {
       boundStateFile(session, { units: [closedUnit("t-9")], pendingTaints: [], damaged: false });
     } finally {
-      restore();
+      sleeping.restore();
     }
 
     const waited = performance.now() - started;
 
-    expect(waited).toBeLessThan(LOCK_WAIT_MS * 4);
+    // How many sleeps the window is worth, not how long they took: with ten times the 1 ms
+    // it asks for, a deadline of `LOCK_WAIT_MS` gives up after a handful, while a count of
+    // 50 sleeps makes 50 of them whatever each one costs. The wall clock cannot tell the
+    // two apart on a loaded runner, where parsing and rewriting 258 KB of state alone can
+    // take longer than the window.
+    expect(sleeping.count()).toBeGreaterThan(0);
+    expect(sleeping.count()).toBeLessThan(LOCK_WAIT_MS / 2);
+
+    // A sanity bound on the clock only, loose enough for a shared CI runner.
+    expect(waited).toBeLessThan(LOCK_WAIT_MS * 40);
     expect(readFileSync(lifecycle, "utf8")).toBe(before);
     expect(readdirSync(session)).toContain("lifecycle.lock");
   });
