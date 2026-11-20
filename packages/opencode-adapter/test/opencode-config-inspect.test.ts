@@ -93,6 +93,25 @@ describe("inspectInstall", () => {
     });
   });
 
+  test("reports a stale entry in the legacy key even when plugins is pinned", async () => {
+    const fileSystem = new FakeFileSystem();
+    fileSystem.files.set(
+      GLOBAL_PATH,
+      JSON.stringify({
+        plugins: [JEVGUARD_PLUGIN_SPEC],
+        plugin: [`${JEVGUARD_PLUGIN_ENTRY}@0.3.0`],
+      }),
+    );
+
+    expect(await inspect(fileSystem, "global")).toEqual({
+      status: "REGISTERED",
+      target: "global",
+      path: GLOBAL_PATH,
+      pin: "0.3.0",
+      legacy: true,
+    });
+  });
+
   test("reports a null pin for an unpinned entry and marks a legacy one", async () => {
     const fileSystem = new FakeFileSystem();
     fileSystem.files.set(GLOBAL_PATH, pluginDocument(JEVGUARD_PLUGIN_ENTRY));

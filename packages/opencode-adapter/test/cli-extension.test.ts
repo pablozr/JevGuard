@@ -275,6 +275,23 @@ describe("OpenCode CLI extension doctor", () => {
     expect(text).toContain("legacy `plugin` key");
   });
 
+  test("a stale entry in the legacy key keeps the doctor from reading OK", async () => {
+    const files = new FakeFiles();
+    files.store.set(
+      PROJECT_PATH,
+      JSON.stringify({
+        plugins: [`${PLUGIN}@${JEVGUARD_PLUGIN_VERSION}`],
+        plugin: [`${PLUGIN}@0.3.0`],
+      }),
+    );
+
+    const [plugin] = await doctor(files, new FakeProcesses(exited("2.2.2")));
+    const text = `${plugin?.message}\n${plugin?.annotation}`;
+
+    expect(plugin?.json).toMatchObject({ status: "WARN", code: "PIN_MISMATCH" });
+    expect(text).toContain("pinned at 0.3.0");
+  });
+
   test("a stale project entry keeps a pinned global one from reading OK", async () => {
     const files = new FakeFiles();
     files.store.set(GLOBAL_PATH, registered(PLUGIN_SPEC));

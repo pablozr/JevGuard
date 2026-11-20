@@ -63,8 +63,47 @@ function isEntryFor(value: PluginListEntry, entry: string): boolean {
   return pluginPackageOf(specOf(value)) === entry;
 }
 
-/** Read-only view of the JevGuard entry in a parsed `opencode.json` document. */
-export function findPluginEntry(document: unknown, entry: string): PluginEntryLookup {
+interface EntryOccurrence {
+  readonly spec: string;
+  readonly legacy: boolean;
+}
+
+/** Every entry of the package, in `plugins` first and then the legacy `plugin` key. */
+function occurrencesOf(
+  document: Record<string, unknown>,
+  entry: string,
+): readonly EntryOccurrence[] {
+  const existing = (document[PLUGINS_KEY] ?? []) as PluginListEntry[];
+  const legacy = (document[LEGACY_PLUGIN_KEY] ?? []) as PluginListEntry[];
+
+  return [
+    ...existing
+      .filter((value) => isEntryFor(value, entry))
+      .map((value) => ({
+        spec: specOf(value),
+        legacy: false,
+      })),
+    ...legacy
+      .filter((value) => isEntryFor(value, entry))
+      .map((value) => ({
+        spec: specOf(value),
+        legacy: true,
+      })),
+  ];
+}
+
+/**
+ * Read-only view of the JevGuard entry in a parsed `opencode.json` document.
+ *
+ * With `expectedSpec`, an occurrence that diverges from it wins over one that matches,
+ * even when both lists register the package: the host reads `plugins` and the legacy
+ * `plugin` key alike, so a stale entry must not hide behind a current one.
+ */
+export function findPluginEntry(
+  document: unknown,
+  entry: string,
+  expectedSpec?: string,
+): PluginEntryLookup {
   if (!isPlainObject(document)) {
     return { status: "INVALID_SHAPE" };
   }
@@ -76,19 +115,18 @@ export function findPluginEntry(document: unknown, entry: string): PluginEntryLo
     return { status: "INVALID_SHAPE" };
   }
 
-  const inPlugins = existing.find((value) => isEntryFor(value, entry));
+  const occurrences = occurrencesOf(document, entry);
+  const found = occurrences.find((occurrence) => occurrence.spec !== expectedSpec);
 
-  if (inPlugins !== undefined) {
-    return { status: "FOUND", spec: specOf(inPlugins), legacy: false };
+  if (found !== undefined) {
+    return { status: "FOUND", spec: found.spec, legacy: found.legacy };
   }
 
-  const inLegacy = legacy.find((value) => isEntryFor(value, entry));
+  const [first] = occurrences;
 
-  if (inLegacy !== undefined) {
-    return { status: "FOUND", spec: specOf(inLegacy), legacy: true };
-  }
-
-  return { status: "ABSENT" };
+  return first === undefined
+    ? { status: "ABSENT" }
+    : { status: "FOUND", spec: first.spec, legacy: first.legacy };
 }
 
 function pinned(value: PluginListEntry, spec: string): PluginListEntry {
@@ -101,13 +139,13 @@ function pinned(value: PluginListEntry, spec: string): PluginListEntry {
  * list that is not an array of package strings or `{ package }` objects rather than
  * clobbering it.
  *
- * When the package is registered with another spec (unpinned or another version), the
- * entry is rewritten in place where it already lives, so the host resolves the pinned
- * release instead of `@latest`. A legacy `plugin` entry is updated in place and never
- * moved to `plugins`, so the plugin is not listed twice.
+ * When the package is registered with another spec (unpinned or another version), every
+ * occurrence is rewritten in place, so the host resolves the pinned release instead of
+ * `@latest` and a stale entry in the other key cannot survive. A legacy `plugin` entry
+ * is updated in place and never moved to `plugins`, so the plugin is not listed twice.
  */
 export function addPluginEntry(document: unknown, spec: string): PluginEntryMutation {
-  const lookup = findPluginEntry(document, pluginPackageOf(spec));
+  const lookup = findPluginEntry(document, pluginPackageOf(spec), spec);
 
   if (lookup.status === "INVALID_SHAPE") {
     return { status: "INVALID_SHAPE" };
@@ -128,7 +166,7 @@ export function addPluginEntry(document: unknown, spec: string): PluginEntryMuta
   return {
     status: "REPINNED",
     from: lookup.spec,
-    document: replaceEntry(document, lookup.legacy, spec),
+    document: repinEverywhere(document, spec),
   };
 }
 
@@ -141,17 +179,21 @@ function addToPlugins(document: Record<string, unknown>, spec: string): PluginEn
   };
 }
 
-function replaceEntry(
+/** Re-pins every occurrence of the package; a key the document does not have stays out. */
+function repinEverywhere(
   document: Record<string, unknown>,
-  legacy: boolean,
   spec: string,
 ): Readonly<Record<string, unknown>> {
-  const key = legacy ? LEGACY_PLUGIN_KEY : PLUGINS_KEY;
-  const list = document[key] as PluginListEntry[];
   const packageName = pluginPackageOf(spec);
+  const repinned = (list: PluginListEntry[]): PluginListEntry[] =>
+    list.map((value) => (isEntryFor(value, packageName) ? pinned(value, spec) : value));
+  const result: Record<string, unknown> = { ...document };
 
-  return {
-    ...document,
-    [key]: list.map((value) => (isEntryFor(value, packageName) ? pinned(value, spec) : value)),
-  };
+  for (const key of [PLUGINS_KEY, LEGACY_PLUGIN_KEY]) {
+    if (Array.isArray(result[key])) {
+      result[key] = repinned(result[key] as PluginListEntry[]);
+    }
+  }
+
+  return result;
 }

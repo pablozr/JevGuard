@@ -10,7 +10,14 @@ import type {
   InstallTarget,
 } from "./types";
 
-const CONFIRMATION_MESSAGE = `Add JevGuard ${JEVGUARD_PLUGIN_SPEC} to the opencode.json plugins list?`;
+const ADD_CONFIRMATION_MESSAGE = `Add JevGuard ${JEVGUARD_PLUGIN_SPEC} to the opencode.json plugins list?`;
+
+const UPDATE_CONFIRMATION_MESSAGE = `Update JevGuard to ${JEVGUARD_PLUGIN_SPEC} in opencode.json?`;
+
+/** The question names what the write does: add a missing entry, or re-pin an existing one. */
+function confirmationMessageOf(mutation: { readonly status: "ADDED" | "REPINNED" }): string {
+  return mutation.status === "REPINNED" ? UPDATE_CONFIRMATION_MESSAGE : ADD_CONFIRMATION_MESSAGE;
+}
 
 /**
  * Registers the JevGuard plugin in the target `opencode.json`. It is idempotent,
@@ -35,7 +42,10 @@ export async function install(dependencies: InstallDependencies): Promise<Instal
     return { status: "ALREADY_INSTALLED", target: dependencies.target, path };
   }
 
-  const confirmation = await requestConfirmation(dependencies.confirmation);
+  const confirmation = await requestConfirmation(
+    dependencies.confirmation,
+    confirmationMessageOf(mutation),
+  );
 
   if (confirmation.status === "FAILED") {
     return failed(dependencies.target, path, confirmation.reason);
@@ -65,12 +75,13 @@ export async function install(dependencies: InstallDependencies): Promise<Instal
 
 async function requestConfirmation(
   confirmation: ConfirmationPrompt,
+  message: string,
 ): Promise<
   | { readonly status: "CONFIRMED" | "DECLINED" }
   | { readonly status: "FAILED"; readonly reason: InstallFailureReason }
 > {
   try {
-    const result = await confirmation.confirm(CONFIRMATION_MESSAGE);
+    const result = await confirmation.confirm(message);
 
     if (result.status === "FAILED") {
       return { status: "FAILED", reason: result.reason };

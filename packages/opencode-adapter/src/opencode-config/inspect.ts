@@ -1,4 +1,9 @@
-import { findPluginEntry, JEVGUARD_PLUGIN_ENTRY, pluginVersionOf } from "./entry";
+import {
+  findPluginEntry,
+  JEVGUARD_PLUGIN_ENTRY,
+  JEVGUARD_PLUGIN_SPEC,
+  pluginVersionOf,
+} from "./entry";
 import { resolveConfigPath } from "./paths";
 import { readConfigDocument } from "./read-document";
 import type { InspectInstallDependencies, InstallInspection } from "./types";
@@ -19,7 +24,8 @@ export async function inspectInstall(
     return { status: "FAILED", target, path, reason: read.reason };
   }
 
-  const lookup = findPluginEntry(read.document, JEVGUARD_PLUGIN_ENTRY);
+  // The CLI's own pin: a stale entry in either key must show up, not hide behind it.
+  const lookup = findPluginEntry(read.document, JEVGUARD_PLUGIN_ENTRY, JEVGUARD_PLUGIN_SPEC);
 
   switch (lookup.status) {
     case "FOUND":
