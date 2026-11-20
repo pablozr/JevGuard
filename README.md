@@ -809,6 +809,7 @@ Use `pnpm check` to run format, lint, typecheck, and tests in sequence. See
 ## Documentation
 
 - [Configuration reference](./docs/configuration.md)
+- [Rule packs](./docs/rule-packs.md)
 - [Public benchmark](./docs/benchmarks/README.md)
 - [Security model](./docs/security.md)
 - [Architecture decisions](./docs/adr/README.md)

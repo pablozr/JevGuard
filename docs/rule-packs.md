@@ -5,12 +5,13 @@ A rule pack is the policy a repository starts with: one `.jev/rules.md` document
 most often carries — a committed secret, an irreversible action, work outside the task,
 and a dependency change nobody asked for.
 
-Two rules are the ones `jevguard init` writes and the public benchmark measures
-(`SECRETS-001` and `SCOPE-001`); the other two (`DESTRUCTIVE-001` and `DEPENDENCY-001`)
-use the same grammar and are not in the published corpus yet. Adding them to the corpus
-changes its hash and requires a new live run, so the published numbers stay on corpus
-`c5822e8838af904c`. `jevguard init` also writes `QUALITY-001` and `API-001`; this page
-does not repeat them.
+`jevguard init` writes four rules. Two of them are documented below (`SECRETS-001` and
+`SCOPE-001`); `QUALITY-001` (a behavior change arrives with its test) and `API-001` (a
+public-interface change is additive or documented) complete the pack without a section
+here. The public benchmark measures all four: 20 cases, 5 per rule, corpus
+`c5822e8838af904c`. `DESTRUCTIVE-001` and `DEPENDENCY-001` use the same grammar and are
+not in the corpus yet; adding them changes its hash and needs a new live run, so the
+published numbers stay on that corpus.
 
 Each rule below is shown as the block it takes in `.jev/rules.md`, followed by one change
 that violates it, one clean change, and the corpus cases when the rule has any. Diffs are

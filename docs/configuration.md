@@ -24,7 +24,8 @@ of a confirmed greenfield bootstrap.
 
 Rules are Markdown so they can be authored, reviewed, and versioned alongside the
 codebase. One document may declare any number of rules, and every rule block is
-evaluated.
+evaluated. The pack `jevguard init` writes, with a violating and a clean example per
+rule, is documented in [rule packs](rule-packs.md).
 
 ```md
 ## ARCH-001
