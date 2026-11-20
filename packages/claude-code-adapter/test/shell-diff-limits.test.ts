@@ -92,11 +92,24 @@ describe("classifySpawnResult", () => {
   });
 });
 
+/**
+ * The product time limits (2 s per Git call, 3 s per snapshot) are real wall-clock
+ * budgets: on a loaded Windows runner a spawn can exceed them and the capture turns
+ * UNAVAILABLE for a reason unrelated to what these tests check (#113, as in #72). Only
+ * the time limits are relaxed here; every size limit stays at its product value.
+ */
+const LOADED_MACHINE_LIMITS = {
+  ...DEFAULT_SHELL_DIFF_LIMITS,
+  gitCallTimeoutMs: 60_000,
+  timeMs: 60_000,
+};
+
 describe("persisted shell diff failures", () => {
   let world: HookWorld;
 
   beforeEach(() => {
     world = new HookWorld();
+    world.shellDiffLimits = LOADED_MACHINE_LIMITS;
     initRepository(world.projectRoot);
   });
 
