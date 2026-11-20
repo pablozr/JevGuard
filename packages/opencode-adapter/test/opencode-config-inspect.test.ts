@@ -1,6 +1,11 @@
 import { dirname, join, resolve } from "node:path";
 import { describe, expect, test } from "vitest";
-import { inspectInstall, JEVGUARD_PLUGIN_ENTRY } from "../src/index";
+import {
+  inspectInstall,
+  JEVGUARD_PLUGIN_ENTRY,
+  JEVGUARD_PLUGIN_SPEC,
+  JEVGUARD_PLUGIN_VERSION,
+} from "../src/index";
 import type { InspectInstallDependencies, InstallTarget } from "../src/index";
 
 const CWD = join("C:", "repo");
@@ -58,22 +63,66 @@ function pluginDocument(...plugins: readonly string[]): string {
 }
 
 describe("inspectInstall", () => {
-  test("reports REGISTERED for the exact entry", async () => {
+  test("reports REGISTERED with the pin for the pinned spec", async () => {
     const fileSystem = new FakeFileSystem();
-    fileSystem.files.set(GLOBAL_PATH, pluginDocument("other", JEVGUARD_PLUGIN_ENTRY));
+    fileSystem.files.set(GLOBAL_PATH, pluginDocument("other", JEVGUARD_PLUGIN_SPEC));
 
     const result = await inspect(fileSystem, "global");
 
-    expect(result).toEqual({ status: "REGISTERED", target: "global", path: GLOBAL_PATH });
+    expect(result).toEqual({
+      status: "REGISTERED",
+      target: "global",
+      path: GLOBAL_PATH,
+      pin: JEVGUARD_PLUGIN_VERSION,
+      legacy: false,
+    });
   });
 
-  test("reports REGISTERED for a pinned version entry", async () => {
+  test("reports the registered pin even when it is another version", async () => {
     const fileSystem = new FakeFileSystem();
     fileSystem.files.set(PROJECT_PATH, pluginDocument(`${JEVGUARD_PLUGIN_ENTRY}@0.2.3`));
 
     const result = await inspect(fileSystem, "project");
 
-    expect(result).toEqual({ status: "REGISTERED", target: "project", path: PROJECT_PATH });
+    expect(result).toEqual({
+      status: "REGISTERED",
+      target: "project",
+      path: PROJECT_PATH,
+      pin: "0.2.3",
+      legacy: false,
+    });
+  });
+
+  test("reports a stale entry in the legacy key even when plugins is pinned", async () => {
+    const fileSystem = new FakeFileSystem();
+    fileSystem.files.set(
+      GLOBAL_PATH,
+      JSON.stringify({
+        plugins: [JEVGUARD_PLUGIN_SPEC],
+        plugin: [`${JEVGUARD_PLUGIN_ENTRY}@0.3.0`],
+      }),
+    );
+
+    expect(await inspect(fileSystem, "global")).toEqual({
+      status: "REGISTERED",
+      target: "global",
+      path: GLOBAL_PATH,
+      pin: "0.3.0",
+      legacy: true,
+    });
+  });
+
+  test("reports a null pin for an unpinned entry and marks a legacy one", async () => {
+    const fileSystem = new FakeFileSystem();
+    fileSystem.files.set(GLOBAL_PATH, pluginDocument(JEVGUARD_PLUGIN_ENTRY));
+    fileSystem.files.set(PROJECT_PATH, JSON.stringify({ plugin: [JEVGUARD_PLUGIN_SPEC] }));
+
+    expect(await inspect(fileSystem, "global")).toMatchObject({ status: "REGISTERED", pin: null });
+    expect(await inspect(fileSystem, "project")).toMatchObject({
+      status: "REGISTERED",
+      pin: JEVGUARD_PLUGIN_VERSION,
+      legacy: true,
+    });
   });
 
   test("reports NOT_REGISTERED when the file is absent", async () => {
@@ -147,11 +196,17 @@ describe("inspectInstall", () => {
 
   test("resolves the global path from an absolute XDG_CONFIG_HOME", async () => {
     const fileSystem = new FakeFileSystem();
-    fileSystem.files.set(XDG_PATH, pluginDocument(JEVGUARD_PLUGIN_ENTRY));
+    fileSystem.files.set(XDG_PATH, pluginDocument(JEVGUARD_PLUGIN_SPEC));
 
     const result = await inspect(fileSystem, "global", { XDG_CONFIG_HOME: XDG });
 
-    expect(result).toEqual({ status: "REGISTERED", target: "global", path: XDG_PATH });
+    expect(result).toEqual({
+      status: "REGISTERED",
+      target: "global",
+      path: XDG_PATH,
+      pin: JEVGUARD_PLUGIN_VERSION,
+      legacy: false,
+    });
   });
 
   test("resolves the project path under the working directory and only reads it", async () => {

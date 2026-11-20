@@ -1,1 +1,6 @@
-export type OpenCodePluginCheckCode = "REGISTERED" | "NOT_REGISTERED" | "INSPECTION_FAILED";
+export type OpenCodePluginCheckCode =
+  | "REGISTERED"
+  | "PIN_MISSING"
+  | "PIN_MISMATCH"
+  | "NOT_REGISTERED"
+  | "INSPECTION_FAILED";

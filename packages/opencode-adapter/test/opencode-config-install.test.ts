@@ -6,12 +6,17 @@ import type { ConfirmationPrompt, ConfirmationResult } from "@jevguard/node-infr
 import {
   addPluginEntry,
   checkOpenCodeVersion,
+  findPluginEntry,
   createNodeConfigFileSystem,
   install,
   JEVGUARD_PLUGIN_ENTRY,
+  JEVGUARD_PLUGIN_SPEC,
+  JEVGUARD_PLUGIN_VERSION,
   OPENCODE_ENGINE_RANGE,
   OPENCODE_LATEST_SUPPORTED,
   OPENCODE_PIN_COMMAND,
+  pluginPackageOf,
+  pluginVersionOf,
   resolveConfigPath,
 } from "../src/index";
 import type { ConfigFileSystem, InstallDependencies, InstallTarget } from "../src/index";
@@ -25,7 +30,7 @@ const XDG_PATH = join(XDG, "opencode", "opencode.json");
 const PROJECT_PATH = join(CWD, "opencode.json");
 const JSONC_PATH = join(dirname(GLOBAL_PATH), "opencode.jsonc");
 const DEFAULT_DOCUMENT = `${JSON.stringify(
-  { $schema: "https://opencode.ai/config.json", plugins: [JEVGUARD_PLUGIN_ENTRY] },
+  { $schema: "https://opencode.ai/config.json", plugins: [JEVGUARD_PLUGIN_SPEC] },
   null,
   2,
 )}\n`;
@@ -108,28 +113,47 @@ function harness(target: InstallTarget = "global"): Harness {
 }
 
 describe("addPluginEntry", () => {
-  test("adds the entry when the plugins key is absent", () => {
-    const result = addPluginEntry({ $schema: "schema" }, JEVGUARD_PLUGIN_ENTRY);
+  test("adds the pinned spec when the plugins key is absent", () => {
+    const result = addPluginEntry({ $schema: "schema" }, JEVGUARD_PLUGIN_SPEC);
 
     expect(result).toEqual({
       status: "ADDED",
-      document: { $schema: "schema", plugins: [JEVGUARD_PLUGIN_ENTRY] },
+      document: { $schema: "schema", plugins: [JEVGUARD_PLUGIN_SPEC] },
     });
   });
 
-  test("detects the exact entry and a version-suffixed entry as present", () => {
-    expect(addPluginEntry({ plugins: [JEVGUARD_PLUGIN_ENTRY] }, JEVGUARD_PLUGIN_ENTRY)).toEqual({
+  test("reports PRESENT only for the exact pinned spec", () => {
+    expect(addPluginEntry({ plugins: [JEVGUARD_PLUGIN_SPEC] }, JEVGUARD_PLUGIN_SPEC)).toEqual({
       status: "PRESENT",
     });
-    expect(
-      addPluginEntry({ plugins: [`${JEVGUARD_PLUGIN_ENTRY}@1.2.3`] }, JEVGUARD_PLUGIN_ENTRY),
-    ).toEqual({ status: "PRESENT" });
+  });
+
+  test("re-pins an unpinned or older entry in place", () => {
+    const unpinned = addPluginEntry(
+      { plugins: ["other", JEVGUARD_PLUGIN_ENTRY] },
+      JEVGUARD_PLUGIN_SPEC,
+    );
+    const older = addPluginEntry(
+      { plugins: [`${JEVGUARD_PLUGIN_ENTRY}@0.3.0`] },
+      JEVGUARD_PLUGIN_SPEC,
+    );
+
+    expect(unpinned).toEqual({
+      status: "REPINNED",
+      from: JEVGUARD_PLUGIN_ENTRY,
+      document: { plugins: ["other", JEVGUARD_PLUGIN_SPEC] },
+    });
+    expect(older).toEqual({
+      status: "REPINNED",
+      from: `${JEVGUARD_PLUGIN_ENTRY}@0.3.0`,
+      document: { plugins: [JEVGUARD_PLUGIN_SPEC] },
+    });
   });
 
   test("preserves unknown keys, their order, and existing plugin entries", () => {
     const result = addPluginEntry(
       { $schema: "schema", model: "gpt", plugins: ["other-plugin"] },
-      JEVGUARD_PLUGIN_ENTRY,
+      JEVGUARD_PLUGIN_SPEC,
     );
 
     expect(result.status).toBe("ADDED");
@@ -139,51 +163,98 @@ describe("addPluginEntry", () => {
     }
 
     expect(Object.keys(result.document)).toEqual(["$schema", "model", "plugins"]);
-    expect(result.document.plugins).toEqual(["other-plugin", JEVGUARD_PLUGIN_ENTRY]);
+    expect(result.document.plugins).toEqual(["other-plugin", JEVGUARD_PLUGIN_SPEC]);
   });
 
   test("refuses a non-object document", () => {
-    expect(addPluginEntry(["plugin"], JEVGUARD_PLUGIN_ENTRY)).toEqual({ status: "INVALID_SHAPE" });
-    expect(addPluginEntry(null, JEVGUARD_PLUGIN_ENTRY)).toEqual({ status: "INVALID_SHAPE" });
+    expect(addPluginEntry(["plugin"], JEVGUARD_PLUGIN_SPEC)).toEqual({ status: "INVALID_SHAPE" });
+    expect(addPluginEntry(null, JEVGUARD_PLUGIN_SPEC)).toEqual({ status: "INVALID_SHAPE" });
   });
 
   test("refuses a plugins value that is not a list of package entries", () => {
-    expect(addPluginEntry({ plugins: "x" }, JEVGUARD_PLUGIN_ENTRY)).toEqual({
+    expect(addPluginEntry({ plugins: "x" }, JEVGUARD_PLUGIN_SPEC)).toEqual({
       status: "INVALID_SHAPE",
     });
-    expect(addPluginEntry({ plugins: [42] }, JEVGUARD_PLUGIN_ENTRY)).toEqual({
+    expect(addPluginEntry({ plugins: [42] }, JEVGUARD_PLUGIN_SPEC)).toEqual({
       status: "INVALID_SHAPE",
     });
-    expect(addPluginEntry({ plugin: "x" }, JEVGUARD_PLUGIN_ENTRY)).toEqual({
+    expect(addPluginEntry({ plugin: "x" }, JEVGUARD_PLUGIN_SPEC)).toEqual({
       status: "INVALID_SHAPE",
     });
   });
 
-  test("counts an entry in the legacy plugin list as present", () => {
-    expect(addPluginEntry({ plugin: [JEVGUARD_PLUGIN_ENTRY] }, JEVGUARD_PLUGIN_ENTRY)).toEqual({
+  test("re-pins a legacy plugin entry in place without moving it to plugins", () => {
+    expect(addPluginEntry({ plugin: [JEVGUARD_PLUGIN_ENTRY] }, JEVGUARD_PLUGIN_SPEC)).toEqual({
+      status: "REPINNED",
+      from: JEVGUARD_PLUGIN_ENTRY,
+      document: { plugin: [JEVGUARD_PLUGIN_SPEC] },
+    });
+    expect(addPluginEntry({ plugin: [JEVGUARD_PLUGIN_SPEC] }, JEVGUARD_PLUGIN_SPEC)).toEqual({
       status: "PRESENT",
     });
   });
 
-  test("counts a package object entry as present", () => {
+  test("re-pins every occurrence across both keys, so a stale entry cannot survive", () => {
+    const both = { plugins: [JEVGUARD_PLUGIN_SPEC], plugin: [`${JEVGUARD_PLUGIN_ENTRY}@0.3.0`] };
+    const first = addPluginEntry(both, JEVGUARD_PLUGIN_SPEC);
+
+    expect(first).toEqual({
+      status: "REPINNED",
+      from: `${JEVGUARD_PLUGIN_ENTRY}@0.3.0`,
+      document: { plugins: [JEVGUARD_PLUGIN_SPEC], plugin: [JEVGUARD_PLUGIN_SPEC] },
+    });
+
+    if (first.status !== "REPINNED") throw new Error("expected REPINNED");
+
+    expect(addPluginEntry(first.document, JEVGUARD_PLUGIN_SPEC)).toEqual({ status: "PRESENT" });
+  });
+
+  test("a stale legacy entry is visible even when plugins already has the pinned spec", () => {
+    const document = {
+      plugins: [JEVGUARD_PLUGIN_SPEC],
+      plugin: [`${JEVGUARD_PLUGIN_ENTRY}@0.3.0`],
+    };
+
+    expect(findPluginEntry(document, JEVGUARD_PLUGIN_ENTRY, JEVGUARD_PLUGIN_SPEC)).toEqual({
+      status: "FOUND",
+      spec: `${JEVGUARD_PLUGIN_ENTRY}@0.3.0`,
+      legacy: true,
+    });
+  });
+
+  test("keeps a package object entry as an object and only updates its package", () => {
+    expect(
+      addPluginEntry({ plugins: [{ package: JEVGUARD_PLUGIN_SPEC }] }, JEVGUARD_PLUGIN_SPEC),
+    ).toEqual({ status: "PRESENT" });
+
     expect(
       addPluginEntry(
-        { plugins: [{ package: `${JEVGUARD_PLUGIN_ENTRY}@1.0.0` }] },
-        JEVGUARD_PLUGIN_ENTRY,
+        { plugins: [{ package: JEVGUARD_PLUGIN_ENTRY, extra: true }] },
+        JEVGUARD_PLUGIN_SPEC,
       ),
-    ).toEqual({ status: "PRESENT" });
+    ).toEqual({
+      status: "REPINNED",
+      from: JEVGUARD_PLUGIN_ENTRY,
+      document: { plugins: [{ package: JEVGUARD_PLUGIN_SPEC, extra: true }] },
+    });
   });
 
   test("writes only to plugins, keeping package objects and the legacy list", () => {
     const document = { plugin: ["other"], plugins: [{ package: "file:/x" }] };
 
-    expect(addPluginEntry(document, JEVGUARD_PLUGIN_ENTRY)).toEqual({
+    expect(addPluginEntry(document, JEVGUARD_PLUGIN_SPEC)).toEqual({
       status: "ADDED",
       document: {
         plugin: ["other"],
-        plugins: [{ package: "file:/x" }, JEVGUARD_PLUGIN_ENTRY],
+        plugins: [{ package: "file:/x" }, JEVGUARD_PLUGIN_SPEC],
       },
     });
+  });
+
+  test("names the pinned package and version", () => {
+    expect(pluginPackageOf(JEVGUARD_PLUGIN_SPEC)).toBe(JEVGUARD_PLUGIN_ENTRY);
+    expect(pluginVersionOf(JEVGUARD_PLUGIN_SPEC)).toBe(JEVGUARD_PLUGIN_VERSION);
+    expect(pluginVersionOf(JEVGUARD_PLUGIN_ENTRY)).toBeNull();
   });
 });
 
@@ -260,9 +331,9 @@ describe("install", () => {
     expect(fileSystem.ensured).toEqual([GLOBAL_PATH]);
   });
 
-  test("does not write or prompt when the entry is already present", async () => {
+  test("does not write or prompt when the pinned entry is already present", async () => {
     const { fileSystem, confirmation, dependencies } = harness();
-    fileSystem.files.set(GLOBAL_PATH, `${JSON.stringify({ plugins: [JEVGUARD_PLUGIN_ENTRY] })}\n`);
+    fileSystem.files.set(GLOBAL_PATH, `${JSON.stringify({ plugins: [JEVGUARD_PLUGIN_SPEC] })}\n`);
 
     const outcome = await install(dependencies);
 
@@ -273,6 +344,63 @@ describe("install", () => {
     });
     expect(fileSystem.writes).toEqual([]);
     expect(confirmation.messages).toEqual([]);
+  });
+
+  test("re-pins an unpinned entry after confirmation", async () => {
+    const { fileSystem, confirmation, dependencies } = harness();
+    fileSystem.files.set(GLOBAL_PATH, `${JSON.stringify({ plugins: [JEVGUARD_PLUGIN_ENTRY] })}\n`);
+
+    const outcome = await install(dependencies);
+
+    expect(outcome).toEqual({
+      status: "UPDATED",
+      target: "global",
+      path: GLOBAL_PATH,
+      from: JEVGUARD_PLUGIN_ENTRY,
+    });
+    expect(confirmation.messages).toHaveLength(1);
+    expect(confirmation.messages[0]).toContain("Update JevGuard");
+    expect(confirmation.messages[0]).toContain(JEVGUARD_PLUGIN_SPEC);
+    expect(JSON.parse(fileSystem.writes[0]?.contents ?? "")).toEqual({
+      plugins: [JEVGUARD_PLUGIN_SPEC],
+    });
+  });
+
+  test("re-pins a stale entry in the legacy key even when plugins is pinned", async () => {
+    const { fileSystem, confirmation, dependencies } = harness();
+    fileSystem.files.set(
+      GLOBAL_PATH,
+      `${JSON.stringify({
+        plugins: [JEVGUARD_PLUGIN_SPEC],
+        plugin: [`${JEVGUARD_PLUGIN_ENTRY}@0.3.0`],
+      })}\n`,
+    );
+
+    const outcome = await install(dependencies);
+
+    expect(outcome).toEqual({
+      status: "UPDATED",
+      target: "global",
+      path: GLOBAL_PATH,
+      from: `${JEVGUARD_PLUGIN_ENTRY}@0.3.0`,
+    });
+    expect(confirmation.messages[0]).toContain("Update JevGuard");
+    expect(JSON.parse(fileSystem.writes[0]?.contents ?? "")).toEqual({
+      plugins: [JEVGUARD_PLUGIN_SPEC],
+      plugin: [JEVGUARD_PLUGIN_SPEC],
+    });
+  });
+
+  test("a second install after a re-pin changes nothing", async () => {
+    const { fileSystem, confirmation, dependencies } = harness();
+    fileSystem.files.set(GLOBAL_PATH, `${JSON.stringify({ plugin: [JEVGUARD_PLUGIN_ENTRY] })}\n`);
+
+    await install(dependencies);
+    const second = await install(dependencies);
+
+    expect(second).toEqual({ status: "ALREADY_INSTALLED", target: "global", path: GLOBAL_PATH });
+    expect(confirmation.messages).toHaveLength(1);
+    expect(fileSystem.writes).toHaveLength(1);
   });
 
   test("writes nothing when the confirmation is declined", async () => {
@@ -451,7 +579,7 @@ describe("node config file system", () => {
     expect(outcome).toEqual({ status: "INSTALLED", target: "project", path });
     expect(JSON.parse(await readFile(path, "utf8"))).toEqual({
       $schema: "schema",
-      plugins: [JEVGUARD_PLUGIN_ENTRY],
+      plugins: [JEVGUARD_PLUGIN_SPEC],
     });
     expect(await readdir(directory)).toEqual(["opencode.json"]);
   });

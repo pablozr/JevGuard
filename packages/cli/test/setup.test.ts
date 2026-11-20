@@ -472,12 +472,14 @@ describe("runSetup agent delivery step", () => {
     expect(memory.store.has(OPENCODE_CONFIG)).toBe(false);
   });
 
-  test("--yes without --agent-delivery does not write it", async () => {
+  test("--yes without --agent-delivery does not write it and names the missing flag", async () => {
     const { ports, memory } = scenario();
 
-    await runSetup(ports, { ...REQUEST, yes: true });
+    const result = await runSetup(ports, { ...REQUEST, yes: true });
 
     expect(memory.store.has(OPENCODE_CONFIG)).toBe(false);
+    expect(result.lines.join("\n")).toContain("Skipped: OpenCode: enable `delivery: agent` in");
+    expect(result.lines.join("\n")).toContain("pass --agent-delivery");
   });
 
   test("--yes --agent-delivery writes only the selected host's file", async () => {
