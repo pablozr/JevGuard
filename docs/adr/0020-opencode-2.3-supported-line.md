@@ -70,8 +70,10 @@ project entry — a `file:` canary module and the published `@pablozrrrr/jevguar
 — the canary's `setup` ran and received `session.execution.succeeded`, and the
 published plugin wrote its review (four `UNAVAILABLE` results, no rules and no
 credential) to the local history before the process exited. The same canary loaded on
-Windows `2.3.0`; only the `loading plugin` line was missing from the log, because on
-Windows the host does not write server logs to stderr even with `--print-logs`. A lab
+Windows `2.3.0`, observed through the canary's own side effects (its `module loaded`
+and `setup called` lines and the `session.execution.succeeded` it received); only the
+`loading plugin` line was missing from the log, because on Windows the host does not
+write server logs to stderr even with `--print-logs`. A lab
 that sees zero `loading plugin` lines on Windows therefore cannot conclude the plugin
 was not loaded. The shutdown-window limitation described above still stands: loading is
 not the problem, the exit before the review finishes is.
