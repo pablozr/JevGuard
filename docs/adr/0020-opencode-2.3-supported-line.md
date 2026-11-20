@@ -64,6 +64,18 @@ runtime API it loads the plugin with.
   in this ADR depends on that path — the four scenarios above ran where the process
   lived on — and the one-shot case is tracked as its own defect (issue #108).
 
+Update 2026-11-20 (issue #112): the one-shot child does load project plugins. On
+`2.3.0` in a scratch Linux repository, `opencode run` logged `loading plugin` for the
+project entry — a `file:` canary module and the published `@pablozrrrr/jevguard@0.4.1`
+— the canary's `setup` ran and received `session.execution.succeeded`, and the
+published plugin wrote its review (four `UNAVAILABLE` results, no rules and no
+credential) to the local history before the process exited. The same canary loaded on
+Windows `2.3.0`; only the `loading plugin` line was missing from the log, because on
+Windows the host does not write server logs to stderr even with `--print-logs`. A lab
+that sees zero `loading plugin` lines on Windows therefore cannot conclude the plugin
+was not loaded. The shutdown-window limitation described above still stands: loading is
+not the problem, the exit before the review finishes is.
+
 ## Alternatives considered
 
 - **Keep `<2.3` and document the limitation.** Rejected: the owner's own host is on 2.3,
