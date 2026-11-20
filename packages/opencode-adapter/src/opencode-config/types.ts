@@ -21,6 +21,13 @@ export type InstallOutcome =
       readonly path: string;
     }
   | {
+      /** The package was registered with another spec; the entry was re-pinned. */
+      readonly status: "UPDATED";
+      readonly target: InstallTarget;
+      readonly path: string;
+      readonly from: string;
+    }
+  | {
       readonly status: "ALREADY_INSTALLED";
       readonly target: InstallTarget;
       readonly path: string;
@@ -64,7 +71,25 @@ export interface InstallDependencies extends InstallPathContext {
 /** Result of merging the JevGuard entry into a parsed `opencode.json` document. */
 export type PluginEntryMutation =
   | { readonly status: "ADDED"; readonly document: Readonly<Record<string, unknown>> }
+  | {
+      /** The package was registered with another spec and the entry is re-pinned. */
+      readonly status: "REPINNED";
+      readonly document: Readonly<Record<string, unknown>>;
+      readonly from: string;
+    }
   | { readonly status: "PRESENT" }
+  | { readonly status: "INVALID_SHAPE" };
+
+/** Read-only lookup of one package's entry in a parsed `opencode.json` document. */
+export type PluginEntryLookup =
+  | {
+      readonly status: "FOUND";
+      /** The registered spec, pinned or not. */
+      readonly spec: string;
+      /** The entry lives in the legacy `plugin` key rather than `plugins`. */
+      readonly legacy: boolean;
+    }
+  | { readonly status: "ABSENT" }
   | { readonly status: "INVALID_SHAPE" };
 
 export type InstallInspectionFailureReason = Extract<
@@ -75,7 +100,16 @@ export type InstallInspectionFailureReason = Extract<
 /** Read-only registration state of the JevGuard plugin entry in one `opencode.json`. */
 export type InstallInspection =
   | {
-      readonly status: "REGISTERED" | "NOT_REGISTERED";
+      readonly status: "REGISTERED";
+      readonly target: InstallTarget;
+      readonly path: string;
+      /** The pinned version, or `null` when the entry resolves to `@latest`. */
+      readonly pin: string | null;
+      /** The entry lives in the legacy `plugin` key rather than `plugins`. */
+      readonly legacy: boolean;
+    }
+  | {
+      readonly status: "NOT_REGISTERED";
       readonly target: InstallTarget;
       readonly path: string;
     }

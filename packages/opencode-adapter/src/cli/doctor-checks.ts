@@ -4,6 +4,7 @@ import {
   type HostDoctorCheck,
   versionDoctorCheck,
 } from "@jevguard/node-infra";
+import { JEVGUARD_PLUGIN_VERSION } from "../opencode-config/entry";
 import { createConfigFileSystem } from "../opencode-config/file-system";
 import { inspectInstall } from "../opencode-config/inspect";
 import type { InstallInspection, InstallTarget } from "../opencode-config/types";
@@ -14,6 +15,8 @@ import { pathContext } from "./path-context";
 import type { OpenCodePluginCheckCode } from "./types";
 
 const TARGETS: readonly InstallTarget[] = ["global", "project"];
+
+type RegisteredInspection = Extract<InstallInspection, { status: "REGISTERED" }>;
 
 export async function openCodeDoctorChecks(
   context: HostCliContext,
@@ -41,16 +44,31 @@ function inspectTargets(context: HostCliContext): Promise<readonly InstallInspec
   );
 }
 
+function registered(targets: readonly InstallInspection[]): readonly RegisteredInspection[] {
+  return targets.filter((target): target is RegisteredInspection => target.status === "REGISTERED");
+}
+
+/**
+ * A registered entry only counts as a healthy setup when it pins the version this CLI
+ * knows; an unpinned entry makes the host resolve `@latest`, which the doctor must not
+ * report as OK.
+ */
 function pluginCode(targets: readonly InstallInspection[]): OpenCodePluginCheckCode {
   if (targets.some((target) => target.status === "FAILED")) {
     return "INSPECTION_FAILED";
   }
 
-  if (targets.some((target) => target.status === "REGISTERED")) {
+  const entries = registered(targets);
+
+  if (entries.length === 0) {
+    return "NOT_REGISTERED";
+  }
+
+  if (entries.every((entry) => entry.pin === JEVGUARD_PLUGIN_VERSION)) {
     return "REGISTERED";
   }
 
-  return "NOT_REGISTERED";
+  return entries.some((entry) => entry.pin !== null) ? "PIN_MISMATCH" : "PIN_MISSING";
 }
 
 function pluginCheck(targets: readonly InstallInspection[]): HostDoctorCheck {

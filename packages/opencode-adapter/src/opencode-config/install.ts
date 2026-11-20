@@ -1,5 +1,5 @@
 import type { ConfirmationPrompt } from "@jevguard/node-infra";
-import { addPluginEntry, JEVGUARD_PLUGIN_ENTRY } from "./entry";
+import { addPluginEntry, JEVGUARD_PLUGIN_SPEC } from "./entry";
 import { resolveConfigPath } from "./paths";
 import { readConfigDocument } from "./read-document";
 import type {
@@ -10,7 +10,7 @@ import type {
   InstallTarget,
 } from "./types";
 
-const CONFIRMATION_MESSAGE = "Add JevGuard to the opencode.json plugins list?";
+const CONFIRMATION_MESSAGE = `Add JevGuard ${JEVGUARD_PLUGIN_SPEC} to the opencode.json plugins list?`;
 
 /**
  * Registers the JevGuard plugin in the target `opencode.json`. It is idempotent,
@@ -25,7 +25,7 @@ export async function install(dependencies: InstallDependencies): Promise<Instal
     return failed(dependencies.target, path, read.reason);
   }
 
-  const mutation = addPluginEntry(read.document, JEVGUARD_PLUGIN_ENTRY);
+  const mutation = addPluginEntry(read.document, JEVGUARD_PLUGIN_SPEC);
 
   if (mutation.status === "INVALID_SHAPE") {
     return failed(dependencies.target, path, "INVALID_CONFIG_SHAPE");
@@ -49,6 +49,15 @@ export async function install(dependencies: InstallDependencies): Promise<Instal
 
   if (!written) {
     return failed(dependencies.target, path, "WRITE_FAILURE");
+  }
+
+  if (mutation.status === "REPINNED") {
+    return {
+      status: "UPDATED",
+      target: dependencies.target,
+      path,
+      from: mutation.from,
+    };
   }
 
   return { status: "INSTALLED", target: dependencies.target, path };

@@ -1,14 +1,18 @@
-import { JEVGUARD_PLUGIN_ENTRY } from "../opencode-config/entry";
+import { JEVGUARD_PLUGIN_SPEC } from "../opencode-config/entry";
 import type { InstallFailureReason, InstallTarget } from "../opencode-config/types";
 
-export const MANUAL_INSTALL_SNIPPET = `{ "plugins": ["${JEVGUARD_PLUGIN_ENTRY}"] }`;
+export const MANUAL_INSTALL_SNIPPET = `{ "plugins": ["${JEVGUARD_PLUGIN_SPEC}"] }`;
 
 export function describeInstallInstalled(target: InstallTarget, path: string): string {
-  return `Registered JevGuard for the ${target} target in ${path}. Restart OpenCode to load it.`;
+  return `Registered JevGuard ${JEVGUARD_PLUGIN_SPEC} for the ${target} target in ${path}. Restart OpenCode to load it.`;
+}
+
+export function describeInstallUpdated(target: InstallTarget, path: string, from: string): string {
+  return `Updated the JevGuard entry for the ${target} target in ${path} from ${from} to ${JEVGUARD_PLUGIN_SPEC}. Restart OpenCode to load it.`;
 }
 
 export function describeInstallAlreadyInstalled(target: InstallTarget, path: string): string {
-  return `JevGuard is already registered for the ${target} target in ${path}.`;
+  return `JevGuard ${JEVGUARD_PLUGIN_SPEC} is already registered for the ${target} target in ${path}.`;
 }
 
 export function describeInstallAborted(path: string): string {

@@ -324,18 +324,21 @@ npx @pablozrrrr/jevguard-cli install --host opencode --project
 ```
 
 The installer asks for confirmation, edits only the `plugins` array, and is
-idempotent. It never writes the legacy `plugin` key, but an entry already there counts
-as installed. It only edits a `plugins` array of package strings or
-`{ "package": "..." }` objects; any other shape is left unchanged and the installer
-prints the manual snippet instead. `jevguard doctor` also checks that
-`opencode --version` is in the supported range `>=2.2.2 <2.4`. The plugin package no
-longer ships a `jevguard` binary; every command below runs through the CLI package, as
+idempotent. It writes the plugin pinned to the release the CLI was built with
+(`@pablozrrrr/jevguard@0.4.1`), so OpenCode resolves that version instead of `@latest`;
+an entry that is unpinned or pins another version is rewritten in place, and a legacy
+`plugin` entry is updated there without being moved to `plugins`. It only edits a list
+of package strings or `{ "package": "..." }` objects; any other shape is left unchanged
+and the installer prints the manual snippet instead. `jevguard doctor` warns when the
+registered pin differs from the CLI's version, and checks that `opencode --version` is
+in the supported range `>=2.2.2 <2.4`. The plugin package no longer ships a `jevguard`
+binary; every command below runs through the CLI package, as
 `npx @pablozrrrr/jevguard-cli <command>` or, once installed globally, as `jevguard <command>`.
 
 The manual alternative is one entry in `opencode.json`:
 
 ```json
-{ "plugins": ["@pablozrrrr/jevguard"] }
+{ "plugins": ["@pablozrrrr/jevguard@0.4.1"] }
 ```
 
 OpenCode resolves the package from the npm registry or its cache and loads it on the

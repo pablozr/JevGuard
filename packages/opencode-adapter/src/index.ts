@@ -43,6 +43,7 @@ export type {
   InstallPathContext,
   InstallTarget,
   OpenCodeVersionVerdict,
+  PluginEntryLookup,
   PluginEntryMutation,
 } from "./opencode-config";
 export {
@@ -51,12 +52,17 @@ export {
   createConfigFileSystem,
   createDefaultConfigDocument,
   createNodeConfigFileSystem,
+  findPluginEntry,
   inspectInstall,
   install,
   JEVGUARD_PLUGIN_ENTRY,
+  JEVGUARD_PLUGIN_SPEC,
+  JEVGUARD_PLUGIN_VERSION,
   OPENCODE_ENGINE_RANGE,
   OPENCODE_LATEST_SUPPORTED,
   OPENCODE_PIN_COMMAND,
+  pluginPackageOf,
+  pluginVersionOf,
   resolveConfigPath,
 } from "./opencode-config";
 export type {

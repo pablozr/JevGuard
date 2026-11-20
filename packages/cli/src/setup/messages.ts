@@ -1,10 +1,6 @@
 import { normalize } from "node:path";
 import type { CredentialSource } from "@jevguard/core";
-import type {
-  AgentDeliveryInspection,
-  HostCliExtension,
-  HostDetection,
-} from "@jevguard/node-infra";
+import type { HostCliExtension, HostDetection } from "@jevguard/node-infra";
 import type { SetupPlan, SetupStep } from "./types";
 
 export function noHostMessage(extensions: readonly HostCliExtension[]): string {
@@ -65,15 +61,17 @@ function describePin(detection: HostDetection): string {
   return detection.pinCommand === undefined ? "" : `; pin it with \`${detection.pinCommand}\``;
 }
 
-function describeDelivery(
-  extension: HostCliExtension,
-  inspection: AgentDeliveryInspection,
-): string {
-  const name = extension.displayName;
+function describeDelivery(step: Extract<SetupStep, { kind: "AGENT_DELIVERY" }>): string {
+  const name = step.extension.displayName;
+  const inspection = step.inspection;
+  // Without the flag, `--yes` skips this offered step; name the flag that applies it.
+  const hint = step.requested
+    ? ""
+    : " (asked interactively; pass --agent-delivery to enable it with --yes)";
 
   switch (inspection.status) {
     case "WOULD_ENABLE":
-      return `${name}: enable \`delivery: agent\` in ${displayPath(inspection.path)}`;
+      return `${name}: enable \`delivery: agent\` in ${displayPath(inspection.path)}${hint}`;
     case "ALREADY_ENABLED":
       return `${name}: \`delivery: agent\` is already enabled`;
     case "INVALID_EXISTING":
@@ -120,7 +118,7 @@ function statementOf(step: SetupStep): string {
     case "INSTALL":
       return describeInstall(step);
     case "AGENT_DELIVERY":
-      return describeDelivery(step.extension, step.inspection);
+      return describeDelivery(step);
     case "POLICY":
       return describePolicy(step);
     case "HOST":

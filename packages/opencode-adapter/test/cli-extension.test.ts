@@ -9,12 +9,14 @@ import type {
 } from "@jevguard/node-infra";
 import { describe, expect, test } from "vitest";
 import { createOpenCodeCliExtension } from "../src/cli";
+import { JEVGUARD_PLUGIN_SPEC, JEVGUARD_PLUGIN_VERSION } from "../src/index";
 
 const CWD = join("C:", "repo");
 const HOME = join("C:", "home");
 const GLOBAL_PATH = join(HOME, ".config", "opencode", "opencode.json");
 const PROJECT_PATH = join(CWD, "opencode.json");
 const PLUGIN = "@pablozrrrr/jevguard";
+const PLUGIN_SPEC = JEVGUARD_PLUGIN_SPEC;
 
 class FakeFiles implements TextFileSystem {
   readonly store = new Map<string, string>();
@@ -125,13 +127,29 @@ describe("OpenCode CLI extension detect", () => {
 describe("OpenCode CLI extension inspectInstall", () => {
   test("maps the registration state and returns the config path", async () => {
     const files = new FakeFiles();
-    files.store.set(GLOBAL_PATH, registered(PLUGIN));
+    files.store.set(GLOBAL_PATH, registered(PLUGIN_SPEC));
 
     const global = await extension.inspectInstall(contextOf({ files }), "global");
     const project = await extension.inspectInstall(contextOf({ files }), "project");
 
     expect(global).toEqual({ state: "INSTALLED", target: GLOBAL_PATH });
     expect(project).toEqual({ state: "NOT_INSTALLED", target: PROJECT_PATH });
+  });
+
+  test("an unpinned or older entry is not installed, so setup offers the re-pin", async () => {
+    const unpinned = new FakeFiles();
+    unpinned.store.set(GLOBAL_PATH, registered(PLUGIN));
+    const older = new FakeFiles();
+    older.store.set(PROJECT_PATH, registered(`${PLUGIN}@0.3.0`));
+
+    expect(await extension.inspectInstall(contextOf({ files: unpinned }), "global")).toEqual({
+      state: "NOT_INSTALLED",
+      target: GLOBAL_PATH,
+    });
+    expect(await extension.inspectInstall(contextOf({ files: older }), "project")).toEqual({
+      state: "NOT_INSTALLED",
+      target: PROJECT_PATH,
+    });
   });
 
   test("an unreadable document is UNKNOWN", async () => {
@@ -146,25 +164,38 @@ describe("OpenCode CLI extension inspectInstall", () => {
 });
 
 describe("OpenCode CLI extension install", () => {
-  test("registers the plugin and asks the user to restart OpenCode", async () => {
+  test("registers the pinned plugin and asks the user to restart OpenCode", async () => {
     const files = new FakeFiles();
 
     const outcome = await extension.install(contextOf({ files }), "global");
 
     expect(outcome).toMatchObject({ status: "CHANGED", code: "INSTALLED" });
     expect(outcome.lines.join("\n")).toContain(GLOBAL_PATH);
+    expect(outcome.lines.join("\n")).toContain(PLUGIN_SPEC);
     expect(files.writes).toHaveLength(1);
+    expect(files.store.get(GLOBAL_PATH)).toContain(PLUGIN_SPEC);
   });
 
-  test("leaves an already registered config unchanged", async () => {
+  test("leaves an already pinned config unchanged", async () => {
     const files = new FakeFiles();
-    files.store.set(PROJECT_PATH, registered(PLUGIN));
+    files.store.set(PROJECT_PATH, registered(PLUGIN_SPEC));
 
     const outcome = await extension.install(contextOf({ files }), "project");
 
     expect(outcome).toMatchObject({ status: "UNCHANGED", code: "ALREADY_INSTALLED" });
     expect(outcome.lines.join("\n")).toContain("already registered");
     expect(files.writes).toEqual([]);
+  });
+
+  test("re-pins an unpinned entry and says what changed", async () => {
+    const files = new FakeFiles();
+    files.store.set(PROJECT_PATH, registered(PLUGIN));
+
+    const outcome = await extension.install(contextOf({ files }), "project");
+
+    expect(outcome).toMatchObject({ status: "CHANGED", code: "UPDATED" });
+    expect(outcome.lines.join("\n")).toContain(`from ${PLUGIN} to ${PLUGIN_SPEC}`);
+    expect(files.store.get(PROJECT_PATH)).toContain(PLUGIN_SPEC);
   });
 
   test("a declined confirmation is DECLINED and writes nothing", async () => {
@@ -203,19 +234,57 @@ describe("OpenCode CLI extension doctor", () => {
 
   test("returns the plugin and version checks with the documented JSON keys", async () => {
     const files = new FakeFiles();
-    files.store.set(PROJECT_PATH, registered(PLUGIN));
+    files.store.set(PROJECT_PATH, registered(PLUGIN_SPEC));
 
     const checks = await doctor(files, new FakeProcesses(exited("2.2.2\n")));
 
     expect(checks.map((check) => check.json.id)).toEqual(["opencode-plugin", "opencode-version"]);
     expect(Object.keys(checks[0]?.json ?? {})).toEqual(["id", "status", "code", "targets"]);
     expect(checks[0]?.json).toMatchObject({ status: "OK", code: "REGISTERED" });
+    expect(checks[0]?.message).toContain(`pinned at ${JEVGUARD_PLUGIN_VERSION}`);
     expect(checks[1]?.json).toEqual({
       id: "opencode-version",
       status: "OK",
       code: "VERSION_SUPPORTED",
       version: "2.2.2",
     });
+  });
+
+  test("warns when the registered entry is unpinned", async () => {
+    const files = new FakeFiles();
+    files.store.set(PROJECT_PATH, registered(PLUGIN));
+
+    const [plugin] = await doctor(files, new FakeProcesses(exited("2.2.2")));
+    const text = `${plugin?.message}\n${plugin?.annotation}`;
+
+    expect(plugin?.json).toMatchObject({ status: "WARN", code: "PIN_MISSING" });
+    expect(text).toContain("without a version");
+    expect(text).toContain("jevguard install");
+  });
+
+  test("warns when the pin diverges from the CLI version, naming both", async () => {
+    const files = new FakeFiles();
+    files.store.set(GLOBAL_PATH, registered(`${PLUGIN}@0.3.0`));
+
+    const [plugin] = await doctor(files, new FakeProcesses(exited("2.2.2")));
+    const text = `${plugin?.message}\n${plugin?.annotation}`;
+
+    expect(plugin?.json).toMatchObject({ status: "WARN", code: "PIN_MISMATCH" });
+    expect(text).toContain("pinned at 0.3.0");
+    expect(text).toContain(`this CLI pins ${JEVGUARD_PLUGIN_VERSION}`);
+    expect(text).toContain("legacy `plugin` key");
+  });
+
+  test("a stale project entry keeps a pinned global one from reading OK", async () => {
+    const files = new FakeFiles();
+    files.store.set(GLOBAL_PATH, registered(PLUGIN_SPEC));
+    files.store.set(PROJECT_PATH, registered(PLUGIN));
+
+    const [plugin] = await doctor(files, new FakeProcesses(exited("2.2.2")));
+    const text = `${plugin?.message}\n${plugin?.annotation}`;
+
+    expect(plugin?.json).toMatchObject({ status: "WARN", code: "PIN_MISMATCH" });
+    expect(text).toContain(`${PROJECT_PATH} (unpinned)`);
   });
 
   test("warns when no target is registered and shows both paths", async () => {

@@ -401,7 +401,8 @@ file or a directory), or the current directory when none does.
 
 The one-command onboarding. It detects the host (OpenCode by default, `--host
 claude-code` for the other), registers the plugin in the project's host config
-(`opencode.json`, or the Claude Code plugin at project scope) and creates
+(`opencode.json`, or the Claude Code plugin at project scope), pinned to the version
+the CLI was built with, and creates
 `.jev/rules.md` with four commented example rules: `QUALITY-001` (tests),
 `SECRETS-001`, `SCOPE-001` and `API-001`. `--global` registers the plugin at user
 scope instead. It never asks and never replaces an existing file; a host that is
@@ -425,7 +426,9 @@ per reviewed commit, so `--last` is bounded to 50. Exit codes: `0` when it repla
 Sets everything up in one command, in this order: the Jev API key, the plugin on each
 supported host, `delivery: agent`, and an optional starter policy. It prints the plan and
 asks before each change. `--host opencode` or `--host claude-code` narrows the hosts and
-`--project` installs at project scope.
+`--project` installs at project scope. The OpenCode entry is written pinned to the
+plugin version the CLI was built with (`@pablozrrrr/jevguard@<version>`); a registered
+entry with another pin is re-pinned by the install step.
 
 - API key: if none is found (OS credential store or the `TYPESAFE_API_KEY` override),
   setup runs the same hidden prompt as `jevguard login`. Without a terminal it cannot
@@ -438,8 +441,9 @@ asks before each change. `--host opencode` or `--host claude-code` narrows the h
 - `.jev/rules.md`: a starter file is offered interactively and never overwrites an
   existing one. `--init` creates it without asking.
 - `--yes` applies the plan without asking, but never turns on `delivery: agent` or
-  creates `.jev/` unless `--agent-delivery` or `--init` is also given. Without `--yes`
-  and without a terminal, setup prints the plan, changes nothing and exits 1.
+  creates `.jev/` unless `--agent-delivery` or `--init` is also given; a skipped step
+  names the flag that would apply it. Without `--yes` and without a terminal, setup
+  prints the plan, changes nothing and exits 1.
 
 ### `jevguard doctor [--json]`
 
@@ -450,7 +454,7 @@ A local diagnosis: no network, no Jev transport, no writes. Checks, in order:
 | `credential` | `CREDENTIAL_STORE`, `CREDENTIAL_ENVIRONMENT`, `MISSING_CREDENTIAL`, `STORE_READ_FAILURE` |
 | `rules` | `RULES_VALID`, `RULES_INVALID`, `RULES_MISSING`, `RULES_READ_FAILURE`, `RULES_NOT_CHECKED` |
 | `config` | `CONFIG_DEFAULTS`, `CONFIG_VALID`, `CONFIG_PARSE_INVALID`, `CONFIG_INVALID`, `REMEDIATION_INVALID`, `CONFIG_READ_FAILURE`, `CONFIG_NOT_CHECKED` |
-| `opencode-plugin` | `REGISTERED`, `NOT_REGISTERED`, `INSPECTION_FAILED` |
+| `opencode-plugin` | `REGISTERED`, `PIN_MISSING`, `PIN_MISMATCH`, `NOT_REGISTERED`, `INSPECTION_FAILED` |
 | `opencode-version` | `VERSION_SUPPORTED`, `VERSION_UNSUPPORTED`, `VERSION_UNKNOWN` |
 | `claude-plugin` | `INSTALLED`, `DISABLED`, `NOT_INSTALLED`, `INSPECTION_FAILED` |
 | `claude-version` | `VERSION_SUPPORTED`, `VERSION_UNSUPPORTED`, `VERSION_UNKNOWN` |
@@ -463,8 +467,11 @@ unregistered or uninspectable OpenCode plugin is `WARN`, and so is an OpenCode v
 that `opencode --version` could not report, and a check skipped because the other
 policy file could not be read. The overall status is the worst check. The OpenCode
 check inspects the global `opencode.json` and the `opencode.json` in the current
-directory, and passes when either registers the plugin in its `plugins` list (or the
-legacy `plugin` list). The version check runs the `opencode` on `PATH` locally.
+directory. It is `OK` only when every registered entry (in `plugins` or the legacy
+`plugin` list) pins the plugin version the CLI was built with; an entry without a
+version (`PIN_MISSING`, so the host would resolve `@latest`) or pinning another one
+(`PIN_MISMATCH`) is `WARN`, with the pin `jevguard install` writes. The version check
+runs the `opencode` on `PATH` locally.
 
 The Claude Code checks run `claude plugin list --json`, `claude --version` and
 `node --version`, which inherit the environment, so they see the plugins of the config
