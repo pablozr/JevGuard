@@ -501,9 +501,15 @@ Known limitations:
 - **Interrupted or failed executions are not reviewed.** Their writes stay on disk and
   count as pre-existing changes for the next execution's snapshot, so they are not
   attributed to it.
-- **`opencode run --standalone`.** The review runs after the execution succeeds; a
-  standalone run can exit before it finishes. JevGuard reviews reliably in the TUI or
-  with `opencode serve` plus `opencode run --server`.
+- **One-shot `opencode run`.** The child loads the project plugin: loading was verified
+  on `2.3.0` on Linux and Windows, where the child starts the same server and loads the
+  entry in the project `opencode.json`. On Windows the host does not print the `loading
+  plugin` server line even with `--print-logs`, so loading there was observed through a
+  canary module's own side effects, not that line. A review finished before the exit was
+  observed on Linux only. The limit is timing, not loading, and it holds on any OS: the
+  process exits as soon as the turn ends and the shutdown drain is capped at 2 s, so a
+  review that still needs the Jev call can be cut. JevGuard reviews reliably in the TUI
+  or with `opencode serve` plus `opencode run --server`.
 - **Concurrent executions.** When two sessions run at once, or an execution starts
   while the previous one is still being finished, the review is `UNAVAILABLE`
   (`CONCURRENT_SESSIONS`, `BOUNDARY_RACE`) instead of mixing changes. Nested child

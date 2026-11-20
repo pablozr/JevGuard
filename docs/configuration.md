@@ -684,9 +684,14 @@ not reach the agent does not count.
 - Overlapping executions are not reviewed (`CONCURRENT_SESSIONS`, `BOUNDARY_RACE`); a
   missing start yields `MISSING_TURN_START`. Nested child sessions count as part of
   their parent execution.
-- With `opencode run --standalone` the process can exit before the background review
-  finishes. Use the TUI, or `opencode serve` with `opencode run --server`. No secret is carried, and no payload, task,
-diff, or secret is logged.
+- The one-shot `opencode run` child loads the project plugin like the TUI does: on
+  `2.3.0` the child started the same server and loaded the project entry on Linux and
+  Windows. On Windows the host does not print the `loading plugin` server line even
+  with `--print-logs`, so loading there was observed through a canary module's own side
+  effects. A review finished before the exit was observed on Linux only. What it cannot
+  guarantee on any OS is time — the process can exit before the background review
+  finishes. Use the TUI, or `opencode serve` with `opencode run --server`.
+  No secret is carried, and no payload, task, diff, or secret is logged.
 
 ## Claude Code
 
