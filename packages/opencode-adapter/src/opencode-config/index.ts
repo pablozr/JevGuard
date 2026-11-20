@@ -2,17 +2,31 @@ export { OPENCODE_CONFIG_FILE_NAME } from "./constants";
 export {
   addPluginEntry,
   createDefaultConfigDocument,
+  findPluginEntries,
   findPluginEntry,
   JEVGUARD_PLUGIN_ENTRY,
   JEVGUARD_PLUGIN_SPEC,
   JEVGUARD_PLUGIN_VERSION,
+  type PluginEntryMatch,
   pluginPackageOf,
   pluginVersionOf,
 } from "./entry";
-export { createConfigFileSystem, createNodeConfigFileSystem } from "./file-system";
+export {
+  createConfigFileSystem,
+  createNodeConfigFileSystem,
+  createNodePluginCacheFileSystem,
+} from "./file-system";
 export { inspectInstall } from "./inspect";
 export { install } from "./install";
 export { resolveConfigPath } from "./paths";
+export {
+  cacheDirNameOf,
+  type PluginCacheFileSystem,
+  type PluginResolution,
+  type PluginResolutionDependencies,
+  type PluginResolutionReason,
+  resolveCachedPlugin,
+} from "./resolution";
 export type {
   ConfigFileSystem,
   InspectInstallDependencies,

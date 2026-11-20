@@ -12,7 +12,7 @@ import { inspectInstall } from "../opencode-config/inspect";
 import { install } from "../opencode-config/install";
 import type { InstallInspection, InstallOutcome } from "../opencode-config/types";
 import { detectOpenCode } from "./detect";
-import { openCodeDoctorChecks } from "./doctor-checks";
+import { type OpenCodeDoctorDependencies, openCodeDoctorChecks } from "./doctor-checks";
 import {
   describeInstallAborted,
   describeInstallAlreadyInstalled,
@@ -101,7 +101,9 @@ async function installOpenCode(
 }
 
 /** The OpenCode side of the host-neutral CLI: plugin registration in `opencode.json`. */
-export function createOpenCodeCliExtension(): HostCliExtension {
+export function createOpenCodeCliExtension(
+  dependencies: OpenCodeDoctorDependencies = {},
+): HostCliExtension {
   return {
     id: "opencode",
     displayName: "OpenCode",
@@ -110,6 +112,6 @@ export function createOpenCodeCliExtension(): HostCliExtension {
     detect: detectOpenCode,
     inspectInstall: inspectOpenCodeInstall,
     install: installOpenCode,
-    doctor: openCodeDoctorChecks,
+    doctor: (context) => openCodeDoctorChecks(context, dependencies),
   };
 }

@@ -9,7 +9,12 @@ import type {
 } from "@jevguard/node-infra";
 import { describe, expect, test } from "vitest";
 import { createOpenCodeCliExtension } from "../src/cli";
-import { JEVGUARD_PLUGIN_SPEC, JEVGUARD_PLUGIN_VERSION } from "../src/index";
+import {
+  cacheDirNameOf,
+  JEVGUARD_PLUGIN_SPEC,
+  JEVGUARD_PLUGIN_VERSION,
+  type PluginCacheFileSystem,
+} from "../src/index";
 
 const CWD = join("C:", "repo");
 const HOME = join("C:", "home");
@@ -17,6 +22,7 @@ const GLOBAL_PATH = join(HOME, ".config", "opencode", "opencode.json");
 const PROJECT_PATH = join(CWD, "opencode.json");
 const PLUGIN = "@pablozrrrr/jevguard";
 const PLUGIN_SPEC = JEVGUARD_PLUGIN_SPEC;
+const CACHE_ROOT = join(HOME, ".cache", "opencode", "npm");
 
 class FakeFiles implements TextFileSystem {
   readonly store = new Map<string, string>();
@@ -61,6 +67,37 @@ function registered(...plugins: readonly string[]): string {
   return JSON.stringify({ plugin: plugins });
 }
 
+/** In-memory stand-in for the host's plugin cache. */
+class FakeCache implements PluginCacheFileSystem {
+  readonly directories = new Map<string, readonly string[]>();
+  readonly files = new Map<string, string>();
+
+  async readDirectory(path: string): Promise<readonly string[] | null> {
+    return this.directories.get(path) ?? null;
+  }
+
+  async readFile(path: string): Promise<string | null> {
+    return this.files.get(path) ?? null;
+  }
+}
+
+function cacheEntry(
+  cache: FakeCache,
+  spec: string,
+  version: string,
+  options: { readonly name?: string; readonly timestamp?: string } = {},
+): void {
+  const timestamp = options.timestamp ?? "1795150043554";
+  const name = options.name ?? PLUGIN;
+  const directory = join(CACHE_ROOT, cacheDirNameOf(spec));
+
+  cache.directories.set(directory, [...(cache.directories.get(directory) ?? []), timestamp]);
+  cache.files.set(
+    join(directory, timestamp, "node_modules", name, "package.json"),
+    JSON.stringify({ name, version }),
+  );
+}
+
 interface ContextOptions {
   files?: FakeFiles;
   processes?: ProcessRunner;
@@ -80,7 +117,7 @@ function contextOf(options: ContextOptions = {}): HostCliContext {
   };
 }
 
-const extension = createOpenCodeCliExtension();
+const extension = createOpenCodeCliExtension({ pluginCacheFileSystem: new FakeCache() });
 
 describe("OpenCode CLI extension identity", () => {
   test("declares its host, config file, scopes and remediation rules", () => {
@@ -232,22 +269,135 @@ describe("OpenCode CLI extension doctor", () => {
     return extension.doctor(contextOf({ files, processes }));
   }
 
-  test("returns the plugin and version checks with the documented JSON keys", async () => {
+  test("returns the plugin, runtime and version checks with the documented JSON keys", async () => {
     const files = new FakeFiles();
     files.store.set(PROJECT_PATH, registered(PLUGIN_SPEC));
 
     const checks = await doctor(files, new FakeProcesses(exited("2.2.2\n")));
 
-    expect(checks.map((check) => check.json.id)).toEqual(["opencode-plugin", "opencode-version"]);
+    expect(checks.map((check) => check.json.id)).toEqual([
+      "opencode-plugin",
+      "opencode-plugin-runtime",
+      "opencode-version",
+    ]);
     expect(Object.keys(checks[0]?.json ?? {})).toEqual(["id", "status", "code", "targets"]);
     expect(checks[0]?.json).toMatchObject({ status: "OK", code: "REGISTERED" });
     expect(checks[0]?.message).toContain(`pinned at ${JEVGUARD_PLUGIN_VERSION}`);
-    expect(checks[1]?.json).toEqual({
+    expect(checks[1]?.json).toMatchObject({
+      id: "opencode-plugin-runtime",
+      status: "WARN",
+      code: "NOT_CACHED",
+      package: PLUGIN,
+    });
+    expect(checks[2]?.json).toEqual({
       id: "opencode-version",
       status: "OK",
       code: "VERSION_SUPPORTED",
       version: "2.2.2",
     });
+  });
+
+  test("proves the runtime resolution from the host cache", async () => {
+    const files = new FakeFiles();
+    files.store.set(PROJECT_PATH, registered(PLUGIN_SPEC));
+    const cache = new FakeCache();
+    cacheEntry(cache, PLUGIN_SPEC, JEVGUARD_PLUGIN_VERSION);
+    const withCache = createOpenCodeCliExtension({ pluginCacheFileSystem: cache });
+
+    const checks = await withCache.doctor(contextOf({ files }));
+    const [plugin, runtime] = checks;
+
+    expect(plugin?.json).toMatchObject({ status: "OK", code: "REGISTERED" });
+    expect(runtime?.json).toEqual({
+      id: "opencode-plugin-runtime",
+      status: "OK",
+      code: "RESOLVED",
+      package: PLUGIN,
+      version: JEVGUARD_PLUGIN_VERSION,
+    });
+    expect(runtime?.message).toContain("resolves at runtime");
+    expect(`${runtime?.message}\n${runtime?.annotation}`).not.toContain(HOME);
+  });
+
+  test("never reports OK when the cached version is not the pinned one", async () => {
+    const files = new FakeFiles();
+    files.store.set(PROJECT_PATH, registered(PLUGIN_SPEC));
+    const cache = new FakeCache();
+    cacheEntry(cache, PLUGIN_SPEC, "0.3.0");
+    const withCache = createOpenCodeCliExtension({ pluginCacheFileSystem: cache });
+
+    const [, runtime] = await withCache.doctor(contextOf({ files }));
+
+    expect(runtime?.json).toMatchObject({ status: "WARN", code: "VERSION_MISMATCH" });
+    expect(runtime?.message).toContain("0.3.0");
+    expect(runtime?.message).toContain(JEVGUARD_PLUGIN_VERSION);
+  });
+
+  test("never reports OK when the cached package cannot be read", async () => {
+    const files = new FakeFiles();
+    files.store.set(PROJECT_PATH, registered(PLUGIN_SPEC));
+    const cache = new FakeCache();
+    cache.directories.set(join(CACHE_ROOT, cacheDirNameOf(PLUGIN_SPEC)), ["1795150043554"]);
+    const withCache = createOpenCodeCliExtension({ pluginCacheFileSystem: cache });
+
+    const [, runtime] = await withCache.doctor(contextOf({ files }));
+
+    expect(runtime?.json).toMatchObject({ status: "WARN", code: "UNREADABLE" });
+    expect(runtime?.message).toContain("cannot be proven");
+  });
+
+  test("warns when there is no entry to resolve", async () => {
+    const [, runtime] = await extension.doctor(contextOf({ files: new FakeFiles() }));
+
+    expect(runtime?.json).toMatchObject({ status: "WARN", code: "NOT_REGISTERED" });
+  });
+
+  test("a divergent legacy entry keeps the runtime check from reading OK", async () => {
+    const files = new FakeFiles();
+    // Both keys are live for the host: `plugins` pins the CLI version, the legacy
+    // `plugin` key pins an older one.
+    files.store.set(
+      PROJECT_PATH,
+      JSON.stringify({ plugins: [PLUGIN_SPEC], plugin: [`${PLUGIN}@0.3.0`] }),
+    );
+    const cache = new FakeCache();
+    cacheEntry(cache, PLUGIN_SPEC, JEVGUARD_PLUGIN_VERSION);
+    cacheEntry(cache, `${PLUGIN}@0.3.0`, "0.3.0");
+    const withCache = createOpenCodeCliExtension({ pluginCacheFileSystem: cache });
+
+    const [, runtime] = await withCache.doctor(contextOf({ files }));
+
+    expect(runtime?.json).toMatchObject({ status: "WARN", code: "DIVERGENT_ENTRIES" });
+    expect(runtime?.message).toContain("disagree");
+    expect(`${runtime?.message}\n${runtime?.annotation}`).toContain("jevguard install");
+  });
+
+  test("a divergent duplicate inside plugins keeps the runtime check from reading OK", async () => {
+    const files = new FakeFiles();
+    files.store.set(PROJECT_PATH, JSON.stringify({ plugins: [PLUGIN_SPEC, `${PLUGIN}@0.3.0`] }));
+    const cache = new FakeCache();
+    cacheEntry(cache, PLUGIN_SPEC, JEVGUARD_PLUGIN_VERSION);
+    cacheEntry(cache, `${PLUGIN}@0.3.0`, "0.3.0");
+    const withCache = createOpenCodeCliExtension({ pluginCacheFileSystem: cache });
+
+    const [, runtime] = await withCache.doctor(contextOf({ files }));
+
+    expect(runtime?.json).toMatchObject({ status: "WARN", code: "DIVERGENT_ENTRIES" });
+  });
+
+  test("entries that agree on one version still resolve", async () => {
+    const files = new FakeFiles();
+    files.store.set(
+      PROJECT_PATH,
+      JSON.stringify({ plugins: [PLUGIN_SPEC], plugin: [PLUGIN_SPEC] }),
+    );
+    const cache = new FakeCache();
+    cacheEntry(cache, PLUGIN_SPEC, JEVGUARD_PLUGIN_VERSION);
+    const withCache = createOpenCodeCliExtension({ pluginCacheFileSystem: cache });
+
+    const [, runtime] = await withCache.doctor(contextOf({ files }));
+
+    expect(runtime?.json).toMatchObject({ status: "OK", code: "RESOLVED" });
   });
 
   test("warns when the registered entry is unpinned", async () => {
@@ -329,7 +479,7 @@ describe("OpenCode CLI extension doctor", () => {
     ["2.1.1", "FAIL", "VERSION_UNSUPPORTED", "2.1.1"],
     ["2.4.0", "FAIL", "VERSION_UNSUPPORTED", "2.4.0"],
   ] as const)("classifies the version output %j", async (stdout, status, code, version) => {
-    const [, versionCheck] = await doctor(new FakeFiles(), new FakeProcesses(exited(stdout)));
+    const [, , versionCheck] = await doctor(new FakeFiles(), new FakeProcesses(exited(stdout)));
 
     expect(versionCheck?.json).toEqual({ id: "opencode-version", status, code, version });
   });
@@ -339,7 +489,7 @@ describe("OpenCode CLI extension doctor", () => {
     [{ kind: "TIMED_OUT" } as ProcessResult],
     [{ kind: "EXITED", exitCode: 1, stdout: "2.2.2" } as ProcessResult],
   ])("an unreadable version (%j) is a VERSION_UNKNOWN warning", async (result) => {
-    const [, versionCheck] = await doctor(new FakeFiles(), new FakeProcesses(result));
+    const [, , versionCheck] = await doctor(new FakeFiles(), new FakeProcesses(result));
 
     expect(versionCheck?.json).toEqual({
       id: "opencode-version",
@@ -350,7 +500,7 @@ describe("OpenCode CLI extension doctor", () => {
   });
 
   test("names the supported range when the version is unsupported", async () => {
-    const [, versionCheck] = await doctor(new FakeFiles(), new FakeProcesses(exited("2.1.1")));
+    const [, , versionCheck] = await doctor(new FakeFiles(), new FakeProcesses(exited("2.1.1")));
 
     const text = `${versionCheck?.message}\n${versionCheck?.annotation}`;
 
@@ -359,7 +509,7 @@ describe("OpenCode CLI extension doctor", () => {
   });
 
   test("the unsupported hint names the newest supported line and how to pin it", async () => {
-    const [, versionCheck] = await doctor(new FakeFiles(), new FakeProcesses(exited("2.4.0")));
+    const [, , versionCheck] = await doctor(new FakeFiles(), new FakeProcesses(exited("2.4.0")));
 
     const text = `${versionCheck?.message}\n${versionCheck?.annotation}`;
 
@@ -369,7 +519,7 @@ describe("OpenCode CLI extension doctor", () => {
   });
 
   test("a supported 2.3.x host needs no pin advice", async () => {
-    const [, versionCheck] = await doctor(new FakeFiles(), new FakeProcesses(exited("2.3.0")));
+    const [, , versionCheck] = await doctor(new FakeFiles(), new FakeProcesses(exited("2.3.0")));
 
     expect(versionCheck?.message).toContain("OpenCode 2.3.0 is supported.");
     expect(versionCheck?.annotation).toBeNull();
