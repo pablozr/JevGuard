@@ -43,15 +43,22 @@ export type {
   InstallPathContext,
   InstallTarget,
   OpenCodeVersionVerdict,
+  PluginCacheFileSystem,
   PluginEntryLookup,
   PluginEntryMutation,
+  PluginResolution,
+  PluginResolutionDependencies,
+  PluginResolutionReason,
 } from "./opencode-config";
 export {
   addPluginEntry,
+  cacheDirNameOf,
   checkOpenCodeVersion,
   createConfigFileSystem,
   createDefaultConfigDocument,
   createNodeConfigFileSystem,
+  createNodePluginCacheFileSystem,
+  findPluginEntries,
   findPluginEntry,
   inspectInstall,
   install,
@@ -63,6 +70,7 @@ export {
   OPENCODE_PIN_COMMAND,
   pluginPackageOf,
   pluginVersionOf,
+  resolveCachedPlugin,
   resolveConfigPath,
 } from "./opencode-config";
 export type {

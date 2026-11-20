@@ -1,4 +1,5 @@
 import {
+  findPluginEntries,
   findPluginEntry,
   JEVGUARD_PLUGIN_ENTRY,
   JEVGUARD_PLUGIN_SPEC,
@@ -10,7 +11,8 @@ import type { InspectInstallDependencies, InstallInspection } from "./types";
 
 /**
  * Read-only counterpart of `install`: reports whether the JevGuard plugin entry is
- * registered in the target `opencode.json`, and which version it pins. It never writes
+ * registered in the target `opencode.json`, which version it pins, and every occurrence
+ * of the package the host also reads. It never writes
  * and never throws; every failure maps to a typed reason.
  */
 export async function inspectInstall(
@@ -35,6 +37,8 @@ export async function inspectInstall(
         path,
         pin: pluginVersionOf(lookup.spec),
         legacy: lookup.legacy,
+        spec: lookup.spec,
+        specs: findPluginEntries(read.document, JEVGUARD_PLUGIN_ENTRY).map((match) => match.spec),
       };
     case "ABSENT":
       return { status: "NOT_REGISTERED", target, path };

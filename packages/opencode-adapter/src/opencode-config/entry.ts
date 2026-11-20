@@ -27,6 +27,12 @@ export function createDefaultConfigDocument(): Readonly<Record<string, unknown>>
 
 type PluginListEntry = string | { readonly package: string };
 
+/** One registered occurrence of the package: its spec as written and which key holds it. */
+export interface PluginEntryMatch {
+  readonly spec: string;
+  readonly legacy: boolean;
+}
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -63,16 +69,11 @@ function isEntryFor(value: PluginListEntry, entry: string): boolean {
   return pluginPackageOf(specOf(value)) === entry;
 }
 
-interface EntryOccurrence {
-  readonly spec: string;
-  readonly legacy: boolean;
-}
-
 /** Every entry of the package, in `plugins` first and then the legacy `plugin` key. */
 function occurrencesOf(
   document: Record<string, unknown>,
   entry: string,
-): readonly EntryOccurrence[] {
+): readonly PluginEntryMatch[] {
   const existing = (document[PLUGINS_KEY] ?? []) as PluginListEntry[];
   const legacy = (document[LEGACY_PLUGIN_KEY] ?? []) as PluginListEntry[];
 
@@ -127,6 +128,26 @@ export function findPluginEntry(
   return first === undefined
     ? { status: "ABSENT" }
     : { status: "FOUND", spec: first.spec, legacy: first.legacy };
+}
+
+/**
+ * Every occurrence of the package in a parsed `opencode.json` document: the `plugins`
+ * entries first, then the legacy `plugin` ones. The host reads both keys, so every
+ * occurrence is a live registration the doctor must account for.
+ */
+export function findPluginEntries(document: unknown, entry: string): readonly PluginEntryMatch[] {
+  if (!isPlainObject(document)) {
+    return [];
+  }
+
+  const existing = document[PLUGINS_KEY] ?? [];
+  const legacy = document[LEGACY_PLUGIN_KEY] ?? [];
+
+  if (!isPluginList(existing) || !isPluginList(legacy)) {
+    return [];
+  }
+
+  return occurrencesOf(document, entry);
 }
 
 function pinned(value: PluginListEntry, spec: string): PluginListEntry {

@@ -455,6 +455,7 @@ A local diagnosis: no network, no Jev transport, no writes. Checks, in order:
 | `rules` | `RULES_VALID`, `RULES_INVALID`, `RULES_MISSING`, `RULES_READ_FAILURE`, `RULES_NOT_CHECKED` |
 | `config` | `CONFIG_DEFAULTS`, `CONFIG_VALID`, `CONFIG_PARSE_INVALID`, `CONFIG_INVALID`, `REMEDIATION_INVALID`, `CONFIG_READ_FAILURE`, `CONFIG_NOT_CHECKED` |
 | `opencode-plugin` | `REGISTERED`, `PIN_MISSING`, `PIN_MISMATCH`, `NOT_REGISTERED`, `INSPECTION_FAILED` |
+| `opencode-plugin-runtime` | `RESOLVED`, `VERSION_MISMATCH`, `DIVERGENT_ENTRIES`, `NOT_CACHED`, `UNREADABLE`, `UNSUPPORTED`, `NOT_REGISTERED` |
 | `opencode-version` | `VERSION_SUPPORTED`, `VERSION_UNSUPPORTED`, `VERSION_UNKNOWN` |
 | `claude-plugin` | `INSTALLED`, `DISABLED`, `NOT_INSTALLED`, `INSPECTION_FAILED` |
 | `claude-version` | `VERSION_SUPPORTED`, `VERSION_UNSUPPORTED`, `VERSION_UNKNOWN` |
@@ -472,6 +473,18 @@ directory. It is `OK` only when every registered entry (in `plugins` or the lega
 version (`PIN_MISSING`, so the host would resolve `@latest`) or pinning another one
 (`PIN_MISMATCH`) is `WARN`, with the pin `jevguard install` writes. The version check
 runs the `opencode` on `PATH` locally.
+
+`opencode-plugin-runtime` proves the entry actually resolves, without starting OpenCode
+and without calling a model: it reads the manifest the host's installer leaves in its
+plugin cache (`~/.cache/opencode/npm/<spec>/<install>/node_modules/<package>/package.json`).
+It is `OK` only when every registered entry resolves to the package, and to the pinned
+version when the entry pins one (`RESOLVED`); a cache with another version is
+`VERSION_MISMATCH`, entries of the package that resolve to different versions are
+`DIVERGENT_ENTRIES`, an entry that is not in the cache yet is `NOT_CACHED`, and an install
+that cannot be read is `UNREADABLE` — all `WARN`, each saying what to do. An entry that
+is not a registry spec cannot be proven (`UNSUPPORTED`), and no entry is `NOT_REGISTERED`.
+The report carries the package and the version, never a cache path, a diff, a task or a
+credential.
 
 The Claude Code checks run `claude plugin list --json`, `claude --version` and
 `node --version`, which inherit the environment, so they see the plugins of the config

@@ -75,6 +75,8 @@ describe("inspectInstall", () => {
       path: GLOBAL_PATH,
       pin: JEVGUARD_PLUGIN_VERSION,
       legacy: false,
+      spec: JEVGUARD_PLUGIN_SPEC,
+      specs: [JEVGUARD_PLUGIN_SPEC],
     });
   });
 
@@ -90,6 +92,8 @@ describe("inspectInstall", () => {
       path: PROJECT_PATH,
       pin: "0.2.3",
       legacy: false,
+      spec: `${JEVGUARD_PLUGIN_ENTRY}@0.2.3`,
+      specs: [`${JEVGUARD_PLUGIN_ENTRY}@0.2.3`],
     });
   });
 
@@ -109,6 +113,8 @@ describe("inspectInstall", () => {
       path: GLOBAL_PATH,
       pin: "0.3.0",
       legacy: true,
+      spec: `${JEVGUARD_PLUGIN_ENTRY}@0.3.0`,
+      specs: [JEVGUARD_PLUGIN_SPEC, `${JEVGUARD_PLUGIN_ENTRY}@0.3.0`],
     });
   });
 
@@ -206,6 +212,8 @@ describe("inspectInstall", () => {
       path: XDG_PATH,
       pin: JEVGUARD_PLUGIN_VERSION,
       legacy: false,
+      spec: JEVGUARD_PLUGIN_SPEC,
+      specs: [JEVGUARD_PLUGIN_SPEC],
     });
   });
 

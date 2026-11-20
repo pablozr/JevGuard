@@ -107,6 +107,10 @@ export type InstallInspection =
       readonly pin: string | null;
       /** The entry lives in the legacy `plugin` key rather than `plugins`. */
       readonly legacy: boolean;
+      /** The entry as written, e.g. `@pablozrrrr/jevguard@0.4.1` or a `file:` path. */
+      readonly spec: string;
+      /** Every registered occurrence across both keys, the first-found one included. */
+      readonly specs: readonly string[];
     }
   | {
       readonly status: "NOT_REGISTERED";
