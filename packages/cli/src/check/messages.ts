@@ -30,9 +30,9 @@ export function describeRangeTooLarge(totalCommits: number, limit: number): stri
 
 /**
  * Human-readable check: the range, a line per commit with its outcome and rule
- * outcomes, the totals and the result. It prints IDs, outcomes, probabilities and
- * typed reasons only — never the task (including the commit subject) or any diff
- * content.
+ * outcomes, the totals and the result. It prints IDs, outcomes, commit revisions
+ * and typed reasons only — never the task (including the commit subject), any diff
+ * content, a severity, a probability or a path.
  */
 export function describeCheck(
   result: Extract<CheckResult, { status: "CHECKED" }>,
@@ -78,7 +78,11 @@ export function serializeCheck(
       },
       commits: result.commits.map((commit) =>
         commit.status === "REVIEWED"
-          ? { sha: commit.sha, status: "REVIEWED", ...toReviewLogEntry(commit.review) }
+          ? {
+              sha: commit.sha,
+              status: "REVIEWED",
+              ...toReviewLogEntry(commit.review),
+            }
           : commit,
       ),
     },

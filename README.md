@@ -657,10 +657,15 @@ jevguard check --range origin/main..HEAD --annotations   # GitHub Actions
 Each non-merge commit's own patch is the unit and its subject is the task; merge
 commits are skipped. Exit codes: `0` for pass or warnings, `1` when a rule with
 severity `error` failed, `2` when the check could not run. `UNAVAILABLE` never fails:
-it exits `0` with a warning, or `1` with `--strict`. The report, the JSON and the
-GitHub annotations carry rule IDs, outcomes, probabilities, severities, typed reason
-codes and commit revisions — never the diff, the commit subject or a credential — and
-the command writes nothing.
+it exits `0` with a warning, or `1` with `--strict`. Every mode carries rule IDs,
+outcomes, commit revisions and the typed reason codes of commits not judged
+completely; the JSON adds each rule's severity, probability and scoped paths, plus
+the slice metadata of a sliced rule (slice index, path, kind and hunk ordinal) that
+the review log projection already allows, while the text report gives each rule's
+ID and outcome only. A GitHub annotation carries the rule ID, the shortened commit
+revision, the probability and the severity — nothing else — and the typed reason
+codes in the warning for commits not judged completely. None of them ever carries
+the diff, the commit subject or a credential, and the command writes nothing.
 The Jev key goes in a repository secret. See [check mode](./docs/check-mode.md) for the
 workflow example and the `SCOPE-001` caveat.
 

@@ -101,10 +101,16 @@ it never carries a path, the commit subject or any diff content.
 
 - Only the commits in the range, each with its own patch. Nothing else in the
   repository is read, and no built-in check runs.
-- The output — text, JSON or annotations — carries rule IDs, outcomes, probabilities,
-  severities, commit revisions and typed reason codes. It never carries the diff, the
-  task (including the commit subject) or a credential, so a CI log kept by a third
-  party cannot leak the change.
+- The output — text, JSON or annotations — carries rule IDs, outcomes, commit
+  revisions and the typed reason codes of commits not judged completely, never the
+  diff: the text report gives each rule's ID and outcome per commit; the JSON adds
+  each rule's severity, probability and scoped paths, plus the slice metadata of a
+  sliced rule (slice index, path, kind and hunk ordinal) that the review log
+  projection allows; an annotation carries only the rule ID, the shortened commit
+  revision, the probability and the severity, plus the typed reason codes in the
+  warning for commits not judged completely. None of them carries the diff, the task
+  (including the commit subject) or a credential, so a CI log kept by a third party
+  cannot leak the change.
 - It writes nothing: no review history, no file, no repository change, and it never
   edits the code.
 - Each rule over each commit is one Jev call, which is what the limit bounds.
