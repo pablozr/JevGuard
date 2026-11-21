@@ -8,7 +8,7 @@ or agent.
 
 See [ADR 0023](./adr/0023-check-mode-in-ci.md) for the design and the decisions behind
 it, and
-[configuration](./configuration.md#jevguard-check---range-basehead---last-1-50---rule-id---strict---json---annotations)
+[configuration](./configuration.md#jevguard-check---range-basehead---last-1-50---rule-id---strict---json----annotations)
 for the flag-by-flag reference.
 
 ## Quick start
@@ -39,8 +39,10 @@ above that limit is refused with its commit count rather than silently truncated
 
 `UNAVAILABLE` never becomes a failure: a rule whose evidence was incomplete, or a
 patch the parser could not read, leaves the check at exit `0` with an explicit
-warning. `--strict` turns that warning into exit `1`, for teams that would rather see
-a broken credential or an oversized patch as a red check. It is off by default.
+warning. A patch the Git reader had to cut at its 16 MiB output bound is reported the
+same way, as `DIFF_TOO_LARGE`: the commit is never judged over the prefix. `--strict`
+turns that warning into exit `1`, for teams that would rather see a broken credential
+or an oversized patch as a red check. It is off by default.
 
 A `FAIL` of a `warning`-severity rule never fails the build either. The gate already
 keeps a warning rule at `WARN` under the default thresholds, and the check does not
@@ -77,20 +79,23 @@ jobs:
         env:
           TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
         run: |
-          git fetch origin ${{ github.base_ref }}
           npx @pablozrrrr/jevguard-cli check \
             --range origin/${{ github.base_ref }}..HEAD \
             --annotations
 ```
 
 `fetch-depth: 0` (or at least enough history to contain the base) matters: with the
-default shallow checkout the range cannot be resolved and the check exits `2`. The
-same pattern works for a push job with `--range "${{ github.event.before }}..${{ github.sha }}"`.
+default shallow checkout the base is not there, the range cannot be resolved and the
+check exits `2`. That full checkout is also why no separate `git fetch` is needed.
+The same pattern works for a push job with
+`--range "${{ github.event.before }}..${{ github.sha }}"` — except on the first push
+of a branch, where `github.event.before` is all zeros and the range is invalid: gate
+that job on the value or fall back to the default branch.
 
 `--annotations` prints GitHub workflow commands (`::error` / `::warning`) next to the
 plain report, so a failing rule shows up on the pull request's annotations. An
-annotation carries the rule ID, the commit revision and the probability; it never
-carries a path, the commit subject or any diff content.
+annotation carries the severity, the rule ID, the commit revision and the probability;
+it never carries a path, the commit subject or any diff content.
 
 ## What it reads, and what it does not
 

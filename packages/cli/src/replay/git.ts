@@ -10,6 +10,12 @@ export const FIELD_SEPARATOR = "\u001f";
 export interface GitResult {
   readonly ok: boolean;
   readonly stdout: string;
+  /**
+   * True when output kept arriving after {@link STDOUT_LIMIT} was reached and the excess
+   * was dropped. The text is then a prefix of Git's output, never the whole patch, so a
+   * caller that judges it must treat the unit as unread rather than as a complete diff.
+   */
+  readonly truncated: boolean;
 }
 
 /**
@@ -21,6 +27,7 @@ export function runGit(args: readonly string[], cwd?: string): Promise<GitResult
   return new Promise((resolve) => {
     let settled = false;
     let stdout = "";
+    let truncated = false;
 
     function settle(result: GitResult): void {
       if (settled) return;
@@ -37,16 +44,25 @@ export function runGit(args: readonly string[], cwd?: string): Promise<GitResult
     });
     const timer = setTimeout(() => {
       child.kill();
-      settle({ ok: false, stdout: "" });
+      settle({ ok: false, stdout: "", truncated: false });
     }, GIT_TIMEOUT_MS);
 
     child.stdout.setEncoding("utf8");
     child.stdout.on("data", (chunk: string) => {
-      if (stdout.length < STDOUT_LIMIT) stdout += chunk.slice(0, STDOUT_LIMIT - stdout.length);
+      if (stdout.length >= STDOUT_LIMIT) {
+        truncated = true;
+
+        return;
+      }
+
+      const room = STDOUT_LIMIT - stdout.length;
+
+      if (chunk.length > room) truncated = true;
+      stdout += chunk.slice(0, room);
     });
     child.stderr.resume();
-    child.on("error", () => settle({ ok: false, stdout: "" }));
-    child.on("close", (code) => settle({ ok: code === 0, stdout }));
+    child.on("error", () => settle({ ok: false, stdout: "", truncated: false }));
+    child.on("close", (code) => settle({ ok: code === 0, stdout, truncated }));
   });
 }
 
@@ -90,7 +106,7 @@ export function createGitCommitReader(): (last: number) => Promise<HistoryRead> 
 
     for (const commit of commits) {
       const patch = commit.merge
-        ? { ok: true, stdout: "" }
+        ? { ok: true, stdout: "", truncated: false }
         : await runGit(["show", "--no-color", "--no-ext-diff", "--format=", commit.sha]);
 
       if (!patch.ok) return { status: "FAILED", reason: "GIT_UNAVAILABLE" };
@@ -100,6 +116,7 @@ export function createGitCommitReader(): (last: number) => Promise<HistoryRead> 
         subject: commit.subject,
         diff: patch.stdout,
         merge: commit.merge,
+        ...(patch.truncated ? { diffTruncated: true as const } : {}),
       });
     }
 

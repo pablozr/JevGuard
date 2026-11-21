@@ -58,7 +58,13 @@ export function createGitRangeReader(
 
       if (!patch.ok) return { status: "FAILED", reason: "GIT_UNAVAILABLE" };
 
-      commits.push({ sha: head.sha, subject: head.subject, diff: patch.stdout, merge: false });
+      commits.push({
+        sha: head.sha,
+        subject: head.subject,
+        diff: patch.stdout,
+        merge: false,
+        ...(patch.truncated ? { diffTruncated: true as const } : {}),
+      });
     }
 
     return { status: "READ", commits };

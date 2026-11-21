@@ -282,6 +282,30 @@ describe("executeCheck", () => {
     expect(jev.requests).toEqual([]);
   });
 
+  test("a cut patch is INCOMPLETE, not PASS, and never reaches Jev", async () => {
+    const jev = new FakeJevPort("PASS");
+    const sha = "a".repeat(40);
+
+    const result = await executeCheck(
+      { range: "main..HEAD", last: null, ruleId: null, strict: false },
+      dependencies([commit(sha, { diffTruncated: true })], jev),
+    );
+
+    expect(result).toEqual(checked([{ sha, status: "INPUT_FAILED", reason: "DIFF_TOO_LARGE" }]));
+    expect(jev.requests).toEqual([]);
+
+    if (result.status !== "CHECKED") return;
+
+    const verdict = evaluateCheck(result.commits);
+
+    expect(verdict.verdict).toBe("INCOMPLETE");
+    expect(checkExitCode(verdict, false)).toBe(0);
+    expect(checkExitCode(verdict, true)).toBe(1);
+    expect(describeCheck(result, verdict, "main..HEAD", false).join("\n")).toContain(
+      "DIFF_TOO_LARGE",
+    );
+  });
+
   test("an empty range is a completed check with nothing to judge", async () => {
     const result = await executeCheck(
       { range: "main..HEAD", last: null, ruleId: null, strict: false },
@@ -590,5 +614,26 @@ describe("createGitRangeReader", () => {
 
     expect(read.status === "READ" && read.commits[0]?.diff).toContain("b.txt");
     expect(read.status === "READ" && read.commits[0]?.diff).not.toContain("a.txt");
+    expect(read.status === "READ" && read.commits[0]?.diffTruncated).toBeUndefined();
+  });
+
+  test("marks a patch the reader had to cut, so a prefix is never taken for the whole diff", {
+    timeout: 120_000,
+  }, async () => {
+    const base = await commitFile("a.txt", "a");
+    await writeFile(join(directory, "pad.txt"), `${"x".repeat(17 * 1024 * 1024)}\n`);
+    await git(["add", "pad.txt"]);
+    await git(["commit", "--quiet", "-m", "pad the history"]);
+    const read = await createGitRangeReader(directory)(`${base}..HEAD`, {
+      newest: null,
+      cap: 50,
+    });
+
+    expect(read.status).toBe("READ");
+    if (read.status !== "READ") return;
+
+    expect(read.commits).toHaveLength(1);
+    expect(read.commits[0]?.diff.length).toBe(16 * 1024 * 1024);
+    expect(read.commits[0]?.diffTruncated).toBe(true);
   });
 });

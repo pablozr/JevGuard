@@ -27,6 +27,11 @@ export interface ReplayedCommit {
   readonly subject: string;
   readonly diff: string;
   readonly merge: boolean;
+  /**
+   * Set when the reader cut the patch at its output bound: `diff` is a prefix of the
+   * commit's real patch, so the unit is unread and must not be judged.
+   */
+  readonly diffTruncated?: true;
 }
 
 export type HistoryRead =

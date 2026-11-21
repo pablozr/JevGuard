@@ -59,6 +59,10 @@ async function replayCommit(
     return { sha: commit.sha, status: "SKIPPED", reason: "MERGE_COMMIT" };
   }
 
+  if (commit.diffTruncated === true) {
+    return { sha: commit.sha, status: "INPUT_FAILED", reason: "DIFF_TOO_LARGE" };
+  }
+
   if (commit.diff.trim() === "") {
     return { sha: commit.sha, status: "SKIPPED", reason: "NO_PATCH" };
   }

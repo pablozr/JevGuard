@@ -440,13 +440,13 @@ commits are never units, so they neither count against the limit nor reach Jev.
   call.
 - `--rule <id>` evaluates only that rule. A `--rule` that matches nothing is exit `2`.
 - `--strict` makes a commit that could not be judged completely fail the check
-  (exit `1`). Without it, `UNAVAILABLE` and an unparseable patch are reported as a
-  warning and never fail.
+  (exit `1`). Without it, `UNAVAILABLE`, an unparseable patch and a patch the reader
+  cut at its 16 MiB bound (`DIFF_TOO_LARGE`) are reported as a warning and never fail.
 - `--json` prints `{ "version": 1, "status": "CHECKED", "verdict", "summary", "commits" }`
   with the same allowlist projection as the structured log.
 - `--annotations` prints GitHub Actions workflow commands (`::error` / `::warning`)
-  next to the plain report. An annotation carries the rule ID, the commit revision and
-  the probability only.
+  next to the plain report. An annotation carries the severity, the rule ID, the
+  commit revision and the probability.
 
 Exit codes: `0` when no `error`-severity rule `FAIL`ed (warnings are fine, and so is a
 `FAIL` of a `warning`-severity rule — the gate, not the check, decides thresholds);

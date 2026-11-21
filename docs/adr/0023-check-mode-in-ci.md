@@ -41,7 +41,10 @@ by the caller. Two properties bound it:
    that policy.
 4. `UNAVAILABLE` never becomes a failure: the run exits `0` and prints an explicit
    warning naming how many commits were not judged and why. An unparseable patch is
-   treated the same way. `--strict` turns that warning into exit `1` for teams that
+   treated the same way, and so is a patch the Git reader had to cut at its 16 MiB
+   output bound: the unit is reported as `DIFF_TOO_LARGE` and never judged over the
+   prefix, because a cut the author of the pull request can place is not evidence.
+   `--strict` turns that warning into exit `1` for teams that
    prefer a broken credential or an oversized patch to be visible as a red check; it is
    off by default, because a policy engine must never pretend incomplete evidence is a
    violation, and a red check tied to the reviewer's own infrastructure teaches people

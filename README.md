@@ -658,8 +658,9 @@ Each non-merge commit's own patch is the unit and its subject is the task; merge
 commits are skipped. Exit codes: `0` for pass or warnings, `1` when a rule with
 severity `error` failed, `2` when the check could not run. `UNAVAILABLE` never fails:
 it exits `0` with a warning, or `1` with `--strict`. The report, the JSON and the
-GitHub annotations carry rule IDs, outcomes, probabilities and commit revisions only —
-never the diff, the commit subject or a credential — and the command writes nothing.
+GitHub annotations carry rule IDs, outcomes, probabilities, severities, typed reason
+codes and commit revisions — never the diff, the commit subject or a credential — and
+the command writes nothing.
 The Jev key goes in a repository secret. See [check mode](./docs/check-mode.md) for the
 workflow example and the `SCOPE-001` caveat.
 
