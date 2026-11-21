@@ -937,10 +937,29 @@ remediation:
   model: sonnet      # optional; Claude alias or id; default: the session's model
 ```
 
-Enforce (`enforce.rules`, `enforce.budget_ms`) is a designed, not yet implemented mode:
-[ADR 0022](./adr/0022-enforce-fail-via-stop-hook.md) records the accepted
-decisions, and an `enforce` block in this file is invalid until the implementation
-lands.
+The same file may carry an `enforce` section. Its settings are validated by this
+release, but the `Stop` hook that would act on them is not wired yet: enabling it now
+changes nothing, and the review stays observe-only until the enforcement step lands
+([ADR 0022](./adr/0022-enforce-fail-via-stop-hook.md)).
+
+```yaml
+enforce:
+  enabled: true               # default false; only this user file can enable it
+  rules: [SECRETS-001, DESTRUCTIVE-001]   # allowlist; required when enabled
+  budget_ms: 8000             # 2000..15000; default 8000
+```
+
+A rule ID is one token (letters, digits, `.`, `_`, `-`; at most 64 characters), so the
+block reason can never carry prose. Two entries are dropped from the effective
+allowlist with a warning each: a repeated rule (`DUPLICATE_RULE`) and a built-in check
+ID such as `SCOPE-CREEP`, `COMPLEXITY` or `TEST-ADEQUACY` (`BUILT_IN_CANNOT_BLOCK`) —
+a built-in never blocks. Enforce can only block on a local rule with severity `error`,
+and a `warning` rule cannot reach `FAIL`, so listing one never blocks. An absent section
+or `enabled: false` is off; an unknown section key, an unknown top-level key, a wrong
+type, an out-of-range budget or `enabled: true` without an allowlist makes the file
+invalid. A section that is off is still validated, so a typo never hides until it is
+turned on. The file is refused when it lives in the project or its Git tree, so a
+repository can never switch enforce on for its users.
 
 The file is read by the worker. `XDG_CONFIG_HOME` is used only when it is an absolute
 path; otherwise `USERPROFILE` and then `HOME` plus `.config`. It is refused when its

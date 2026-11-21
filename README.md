@@ -761,7 +761,12 @@ fixes the decisions — Claude Code only, opt-in in the user's own `claude-code.
 interactive sessions only, `error` rules from the user's allowlist (the pilot uses
 `SECRETS-001` and `DESTRUCTIVE-001`), one block per unit, an 8 s budget, never a
 built-in, coexisting with remediation delivery, and `jevguard ack` as the user's
-per-unit override.
+per-unit override. The first pieces are in: the `enforce` section is validated
+strictly (the allowlist and the budget, with built-ins and duplicates kept out of it as
+[configuration](./docs/configuration.md) documents) and the decision that turns a review
+into a block is pure and tested, failing open on anything it cannot answer positively.
+The `Stop` hook that would apply it is not wired yet, so a review is still observe-only
+and an enabled section has no effect.
 
 The `V0.4` `jev-init` skill is implemented: when no policy exists it bootstraps
 `.jev/rules.md` and `.jev/config.yaml` from the user's explicit constraints and

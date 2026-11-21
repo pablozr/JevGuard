@@ -56,6 +56,23 @@ export {
   versionDoctorCheck,
 } from "./host-cli";
 export type {
+  EnforceSettingsWarning,
+  EnforceUserSettings,
+  EnforceUserSettingsInvalidReason,
+  EnforceUserSettingsResult,
+} from "./enforce";
+export {
+  enabledEnforceSettings,
+  ENFORCE_BUILT_IN_CHECK_IDS,
+  ENFORCE_DEFAULT_BUDGET_MS,
+  ENFORCE_MAX_BUDGET_MS,
+  ENFORCE_MIN_BUDGET_MS,
+  ENFORCE_SECTION_KEY,
+  isEnforceRuleId,
+  loadEnforceUserSettings,
+  resolveEnforceUserSettings,
+} from "./enforce";
+export type {
   FeedbackReadResult,
   FeedbackSelectionReadResult,
   FeedbackWriteStatus,
