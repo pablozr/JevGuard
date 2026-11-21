@@ -1163,7 +1163,7 @@ describe("JevGuardPlugin event returns before background work", () => {
   });
 
   test("a shutdown that cuts a review in flight closes the unit once and drops the late verdict", async () => {
-    const { runtime, presenter, jev } = harness();
+    const { runtime, presenter, jev, operational } = harness();
     jev.block = true;
 
     send(runtime, turnEvents());
@@ -1173,6 +1173,8 @@ describe("JevGuardPlugin event returns before background work", () => {
 
     expect(presenter.reviews).toHaveLength(1);
     expect(lastResults(presenter)).toEqual([reviewUnavailable(SESSION_ID, "REVIEW_INTERRUPTED")]);
+    // The interrupted unit leaves one operational line, carrying the typed code only.
+    expect(operational.events).toEqual([{ kind: "REVIEW_INTERRUPTED" }]);
 
     jev.release();
     await runtime.drain();
@@ -1213,6 +1215,7 @@ describe("JevGuardPlugin event returns before background work", () => {
     // The line is on its way to disk: the shutdown must not claim the unit as unjudged.
     await values.runtime.abandon();
     expect(presenter.reviews).toHaveLength(0);
+    expect(values.operational.events).toEqual([]);
 
     releasePresent();
     await values.runtime.drain();

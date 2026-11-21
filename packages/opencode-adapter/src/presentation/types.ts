@@ -70,10 +70,12 @@ export interface ProposalSessionNavigator {
 
 /**
  * Operational lines that are not a review: an execution skipped because it was
- * interrupted or failed, or an attribution failure. They carry only the typed code.
+ * interrupted or failed, an attribution failure, or a unit the shutdown closed as
+ * `REVIEW_INTERRUPTED`. They carry only the typed code.
  */
 export type OperationalEvent =
   | { readonly kind: "TURN_SKIPPED"; readonly reason: "interrupted" | "failed" }
+  | { readonly kind: "REVIEW_INTERRUPTED" }
   | { readonly kind: "ATTRIBUTION_UNAVAILABLE"; readonly reason: AttributionFailureReason }
   | RemediationDeliveryEvent;
 

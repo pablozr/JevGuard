@@ -343,6 +343,9 @@ the background: the `session.execution.succeeded` handler returns as soon as the
 serialized attribution step is scheduled, so policy reads, Jev requests, and
 presentation are never on the agent's critical path. An `interrupted` or `failed`
 execution is not reviewed; the plugin logs `JevGuard skipped · interrupted|failed`.
+A unit the shutdown budget cuts before its review finishes is presented once as
+`UNAVAILABLE/REVIEW_INTERRUPTED` (ADR 0021) and logs one `JevGuard review interrupted`
+line per cut unit, at `warn`, with no field beyond the typed code.
 
 - Toast: `JevGuard <OUTCOME>` where `<OUTCOME>` is the aggregate display outcome.
   The display precedence is `FAIL > UNAVAILABLE > WARN > PASS > SKIPPED`: any
