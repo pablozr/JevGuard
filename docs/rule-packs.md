@@ -1,28 +1,30 @@
 # Rule packs
 
 A rule pack is the policy a repository starts with: one `.jev/rules.md` document, one
-`##` block per rule. This page is the initial pack for the risks an AI-written change
-most often carries — a committed secret, an irreversible action, work outside the task,
-and a dependency change nobody asked for.
+`##` block per rule. This page carries two layers, and the difference matters:
 
-`jevguard init` writes four rules. Two of them are documented below (`SECRETS-001` and
-`SCOPE-001`); `QUALITY-001` (a behavior change arrives with its test) and `API-001` (a
-public-interface change is additive or documented) complete the pack without a section
-here. The public benchmark measures all four: 20 cases, 5 per rule, corpus
-`c5822e8838af904c`. `DESTRUCTIVE-001` and `DEPENDENCY-001` use the same grammar and are
-not in the corpus yet; adding them changes its hash and needs a new live run, so the
-published numbers stay on that corpus.
+- **The starter pack** — what `jevguard init` writes: `QUALITY-001` (a behavior change
+  arrives with its test), `SECRETS-001`, `SCOPE-001` and `API-001` (a public-interface
+  change is additive or documented). The public benchmark measures all four: 20 cases, 5
+  per rule, corpus `c5822e8838af904c`. `SECRETS-001` and `SCOPE-001` are documented
+  below; the other two have no section here.
+- **Proposed additions** — `DESTRUCTIVE-001` and `DEPENDENCY-001`, for the two risks the
+  starter pack does not cover: an irreversible action, and a dependency change nobody
+  asked for. They use the same grammar and are ready to paste into `.jev/rules.md`, but
+  `init` does not scaffold them and the corpus does not measure them; adding them to the
+  corpus changes its hash and needs a new live run, so the published numbers stay on that
+  corpus.
 
 Each rule below is shown as the block it takes in `.jev/rules.md`, followed by one change
 that violates it, one clean change, and the corpus cases when the rule has any. Diffs are
 synthetic and short, the same way the corpus is.
 
-| Rule | Severity | Question it answers |
-| --- | --- | --- |
-| [SECRETS-001](#secrets-001) | error | Did the change commit a credential? |
-| [DESTRUCTIVE-001](#destructive-001) | error | Did the change make an irreversible action ordinary? |
-| [SCOPE-001](#scope-001) | warning | Did the change stay inside the task? |
-| [DEPENDENCY-001](#dependency-001) | warning | Was the dependency change asked for and completed? |
+| Rule | Layer | Severity | Question it answers |
+| --- | --- | --- | --- |
+| [SECRETS-001](#secrets-001) | starter | error | Did the change commit a credential? |
+| [DESTRUCTIVE-001](#destructive-001) | proposed | error | Did the change make an irreversible action ordinary? |
+| [SCOPE-001](#scope-001) | starter | warning | Did the change stay inside the task? |
+| [DEPENDENCY-001](#dependency-001) | proposed | warning | Was the dependency change asked for and completed? |
 
 ## SECRETS-001
 
@@ -87,13 +89,15 @@ severity: error
 ### Rule
 
 A change must not make an irreversible operation part of the normal path, and must not
-delete stored data, unless the task explicitly asks for it.
+delete stored data, unless the task explicitly asks for it — and an asked-for destructive
+step still keeps the data recoverable.
 
 ### Violation
 
 The change adds or edits a migration, script, or command that drops a table or a column
 that holds data, truncates a table, deletes rows or files without a bounded condition,
-force-pushes, or rewrites history.
+force-pushes, or rewrites history — and the step is not both asked for by the task and
+recoverable (a backup, a bounded condition, or a dry run that defaults to on).
 
 ### Allowed
 
@@ -122,8 +126,9 @@ Clean — an additive migration that loses nothing:
 +ALTER TABLE users ADD COLUMN avatar_url text;
 ```
 
-Not in the published corpus yet. A case for it belongs in `benchmarks/corpus/` when the
-rule enters the starter pack and a live run can measure it.
+A proposed addition, not part of the starter pack: not scaffolded by `init` and not in
+the published corpus. A case for it belongs in `benchmarks/corpus/` once it joins the
+starter pack and a live run can measure it (issue #118).
 
 ## SCOPE-001
 
@@ -217,7 +222,8 @@ lockfile:
    }
 ```
 
-Clean — the upgrade the task asked for, with its lockfile in the same change:
+Clean — both conditions hold: the task asked for the upgrade, and its lockfile hunk is in
+the same change.
 
 ```diff
 --- a/package.json
@@ -234,7 +240,8 @@ Clean — the upgrade the task asked for, with its lockfile in the same change:
 +  zod@3.24.1:
 ```
 
-Not in the published corpus yet, for the same reason as `DESTRUCTIVE-001`.
+Also a proposed addition: not scaffolded by `init` and not in the published corpus, for
+the same reason as `DESTRUCTIVE-001`.
 
 ## Using the pack
 
@@ -246,15 +253,16 @@ documentation and is ignored. A branch with the rules is the versioned policy: e
 Only `error` rules can reach `FAIL`. `SCOPE-001` and `DEPENDENCY-001` are `warning`
 rules: they can warn, never fail, so they cannot stop a turn in
 [enforce mode](adr/0022-enforce-fail-via-stop-hook.md). The two `error` rules are the
-candidates for it.
+candidates for it; of the two, only `SECRETS-001` has a published corpus rate today.
 
 ## Adding a rule to the pack
 
 1. Add the block to `.jev/rules.md` (or to this page, if it is a proposal).
-2. Add the rule to `STARTER_RULES` in `packages/cli/src/setup/scaffold.ts`. Only rules in
-   that constant are accepted by the harness, and the corpus rejects a case whose rule is
-   not there. `init` never replaces an existing file, so an added rule reaches new
-   repositories and changes nobody's current policy.
+2. Add the rule to `STARTER_RULES` in `packages/cli/src/setup/scaffold.ts`. The benchmark
+   harness accepts only rules in that constant, and the corpus rejects a case whose rule
+   is not there; the runtime itself accepts any rule ID from `.jev/rules.md` (provenance
+   only warns `PROVENANCE_UNKNOWN_RULE`). `init` never replaces an existing file, so an
+   added rule reaches new repositories and changes nobody's current policy.
 3. Add `benchmarks/corpus/<ID>.json` with at least one clean case and one flagging case;
    the corpus rejects a one-sided rule.
 4. Run `bun tools/benchmark/main.ts run --confirm-live-runs <n>` and publish the numbers

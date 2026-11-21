@@ -21,7 +21,8 @@ The host already exposes the primitive. A Claude Code `Stop` hook may return
 `{"decision": "block", "reason": "..."}`; the turn continues and Claude receives the
 reason. The same input carries `stop_hook_active` (true when Claude is already
 continuing because of a Stop hook) and `background_tasks`; Claude Code caps consecutive
-continuations at eight and resets the count on a tool call, and a command hook that
+continuations at eight — configurable through `CLAUDE_CODE_STOP_HOOK_BLOCK_CAP` — and
+resets the count on a tool call, and a command hook that
 reaches its timeout has its output discarded, so a slow enforcer fails open. The
 plugin's `Stop` hook currently declares a 30 s timeout
 (`packages/claude-code-plugin/artifact/hooks.json`). These are the facts this design
@@ -45,7 +46,10 @@ promise parity.
    the gate, so listing one can never block; it is a configuration warning. Built-in
    checks do not block in this first design.
 3. **What is reviewed.** The same unit observe reviews: the change attributed to the
-   closing `Stop`, with no active background task. Never the worktree, never history.
+   closing `Stop`, with no active background task. Never the worktree, never history. An
+   active background task means the hook returns no decision and the turn ends — fail-open
+   — and the check is deterministic: the `Stop` input carries `background_tasks`, so the
+   hook reads it and never infers it.
 4. **When it may block.** Only when an allowlisted `error` rule returns `FAIL` on
    complete, safe evidence. `UNAVAILABLE` (missing attributed diff, blocked path,
    oversized or partial evidence, multiple repositories, acquisition limit, Jev failure)
@@ -64,8 +68,8 @@ promise parity.
 7. **Loop control.** At most `max_blocks` blocks per unit (default 1). The count is
    stored per session and unit, and `stop_hook_active: true` on the continued `Stop` is a
    second guard. After the cap the stop is allowed and a closed code
-   (`ENFORCE_CAP_REACHED`) is recorded. The host's eight-continuation cap is a backstop,
-   not the design.
+   (`ENFORCE_CAP_REACHED`) is recorded. The host's eight-continuation cap (itself
+   configurable through `CLAUDE_CODE_STOP_HOOK_BLOCK_CAP`) is a backstop, not the design.
 8. **Latency.** The wait is bounded by `budget_ms` and stays inside the existing 30 s
    `Stop` timeout. The published measurement had a full review at p50 354–377 ms and a
    per-rule review at p50 170–183 ms, on one machine and one network
@@ -92,8 +96,9 @@ promise parity.
 ## Risks
 
 - **False positives block work.** A `FAIL` is a probability above the gate, not proof.
-  Mitigation: opt-in, `error` only, a pilot with two rules, and the corpus rates checked
-  before any default.
+  Mitigation: opt-in, `error` only, a pilot with two rules — one of them measured only by
+  the pilot itself (see the recommendation) — and the corpus rates checked before any
+  default.
 - **Unwanted turns cost tokens.** A block starts a turn the user did not ask for; the
   default cap of one bounds it.
 - **A rule may be unfixable in the turn** (the task itself requires the violation). The
@@ -124,10 +129,22 @@ promise parity.
 ## Recommendation
 
 Ship V0.7 as an opt-in, Claude Code-only enforce mode: `error` rules only, one block per
-unit, an 8 s budget, default off, piloted with `SECRETS-001` and `DESTRUCTIVE-001` from
-the [initial rule pack](../rule-packs.md). Keep OpenCode observe-only and say so. Do not
-make enforce the default and do not extend it to `warning` rules; measure false positives
-on the corpus and in real sessions before widening.
+unit, an 8 s budget, default off, piloted with `SECRETS-001` and `DESTRUCTIVE-001`.
+
+The two rules do not enter the pilot on equal footing. The [rule pack](../rule-packs.md)
+has two layers: `SECRETS-001` is in the starter pack and measured by the public corpus;
+`DESTRUCTIVE-001` is a proposed addition that `init` does not scaffold and the corpus does
+not measure. The pilot's second rule therefore enters unmeasured, and the false-positive
+mitigation above ("the corpus rates checked") does not cover it yet. The plan is explicit,
+one of two ways:
+
+- its corpus cases land with a live run before the pilot starts (#118); or
+- the pilot's own sessions are where its false positives are first measured — in which
+  case "before any default" means the pilot's observed block rate, not a corpus number,
+  and the rule stays opt-in until a corpus run exists.
+
+Keep OpenCode observe-only and say so. Do not make enforce the default and do not extend
+it to `warning` rules.
 
 ## Open questions for the owner
 
