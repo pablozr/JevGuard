@@ -44,7 +44,11 @@ function shellDiffOf(event: HookEvent) {
 
 describe("parseHookEvent envelope", () => {
   test.each([null, undefined, "x", 3, [], true])("rejects non-object payload %j", (payload) => {
-    expect(failure(payload)).toEqual({ invalid: true, reason: "NOT_AN_OBJECT", field: "payload" });
+    expect(failure(payload)).toEqual({
+      invalid: true,
+      reason: "NOT_AN_OBJECT",
+      field: "payload",
+    });
   });
 
   test("rejects missing, mistyped and unknown hook_event_name", () => {
@@ -68,19 +72,36 @@ describe("parseHookEvent envelope", () => {
       reason: "MISSING_FIELD",
       field,
     });
-    expect(failure({ ...payload, [field]: 5 })).toMatchObject({ reason: "INVALID_FIELD", field });
-    expect(failure({ ...payload, [field]: "" })).toMatchObject({ reason: "INVALID_FIELD", field });
+    expect(failure({ ...payload, [field]: 5 })).toMatchObject({
+      reason: "INVALID_FIELD",
+      field,
+    });
+    expect(failure({ ...payload, [field]: "" })).toMatchObject({
+      reason: "INVALID_FIELD",
+      field,
+    });
   });
 
   test.each(["prompt_id", "agent_id"])("rejects a mistyped optional %s", (field) => {
-    const payload = { ...COMMON, hook_event_name: "SessionStart", [field]: 7 };
+    const payload = {
+      ...COMMON,
+      hook_event_name: "SessionStart",
+      [field]: 7,
+    };
 
-    expect(failure(payload)).toMatchObject({ reason: "INVALID_FIELD", field });
+    expect(failure(payload)).toMatchObject({
+      reason: "INVALID_FIELD",
+      field,
+    });
   });
 
   test("main events have no agent id; subagent events carry it", () => {
     const main = parsed({ ...COMMON, hook_event_name: "SessionStart" });
-    const sub = parsed({ ...COMMON, hook_event_name: "SubagentStart", agent_id: "a1" });
+    const sub = parsed({
+      ...COMMON,
+      hook_event_name: "SubagentStart",
+      agent_id: "a1",
+    });
 
     expect(main.agentId).toBeNull();
     expect(sub.agentId).toBe("a1");
@@ -121,9 +142,17 @@ describe("parseHookEvent prompt and stop", () => {
     ["x", "UNKNOWN"],
     [null, "UNKNOWN"],
   ])("Stop background_tasks %j is %s", (value, expected) => {
-    const event = parsed({ ...COMMON, hook_event_name: "Stop", background_tasks: value });
+    const event = parsed({
+      ...COMMON,
+      hook_event_name: "Stop",
+      background_tasks: value,
+    });
 
-    expect(event).toMatchObject({ name: "Stop", backgroundTasks: expected, stopHookActive: false });
+    expect(event).toMatchObject({
+      name: "Stop",
+      backgroundTasks: expected,
+      stopHookActive: false,
+    });
   });
 
   test("Stop validates stop_hook_active", () => {
@@ -135,6 +164,42 @@ describe("parseHookEvent prompt and stop", () => {
     });
   });
 
+  /**
+   * The payload a real `Stop` hook receives, copied from a run on the host (Claude Code
+   * 2.1.329, headless). Fields the plugin does not read (`permission_mode`, `effort`,
+   * `last_assistant_message`, `session_crons`) must not make parsing fail, and an empty
+   * `background_tasks` must read as `EMPTY` — the gate's fail-open depends on both.
+   */
+  test("a real host Stop payload parses, whatever else it carries", () => {
+    const hostPayload = {
+      session_id: "1da64c46-b7d7-4af4-b5d8-a2268648a76f",
+      transcript_path: "C:/tmp/1da64c46.jsonl",
+      cwd: "C:/repo",
+      prompt_id: "bfa33d55-2d2d-4507-b912-dfdcb730a1c6",
+      permission_mode: "default",
+      effort: { level: "high" },
+      hook_event_name: "Stop",
+      stop_hook_active: false,
+      last_assistant_message: "ok",
+      background_tasks: [],
+      session_crons: [],
+    };
+
+    expect(parsed(hostPayload)).toMatchObject({
+      name: "Stop",
+      sessionId: "1da64c46-b7d7-4af4-b5d8-a2268648a76f",
+      backgroundTasks: "EMPTY",
+      stopHookActive: false,
+    });
+
+    expect(
+      parsed({
+        ...hostPayload,
+        background_tasks: [{ task_id: "t1", status: "running" }],
+      }),
+    ).toMatchObject({ backgroundTasks: "ACTIVE" });
+  });
+
   test("StopFailure parses with the common fields only", () => {
     expect(parsed({ ...COMMON, hook_event_name: "StopFailure" })).toMatchObject({
       name: "StopFailure",
@@ -143,15 +208,32 @@ describe("parseHookEvent prompt and stop", () => {
 });
 
 describe("parseHookEvent tools", () => {
-  const tool = { ...COMMON, hook_event_name: "PreToolUse", tool_name: "Edit", tool_use_id: "t1" };
+  const tool = {
+    ...COMMON,
+    hook_event_name: "PreToolUse",
+    tool_name: "Edit",
+    tool_use_id: "t1",
+  };
 
   test("requires tool_name, tool_use_id and an object tool_input", () => {
-    expect(failure({ ...tool, tool_name: undefined })).toMatchObject({ field: "tool_name" });
-    expect(failure({ ...tool, tool_name: 1 })).toMatchObject({ field: "tool_name" });
-    expect(failure({ ...tool, tool_use_id: undefined })).toMatchObject({ field: "tool_use_id" });
-    expect(failure({ ...tool, tool_use_id: 1 })).toMatchObject({ field: "tool_use_id" });
-    expect(failure({ ...tool, tool_input: "x" })).toMatchObject({ field: "tool_input" });
-    expect(failure({ ...tool, tool_input: [] })).toMatchObject({ field: "tool_input" });
+    expect(failure({ ...tool, tool_name: undefined })).toMatchObject({
+      field: "tool_name",
+    });
+    expect(failure({ ...tool, tool_name: 1 })).toMatchObject({
+      field: "tool_name",
+    });
+    expect(failure({ ...tool, tool_use_id: undefined })).toMatchObject({
+      field: "tool_use_id",
+    });
+    expect(failure({ ...tool, tool_use_id: 1 })).toMatchObject({
+      field: "tool_use_id",
+    });
+    expect(failure({ ...tool, tool_input: "x" })).toMatchObject({
+      field: "tool_input",
+    });
+    expect(failure({ ...tool, tool_input: [] })).toMatchObject({
+      field: "tool_input",
+    });
   });
 
   test("edit tools expose file_path or notebook_path", () => {
@@ -163,13 +245,19 @@ describe("parseHookEvent tools", () => {
     });
     const missing = parsed({ ...tool, tool_input: { file_path: 4 } });
 
-    expect(write).toMatchObject({ tool: { category: "EDIT", filePath: "/repo/a.ts" } });
+    expect(write).toMatchObject({
+      tool: { category: "EDIT", filePath: "/repo/a.ts" },
+    });
     expect(notebook).toMatchObject({ tool: { filePath: "/repo/n.ipynb" } });
     expect(missing).toMatchObject({ tool: { filePath: null } });
   });
 
   test("run_in_background is read for shells only", () => {
-    const shell = parsed({ ...tool, tool_name: "Bash", tool_input: { run_in_background: true } });
+    const shell = parsed({
+      ...tool,
+      tool_name: "Bash",
+      tool_input: { run_in_background: true },
+    });
     const edit = parsed({ ...tool, tool_input: { run_in_background: true } });
     const stringy = parsed({
       ...tool,
@@ -241,11 +329,17 @@ describe("bashEditDiff reading", () => {
   test("absent field, missing response and null are ABSENT", () => {
     expect(shellDiffOf(bashPost({ stdout: "" }))).toEqual({ status: "ABSENT" });
     expect(shellDiffOf(bashPost(undefined))).toEqual({ status: "ABSENT" });
-    expect(shellDiffOf(bashPost({ bashEditDiff: null }))).toEqual({ status: "ABSENT" });
+    expect(shellDiffOf(bashPost({ bashEditDiff: null }))).toEqual({
+      status: "ABSENT",
+    });
   });
 
   test("a clean present diff lists the changed files", () => {
-    const diff = { changedFiles: ["/repo/a.ts", { path: "/repo/b.ts" }], files: [], moreFiles: 0 };
+    const diff = {
+      changedFiles: ["/repo/a.ts", { path: "/repo/b.ts" }],
+      files: [],
+      moreFiles: 0,
+    };
 
     expect(shellDiffOf(bashPost({ bashEditDiff: diff }))).toEqual({
       status: "PRESENT",
@@ -267,11 +361,18 @@ describe("bashEditDiff reading", () => {
     ["changedFiles not an array", { moreFiles: 0, changedFiles: "x" }],
     ["diff not an object", "x"],
   ])("%s is INCOMPLETE", (_name, bashEditDiff) => {
-    expect(shellDiffOf(bashPost({ bashEditDiff }))).toEqual({ status: "INCOMPLETE" });
+    expect(shellDiffOf(bashPost({ bashEditDiff }))).toEqual({
+      status: "INCOMPLETE",
+    });
   });
 
   test("false flags and moreFiles zero are not incompleteness", () => {
-    const diff = { ...clean, shared: false, unavailable: false, skipped: false };
+    const diff = {
+      ...clean,
+      shared: false,
+      unavailable: false,
+      skipped: false,
+    };
 
     expect(shellDiffOf(bashPost({ bashEditDiff: diff })).status).toBe("PRESENT");
   });
