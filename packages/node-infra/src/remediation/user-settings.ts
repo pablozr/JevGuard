@@ -16,6 +16,8 @@ const TRAILING_SEPARATORS = /[\\/]+$/;
 const DEFAULT_CONFIG_SUBPATH = ".config";
 const CONFIG_DIRECTORY = "jevguard";
 const SECTION_KEY = "remediation";
+/** Every section the user's host file may carry; any other top-level key makes it invalid. */
+const USER_CONFIG_SECTIONS = [SECTION_KEY, "enforce"];
 const SHARED_KEYS = ["enabled", "delivery", "mode", "max_attempts"];
 const MODEL_KEY = "model";
 const LEGACY_MAX_ATTEMPTS_CEILING = 3;
@@ -31,6 +33,11 @@ const INVALID: RemediationUserSettingsResult = {
 };
 
 type JsonRecord = Record<string, unknown>;
+
+/** `true` when every top-level key is a section the user's host file may carry. */
+export function hasOnlyUserConfigSections(value: JsonRecord): boolean {
+  return Object.keys(value).every((key) => USER_CONFIG_SECTIONS.includes(key));
+}
 
 /** `true` for a plain object: not `null`, not an array. */
 export function isRecord(value: unknown): value is JsonRecord {
@@ -114,7 +121,7 @@ export function resolveRemediationUserSettings(
 ): RemediationUserSettingsResult {
   if (value === null || value === undefined) return DISABLED;
   if (!isRecord(value)) return INVALID;
-  if (Object.keys(value).some((key) => key !== SECTION_KEY)) return INVALID;
+  if (!hasOnlyUserConfigSections(value)) return INVALID;
 
   const section = value[SECTION_KEY];
 
@@ -146,19 +153,33 @@ export function userConfigFileOf(
     : `${base.replace(TRAILING_SEPARATORS, "")}/${CONFIG_DIRECTORY}/${fileName}`;
 }
 
+/** Why any user settings file could not be read or used; a closed code, never its text. */
+export type UserSettingsFileInvalidReason =
+  | "USER_CONFIG_INVALID"
+  | "USER_CONFIG_IN_PROJECT"
+  | "USER_CONFIG_UNREADABLE";
+
+export interface UserSettingsFileFailure {
+  readonly status: "INVALID";
+  readonly reason: UserSettingsFileInvalidReason;
+}
+
 /**
- * Loads and validates the user's file. A file whose canonical path is inside the project
- * root or its Git working tree is refused, on every platform and whatever the letter case:
- * a cloned repository must never be able to switch remediation on.
+ * Loads and validates the user's host file through `resolve`. A file whose canonical path
+ * is inside the project root or its Git working tree is refused, on every platform and
+ * whatever the letter case: a cloned repository must never be able to switch a user-only
+ * feature on. A missing file (or one deleted between the probe and the read) is
+ * `disabled`; unreadable or unparseable text is a closed failure code.
  */
-export function loadRemediationUserSettings(
+export function loadUserSettingsFile<T>(
   input: UserConfigLoadInput,
-  rules: RemediationUserSettingsRules = {},
-): RemediationUserSettingsResult {
+  resolve: (value: unknown) => T,
+  disabled: T,
+): T | UserSettingsFileFailure {
   try {
     const realFile = input.realPath(input.file);
 
-    if (realFile === null) return DISABLED;
+    if (realFile === null) return disabled;
 
     if (isInsideProject(realFile, input.projectRoot, input)) {
       return { status: "INVALID", reason: "USER_CONFIG_IN_PROJECT" };
@@ -166,16 +187,28 @@ export function loadRemediationUserSettings(
 
     const text = input.readText(realFile);
 
-    if (text === null) return DISABLED;
+    if (text === null) return disabled;
 
     const parsed = input.parse(text);
 
     return parsed.status === "PARSED"
-      ? resolveRemediationUserSettings(parsed.value, rules)
-      : INVALID;
+      ? resolve(parsed.value)
+      : { status: "INVALID", reason: "USER_CONFIG_INVALID" };
   } catch {
     return { status: "INVALID", reason: "USER_CONFIG_UNREADABLE" };
   }
+}
+
+/** Loads the user's remediation section; the file is refused inside the project. */
+export function loadRemediationUserSettings(
+  input: UserConfigLoadInput,
+  rules: RemediationUserSettingsRules = {},
+): RemediationUserSettingsResult {
+  return loadUserSettingsFile(
+    input,
+    (value) => resolveRemediationUserSettings(value, rules),
+    DISABLED,
+  );
 }
 
 export interface UserRemediationSettingsDependencies {
