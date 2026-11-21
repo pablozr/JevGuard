@@ -17,6 +17,7 @@ export const USAGE = [
   `       jevguard setup [--host <${HOST_CHOICE}>] [--project] [--init] [--yes] [--agent-delivery]`,
   `       jevguard init [--host <${HOST_CHOICE}>] [--global]`,
   "       jevguard replay [--last <1-50>] [--rule <id>] [--json]",
+  "       jevguard check --range <base>..<head> [--last <1-50>] [--rule <id>] [--strict] [--json | --annotations]",
   "       jevguard report [--json]",
   `       jevguard doctor [--json] [--host <${HOST_CHOICE}>]`,
   "       jevguard rules check --diff <file|-> [--task <text>] [--rule <id>] [--json]",
@@ -89,6 +90,20 @@ export function describeReport(report: ReviewReport): string {
 
 export function describeTotals(totals: ReviewCounts): string {
   return `pass ${totals.pass} · warn ${totals.warn} · fail ${totals.fail} · unavailable ${totals.unavailable} · skipped ${totals.skipped}`;
+}
+
+/** Sums the outcome counts of several reviews, so a multi-unit command prints one total. */
+export function totalCounts(summaries: readonly { readonly counts: ReviewCounts }[]): ReviewCounts {
+  return summaries.reduce<ReviewCounts>(
+    (total, summary) => ({
+      pass: total.pass + summary.counts.pass,
+      warn: total.warn + summary.counts.warn,
+      fail: total.fail + summary.counts.fail,
+      unavailable: total.unavailable + summary.counts.unavailable,
+      skipped: total.skipped + summary.counts.skipped,
+    }),
+    { pass: 0, warn: 0, fail: 0, unavailable: 0, skipped: 0 },
+  );
 }
 
 function describeReasons(reasons: readonly ReportReasonCount<string>[]): readonly string[] {

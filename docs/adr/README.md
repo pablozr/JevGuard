@@ -29,3 +29,4 @@ consequences; later records can supersede earlier ones. References to "SPEC" or
 | [0020](0020-opencode-2.3-supported-line.md) | OpenCode 2.3 is a supported line alongside 2.2 | Accepted |
 | [0021](0021-shutdown-writes-one-interrupted-review.md) | A shutdown that cuts a review writes one interrupted line | Accepted |
 | [0022](0022-enforce-fail-via-stop-hook.md) | Enforce returns a FAIL through the Claude Code Stop hook, opt-in and off by default | Proposed |
+| [0023](0023-check-mode-in-ci.md) | A CI check mode judges an existing commit range | Proposed |

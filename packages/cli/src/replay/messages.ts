@@ -1,5 +1,5 @@
-import type { ReviewCounts } from "@jevguard/core";
 import { toReviewLogEntry, type ReviewLogResult } from "@jevguard/node-infra";
+import { describeTotals, totalCounts } from "../messages";
 import type { ReplayCommitResult, ReplayResult } from "./types";
 
 export const REPLAY_USAGE = "Usage: jevguard replay [--last <1-50>] [--rule <id>] [--json]";
@@ -53,7 +53,7 @@ export function describeReplay(result: ReplayResult, last: number): readonly str
   return [
     `JevGuard replay (newest ${last} commits)`,
     ...verdicts,
-    `Summary: ${describeTotals(totalOf(reviewed))}`,
+    `Summary: ${describeTotals(totalCounts(reviewed))}`,
     ...describeRemaining(result.commits),
     "Nothing was written: no review history, no file in the repository, and no diff in a log.",
   ];
@@ -103,23 +103,6 @@ function nameOf(result: ReviewLogResult): string {
     case "REVIEW":
       return "review";
   }
-}
-
-function totalOf(reviewed: readonly { readonly counts: ReviewCounts }[]): ReviewCounts {
-  return reviewed.reduce<ReviewCounts>(
-    (total, summary) => ({
-      pass: total.pass + summary.counts.pass,
-      warn: total.warn + summary.counts.warn,
-      fail: total.fail + summary.counts.fail,
-      unavailable: total.unavailable + summary.counts.unavailable,
-      skipped: total.skipped + summary.counts.skipped,
-    }),
-    { pass: 0, warn: 0, fail: 0, unavailable: 0, skipped: 0 },
-  );
-}
-
-function describeTotals(totals: ReviewCounts): string {
-  return `pass ${totals.pass} · warn ${totals.warn} · fail ${totals.fail} · unavailable ${totals.unavailable} · skipped ${totals.skipped}`;
 }
 
 function describeRemaining(commits: readonly ReplayCommitResult[]): readonly string[] {

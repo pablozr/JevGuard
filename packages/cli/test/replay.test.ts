@@ -176,6 +176,23 @@ describe("executeReplay", () => {
     });
   });
 
+  test("a patch the reader had to cut is not judged, never passed as a complete diff", async () => {
+    const jev = new FakeJevPort();
+    const history: HistoryRead = {
+      status: "READ",
+      commits: [commit("a".repeat(40), { diffTruncated: true })],
+    };
+
+    const result = await executeReplay({ last: 1, ruleId: null }, dependencies(history, jev));
+
+    expect(result.status === "REPLAYED" && result.commits[0]).toEqual({
+      sha: "a".repeat(40),
+      status: "INPUT_FAILED",
+      reason: "DIFF_TOO_LARGE",
+    });
+    expect(jev.requests).toHaveLength(0);
+  });
+
   test("passes an unreadable history through as FAILED", async () => {
     const result = await executeReplay(
       { last: 5, ruleId: null },

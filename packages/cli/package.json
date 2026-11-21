@@ -2,7 +2,7 @@
   "name": "@pablozrrrr/jevguard-cli",
   "version": "0.2.0",
   "private": true,
-  "description": "Host-neutral JevGuard command line: login, report, feedback, rules check, doctor, install and setup.",
+  "description": "Host-neutral JevGuard command line: login, report, feedback, rules check, CI check, doctor, install and setup.",
   "license": "MIT",
   "type": "module",
   "bin": {

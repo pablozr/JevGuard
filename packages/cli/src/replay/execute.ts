@@ -26,22 +26,41 @@ export async function executeReplay(
     return { status: "FAILED", reason: history.reason };
   }
 
-  const commits: ReplayCommitResult[] = [];
+  return {
+    status: "REPLAYED",
+    commits: await reviewCommits(history.commits, request, dependencies),
+  };
+}
 
-  for (const commit of history.commits) {
-    commits.push(await replayCommit(commit, request, dependencies));
+/**
+ * Reviews each commit's own patch with its subject as the task, in order. The CI check
+ * shares this path so one commit is judged the same way by `replay` and by `check`.
+ */
+export async function reviewCommits(
+  commits: readonly ReplayedCommit[],
+  request: { readonly ruleId: string | null },
+  dependencies: Pick<ReplayDependencies, "policy" | "parseConfig" | "jev">,
+): Promise<readonly ReplayCommitResult[]> {
+  const results: ReplayCommitResult[] = [];
+
+  for (const commit of commits) {
+    results.push(await replayCommit(commit, request, dependencies));
   }
 
-  return { status: "REPLAYED", commits };
+  return results;
 }
 
 async function replayCommit(
   commit: ReplayedCommit,
-  request: ReplayRequest,
-  dependencies: ReplayDependencies,
+  request: { readonly ruleId: string | null },
+  dependencies: Pick<ReplayDependencies, "policy" | "parseConfig" | "jev">,
 ): Promise<ReplayCommitResult> {
   if (commit.merge) {
     return { sha: commit.sha, status: "SKIPPED", reason: "MERGE_COMMIT" };
+  }
+
+  if (commit.diffTruncated === true) {
+    return { sha: commit.sha, status: "INPUT_FAILED", reason: "DIFF_TOO_LARGE" };
   }
 
   if (commit.diff.trim() === "") {

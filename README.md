@@ -643,6 +643,27 @@ no `UNAVAILABLE`; `1` at least one rule `FAIL`ed; `2` it could not check complet
 `UNAVAILABLE` result). See [configuration](./docs/configuration.md#cli-diagnostics-and-on-demand-rule-checks)
 for the full contract.
 
+## Check a pull request in CI
+
+`jevguard check` judges a change that is already committed, with no plugin on the
+host — the cheapest way to put a policy in front of every pull request:
+
+```sh
+jevguard check --range origin/main..HEAD
+jevguard check --range origin/main..HEAD --last 5 --json
+jevguard check --range origin/main..HEAD --annotations   # GitHub Actions
+```
+
+Each non-merge commit's own patch is the unit and its subject is the task; merge
+commits are skipped. Exit codes: `0` for pass or warnings, `1` when a rule with
+severity `error` failed, `2` when the check could not run. `UNAVAILABLE` never fails:
+it exits `0` with a warning, or `1` with `--strict`. The report, the JSON and the
+GitHub annotations carry rule IDs, outcomes, probabilities, severities, typed reason
+codes and commit revisions — never the diff, the commit subject or a credential — and
+the command writes nothing.
+The Jev key goes in a repository secret. See [check mode](./docs/check-mode.md) for the
+workflow example and the `SCOPE-001` caveat.
+
 ## Implemented behavior
 
 The current release implements the full local review path:
@@ -715,7 +736,8 @@ ordinary turn is reviewed normally.
 Implemented so far: multi-rule reviews, the `SCOPE-CREEP`, `COMPLEXITY`, and
 `TEST-ADEQUACY` built-ins, the `jev-init` policy bootstrap, local review history with
 feedback and calibration (`jevguard report`, `jevguard feedback`), on-demand checks
-(`jevguard rules check`, `jevguard doctor`), and the Claude Code plugin. Planned work:
+(`jevguard rules check`, `jevguard check` in CI, `jevguard doctor`), and the Claude
+Code plugin. Planned work:
 
 ```text
 V0.3  Remaining built-in semantic check: test adequacy        done

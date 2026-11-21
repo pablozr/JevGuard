@@ -1,5 +1,20 @@
 import type { HostInstallOutcome } from "@jevguard/node-infra";
 import { parseHostCommandArguments } from "./arguments";
+import { parseCheckArguments } from "./check/arguments";
+import {
+  CHECK_FAILURE_MESSAGE,
+  CHECK_GIT_UNAVAILABLE_MESSAGE,
+  CHECK_RANGE_INVALID_MESSAGE,
+  CHECK_RULE_NOT_FOUND_MESSAGE,
+  CHECK_STAGED_MESSAGE,
+  CHECK_USAGE,
+  describeCheck,
+  describeCheckAnnotations,
+  describeRangeTooLarge,
+  serializeCheck,
+} from "./check/messages";
+import type { CheckRequest, CheckResult } from "./check/types";
+import { checkExitCode, evaluateCheck } from "./check/verdict";
 import {
   DOCTOR_FAILURE_MESSAGE,
   describeDoctorReport,
@@ -55,11 +70,13 @@ import type { CliDependencies, CliIO } from "./types";
 /**
  * Dispatches the `jevguard` CLI: `login`, `install [--project] [--host <id>]`,
  * `setup [--host <id>] [--project] [--init] [--yes] [--agent-delivery]`, `report [--json]`,
- * `doctor [--json] [--host <id>]`, `feedback [--json]`, `feedback <number> <right|wrong>`, and
- * `rules check --diff <file|-> ...`. Any other command,
- * argument, or secret-looking argument yields usage and a nonzero exit, and no
+ * `doctor [--json] [--host <id>]`, `feedback [--json]`, `feedback <number> <right|wrong>`,
+ * `rules check --diff <file|-> ...`, and `check --range <base>..<head> ...`. Any other
+ * command, argument, or secret-looking argument yields usage and a nonzero exit, and no
  * argument value is ever echoed. `rules check` exits 0 (clean), 1 (a rule failed),
- * or 2 (it could not complete, including invalid arguments). `feedback` exits 0
+ * or 2 (it could not complete, including invalid arguments). `check` exits 0 (pass or
+ * warnings), 1 (an error-severity rule failed, or a not-judged commit with `--strict`),
+ * or 2 (it could not run). `feedback` exits 0
  * (listed or recorded), 1 (invalid input), or 2 (local storage failed).
  */
 export async function runCli(
@@ -85,6 +102,10 @@ export async function runCli(
 
   if (argv[0] === "replay") {
     return runReplayCommand(argv.slice(1), io, dependencies);
+  }
+
+  if (argv[0] === "check") {
+    return runCheckCommand(argv.slice(1), io, dependencies);
   }
 
   if (argv.length === 1 && argv[0] === "report") {
@@ -310,6 +331,81 @@ async function runReplayCommand(
   );
 
   return 0;
+}
+
+async function runCheckCommand(
+  args: readonly string[],
+  io: CliIO,
+  dependencies: CliDependencies,
+): Promise<number> {
+  const parsed = parseCheckArguments(args);
+
+  if (parsed === null) {
+    io.writeErr(CHECK_USAGE);
+
+    return 2;
+  }
+
+  if (parsed.kind === "STAGED_OUT_OF_V1") {
+    io.writeErr(CHECK_STAGED_MESSAGE);
+
+    return 2;
+  }
+
+  return runCheck(parsed.request, parsed.output, io, dependencies);
+}
+
+async function runCheck(
+  request: CheckRequest,
+  output: "TEXT" | "JSON" | "ANNOTATIONS",
+  io: CliIO,
+  dependencies: CliDependencies,
+): Promise<number> {
+  let result: CheckResult;
+
+  try {
+    result = await dependencies.check(request);
+  } catch {
+    io.writeErr(CHECK_FAILURE_MESSAGE);
+
+    return 2;
+  }
+
+  if (result.status === "FAILED") {
+    io.writeErr(
+      result.reason === "RANGE_INVALID"
+        ? CHECK_RANGE_INVALID_MESSAGE
+        : CHECK_GIT_UNAVAILABLE_MESSAGE,
+    );
+
+    return 2;
+  }
+
+  if (result.status === "RANGE_TOO_LARGE") {
+    io.writeErr(describeRangeTooLarge(result.totalCommits, result.limit));
+
+    return 2;
+  }
+
+  const verdict = evaluateCheck(result.commits);
+
+  if (verdict.verdict === "RULE_NOT_FOUND") {
+    io.writeErr(CHECK_RULE_NOT_FOUND_MESSAGE);
+
+    return 2;
+  }
+
+  io.writeOut(
+    output === "JSON"
+      ? serializeCheck(result, verdict)
+      : describeCheck(result, verdict, request.range, request.strict).join("\n"),
+  );
+
+  if (output === "ANNOTATIONS") {
+    io.writeOut(describeCheckAnnotations(verdict).join("\n"));
+  }
+
+  return checkExitCode(verdict, request.strict);
 }
 
 function reportSetup(io: CliIO, result: SetupResult): number {
