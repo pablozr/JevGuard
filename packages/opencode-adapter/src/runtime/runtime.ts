@@ -189,9 +189,15 @@ export function createPluginRuntime(dependencies: PluginRuntimeDependencies): Pl
       activeUnits.clear();
 
       await Promise.all(
-        units.map((sessionID) =>
-          presentReview(dependencies.presenter, unavailableReview(sessionID, "REVIEW_INTERRUPTED")),
-        ),
+        units.map(async (sessionID) => {
+          await Promise.all([
+            presentReview(
+              dependencies.presenter,
+              unavailableReview(sessionID, "REVIEW_INTERRUPTED"),
+            ),
+            writeOperationalNow(dependencies.operational, { kind: "REVIEW_INTERRUPTED" }),
+          ]);
+        }),
       );
     },
   };
@@ -199,6 +205,22 @@ export function createPluginRuntime(dependencies: PluginRuntimeDependencies): Pl
 
 async function writeOperational(sink: OperationalLogSink, event: OperationalEvent): Promise<void> {
   await sink.write(event);
+}
+
+/**
+ * Writes one operational line on the shutdown path, where there is no later drain to
+ * carry it. It never throws into the host: the line is the last chance to record that
+ * the unit was not judged.
+ */
+async function writeOperationalNow(
+  sink: OperationalLogSink,
+  event: OperationalEvent,
+): Promise<void> {
+  try {
+    await sink.write(event);
+  } catch {
+    return;
+  }
 }
 
 function ignore(): void {

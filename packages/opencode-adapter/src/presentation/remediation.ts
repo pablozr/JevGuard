@@ -94,6 +94,7 @@ export function createOperationalLogSink(writer: OpenCodeLogWriter): Operational
 
 function levelOf(event: OperationalEvent): "info" | "warn" {
   return event.kind === "ATTRIBUTION_UNAVAILABLE" ||
+    event.kind === "REVIEW_INTERRUPTED" ||
     event.kind === "REMEDIATION_NOT_SENT" ||
     event.kind === "REMEDIATION_CONFIG_LEGACY" ||
     event.kind === "REMEDIATION_CONFIG_INVALID"
@@ -105,6 +106,8 @@ function operationalMessage(event: OperationalEvent): string {
   switch (event.kind) {
     case "TURN_SKIPPED":
       return `JevGuard skipped · ${event.reason}`;
+    case "REVIEW_INTERRUPTED":
+      return "JevGuard review interrupted · the host shut down before the review finished";
     case "ATTRIBUTION_UNAVAILABLE":
       return ATTRIBUTION_LOG_MESSAGE;
     case "REMEDIATION_SENT":

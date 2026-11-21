@@ -170,6 +170,21 @@ describe("operational log sink", () => {
     ]);
   });
 
+  test("logs a review the shutdown cut with the typed code only", async () => {
+    const writer = new FakeLogWriter();
+
+    await createOperationalLogSink(writer).write({ kind: "REVIEW_INTERRUPTED" });
+
+    expect(writer.logs).toEqual([
+      {
+        service: "jevguard",
+        level: "warn",
+        message: "JevGuard review interrupted · the host shut down before the review finished",
+        extra: {},
+      },
+    ]);
+  });
+
   test("contains a writer failure as FAILED", async () => {
     const writer = new FakeLogWriter();
 
