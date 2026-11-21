@@ -13,6 +13,7 @@ import type {
   ReviewHistoryRecord,
 } from "@jevguard/node-infra";
 import { describe, expect, test } from "vitest";
+import type { CheckRequest, CheckResult } from "../src/check/types";
 import type { DoctorReport, DoctorRun } from "../src/doctor/types";
 import type {
   FeedbackListResult,
@@ -79,6 +80,19 @@ function doctorFixture(status: DoctorReport["status"]): DoctorRun {
       ],
     },
     hostChecks: [{ json: plugin, message: "OpenCode plugin line.", annotation: null }],
+  };
+}
+
+const CHECK_SHA = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678";
+
+function checkedCommit(
+  results: Parameters<typeof aggregateReview>[1],
+): Extract<CheckResult, { status: "CHECKED" }> {
+  return {
+    status: "CHECKED",
+    commits: [
+      { sha: CHECK_SHA, status: "REVIEWED", review: aggregateReview("rules-check", results) },
+    ],
   };
 }
 
@@ -180,6 +194,9 @@ class StubDependencies implements CliDependencies {
     status: "REVIEWED",
     review: aggregateReview("rules-check", []),
   };
+  readonly checkRequests: CheckRequest[] = [];
+  checkResult: CheckResult = { status: "CHECKED", commits: [] };
+  checkError: Error | null = null;
 
   login(): Promise<LoginOutcome> {
     this.loginCalls += 1;
@@ -249,6 +266,14 @@ class StubDependencies implements CliDependencies {
     return this.rulesCheckError === null
       ? Promise.resolve(this.rulesCheckResult)
       : Promise.reject(this.rulesCheckError);
+  }
+
+  check(request: CheckRequest): Promise<CheckResult> {
+    this.checkRequests.push(request);
+
+    return this.checkError === null
+      ? Promise.resolve(this.checkResult)
+      : Promise.reject(this.checkError);
   }
 }
 
@@ -734,6 +759,219 @@ describe("runCli rules check", () => {
     expect(usage).toContain("jevguard doctor [--json]");
     expect(usage).toContain(
       "jevguard rules check --diff <file|-> [--task <text>] [--rule <id>] [--json]",
+    );
+  });
+});
+
+describe("runCli check", () => {
+  test("passes the range and prints the human report", async () => {
+    const { io, dependencies } = harness();
+
+    const exitCode = await runCli(["check", "--range", "main..HEAD"], io, dependencies);
+
+    expect(exitCode).toBe(0);
+    expect(dependencies.checkRequests[0]).toEqual({
+      range: "main..HEAD",
+      last: null,
+      ruleId: null,
+      strict: false,
+    });
+    expect(io.out.join("\n")).toContain("JevGuard check (main..HEAD)");
+  });
+
+  test("exits 1 when an error-severity rule fails", async () => {
+    const { io, dependencies } = harness();
+    dependencies.checkResult = checkedCommit([
+      {
+        kind: "RULE",
+        turnId: "rules-check",
+        ruleId: "SECRETS-001",
+        severity: "error",
+        scopedPaths: ["src/a.ts"],
+        outcome: "FAIL",
+        violationProbability: 0.91,
+      },
+    ]);
+
+    const exitCode = await runCli(["check", "--range", "main..HEAD"], io, dependencies);
+
+    expect(exitCode).toBe(1);
+    expect(io.out.join("\n")).toContain("Result: FAIL");
+    expect(io.out.join("\n")).toContain("SECRETS-001:FAIL");
+  });
+
+  test("a warning-severity FAIL never fails the build", async () => {
+    const { io, dependencies } = harness();
+    dependencies.checkResult = checkedCommit([
+      {
+        kind: "RULE",
+        turnId: "rules-check",
+        ruleId: "SCOPE-001",
+        severity: "warning",
+        scopedPaths: ["src/a.ts"],
+        outcome: "FAIL",
+        violationProbability: 0.93,
+      },
+    ]);
+
+    const exitCode = await runCli(["check", "--range", "main..HEAD"], io, dependencies);
+
+    expect(exitCode).toBe(0);
+    expect(io.out.join("\n")).toContain("Result: WARN");
+  });
+
+  test("UNAVAILABLE never fails, unless --strict is given", async () => {
+    const { io, dependencies } = harness();
+    dependencies.checkResult = checkedCommit([
+      {
+        kind: "RULE",
+        turnId: "rules-check",
+        ruleId: "SECRETS-001",
+        severity: "error",
+        scopedPaths: [],
+        outcome: "UNAVAILABLE",
+        reason: "JEV_FAILURE",
+      },
+    ]);
+
+    const lenient = await runCli(["check", "--range", "main..HEAD"], io, dependencies);
+    const strict = await runCli(["check", "--range", "main..HEAD", "--strict"], io, dependencies);
+
+    expect(lenient).toBe(0);
+    expect(strict).toBe(1);
+    expect(io.out.join("\n")).toContain("JEV_FAILURE");
+  });
+
+  test("exits 2 for an unknown rule without echoing the id", async () => {
+    const { io, dependencies } = harness();
+    dependencies.checkResult = {
+      status: "CHECKED",
+      commits: [{ sha: CHECK_SHA, status: "RULE_NOT_FOUND" }],
+    };
+
+    const exitCode = await runCli(
+      ["check", "--range", "main..HEAD", "--rule", "SECRET_VALUE"],
+      io,
+      dependencies,
+    );
+
+    expect(exitCode).toBe(2);
+    expect(io.err.join("\n")).toContain("No rule in .jev/rules.md matches --rule");
+    expect(io.err.join("\n")).not.toContain("SECRET_VALUE");
+  });
+
+  test("exits 2 and says how many commits the range has when it is above the cap", async () => {
+    const { io, dependencies } = harness();
+    dependencies.checkResult = { status: "RANGE_TOO_LARGE", totalCommits: 73, limit: 50 };
+
+    const exitCode = await runCli(["check", "--range", "main..HEAD"], io, dependencies);
+
+    expect(exitCode).toBe(2);
+    expect(io.err.join("\n")).toContain("73 commits");
+    expect(io.err.join("\n")).toContain("--last 50");
+  });
+
+  test("exits 2 with the matching message when the range is invalid", async () => {
+    const { io, dependencies } = harness();
+    dependencies.checkResult = { status: "FAILED", reason: "RANGE_INVALID" };
+
+    const exitCode = await runCli(["check", "--range", "nope..HEAD"], io, dependencies);
+
+    expect(exitCode).toBe(2);
+    expect(io.err.join("\n")).toContain("Could not read the range");
+  });
+
+  test("refuses --staged as out of v1 without calling the dependency", async () => {
+    const { io, dependencies } = harness();
+
+    const exitCode = await runCli(["check", "--staged"], io, dependencies);
+
+    expect(exitCode).toBe(2);
+    expect(dependencies.checkRequests).toEqual([]);
+    expect(io.err.join("\n")).toContain("--staged");
+    expect(io.err.join("\n")).toContain("ADR 0023");
+  });
+
+  test("prints versioned JSON with --json", async () => {
+    const { io, dependencies } = harness();
+    dependencies.checkResult = checkedCommit([
+      {
+        kind: "RULE",
+        turnId: "rules-check",
+        ruleId: "SECRETS-001",
+        severity: "error",
+        scopedPaths: [],
+        outcome: "FAIL",
+        violationProbability: 0.8,
+      },
+    ]);
+
+    await runCli(["check", "--range", "main..HEAD", "--json"], io, dependencies);
+
+    expect(JSON.parse(io.out.join("\n"))).toMatchObject({
+      version: 1,
+      status: "CHECKED",
+      verdict: "FAIL",
+      commits: [{ sha: CHECK_SHA }],
+    });
+  });
+
+  test("prints GitHub annotations with --annotations", async () => {
+    const { io, dependencies } = harness();
+    dependencies.checkResult = checkedCommit([
+      {
+        kind: "RULE",
+        turnId: "rules-check",
+        ruleId: "SECRETS-001",
+        severity: "error",
+        scopedPaths: [],
+        outcome: "FAIL",
+        violationProbability: 0.8,
+      },
+    ]);
+
+    const exitCode = await runCli(
+      ["check", "--range", "main..HEAD", "--annotations"],
+      io,
+      dependencies,
+    );
+
+    expect(exitCode).toBe(1);
+    expect(io.out.join("\n")).toContain("::error title=JevGuard SECRETS-001::");
+  });
+
+  test("exits 2 on invalid arguments without calling the dependency or echoing them", async () => {
+    const { io, dependencies } = harness();
+
+    const exitCode = await runCli(
+      ["check", "--range", "--force", "SECRET_VALUE"],
+      io,
+      dependencies,
+    );
+
+    expect(exitCode).toBe(2);
+    expect(dependencies.checkRequests).toEqual([]);
+    expect(io.err.join("\n")).toContain("Usage: jevguard check");
+    expect(io.err.join("\n")).not.toContain("SECRET_VALUE");
+  });
+
+  test("exits 2 with a generic message when the dependency throws", async () => {
+    const { io, dependencies } = harness();
+    dependencies.checkError = new Error("SECRET_VALUE");
+
+    const exitCode = await runCli(["check", "--range", "main..HEAD"], io, dependencies);
+
+    expect(exitCode).toBe(2);
+    expect(io.err.join("\n")).toBe("Could not run the check.");
+  });
+
+  test("the global usage lists the check command", async () => {
+    const { io, dependencies } = harness();
+
+    await runCli([], io, dependencies);
+
+    expect(io.err.join("\n")).toContain(
+      "jevguard check --range <base>..<head> [--last <1-50>] [--rule <id>] [--strict] [--json | --annotations]",
     );
   });
 });

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { performCheck } from "./check/perform";
 import { performDoctor } from "./doctor/perform";
 import { performFeedbackList, performFeedbackMark } from "./feedback/perform";
 import { performInit } from "./init/perform";
@@ -22,6 +23,7 @@ const exitCode = await runCli(process.argv.slice(2), io, {
   setup: performSetup,
   init: performInit,
   replay: performReplay,
+  check: performCheck,
   report: performReport,
   doctor: performDoctor,
   rulesCheck: performRulesCheck,

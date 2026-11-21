@@ -5,6 +5,7 @@ import type {
   HostInstallScope,
   LoginOutcome,
 } from "@jevguard/node-infra";
+import type { CheckRequest, CheckResult } from "./check/types";
 import type { DoctorRun } from "./doctor/types";
 import type { FeedbackListResult, FeedbackMarkRequest, FeedbackMarkResult } from "./feedback/types";
 import type { InitRequest, InitResult } from "./init/types";
@@ -23,6 +24,7 @@ export interface CliDependencies {
   readonly setup: (request: SetupRequest) => Promise<SetupResult>;
   readonly init: (request: InitRequest) => Promise<InitResult>;
   readonly replay: (request: ReplayRequest) => Promise<ReplayResult>;
+  readonly check: (request: CheckRequest) => Promise<CheckResult>;
   readonly report: () => Promise<ReviewReport>;
   readonly doctor: (hosts: readonly HostId[]) => Promise<DoctorRun>;
   readonly rulesCheck: (request: RulesCheckRequest) => Promise<RulesCheckResult>;

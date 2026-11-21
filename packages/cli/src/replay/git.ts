@@ -3,9 +3,11 @@ import type { HistoryRead, ReplayedCommit } from "./types";
 
 const GIT_TIMEOUT_MS = 20_000;
 const STDOUT_LIMIT = 16 * 1024 * 1024;
-const FIELD_SEPARATOR = "\u001f";
 
-interface GitResult {
+/** Field separator for the one-line `git log` format shared by the replay and check readers. */
+export const FIELD_SEPARATOR = "\u001f";
+
+export interface GitResult {
   readonly ok: boolean;
   readonly stdout: string;
 }
@@ -13,8 +15,9 @@ interface GitResult {
 /**
  * Runs read-only Git in the working directory. The arguments are constant except for a
  * commit count and a hexadecimal revision, so nothing user-provided reaches a shell.
+ * Exported so other read-only Git readers reuse the same timeout and output bound.
  */
-function runGit(args: readonly string[]): Promise<GitResult> {
+export function runGit(args: readonly string[], cwd?: string): Promise<GitResult> {
   return new Promise((resolve) => {
     let settled = false;
     let stdout = "";
@@ -27,7 +30,11 @@ function runGit(args: readonly string[]): Promise<GitResult> {
       resolve(result);
     }
 
-    const child = spawn("git", [...args], { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn("git", [...args], {
+      ...(cwd === undefined ? {} : { cwd }),
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
     const timer = setTimeout(() => {
       child.kill();
       settle({ ok: false, stdout: "" });
@@ -43,13 +50,14 @@ function runGit(args: readonly string[]): Promise<GitResult> {
   });
 }
 
-interface CommitHead {
+export interface CommitHead {
   readonly sha: string;
   readonly subject: string;
   readonly merge: boolean;
 }
 
-function parseHeads(output: string): readonly CommitHead[] {
+/** Parses the `%H`, `%p`, `%s` lines this module and the check reader ask Git for. */
+export function parseCommitHeads(output: string): readonly CommitHead[] {
   return output.split("\n").flatMap((line) => {
     const [sha = "", parents = "", subject = ""] = line.split(FIELD_SEPARATOR);
 
@@ -74,7 +82,7 @@ export function createGitCommitReader(): (last: number) => Promise<HistoryRead> 
 
     if (!heads.ok) return { status: "FAILED", reason: "GIT_UNAVAILABLE" };
 
-    const commits: CommitHead[] = [...parseHeads(heads.stdout)];
+    const commits: CommitHead[] = [...parseCommitHeads(heads.stdout)];
 
     if (commits.length === 0) return { status: "FAILED", reason: "NO_COMMITS" };
 
