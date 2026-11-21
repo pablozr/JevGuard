@@ -422,6 +422,44 @@ a short revision, the verdict and each rule's outcome. It costs one Jev call per
 per reviewed commit, so `--last` is bounded to 50. Exit codes: `0` when it replayed,
 `1` for invalid arguments, `2` when Git could not be read or the Jev port failed.
 
+### `jevguard check --range <base>..<head> [--last <1-50>] [--rule <id>] [--strict] [--json | --annotations]`
+
+The CI mode: it judges an existing commit range instead of a live turn. Each
+non-merge commit's own patch is the unit and its subject is the task, exactly as
+`jevguard replay` judges them (`check` and `replay` share the review path). Merge
+commits are never units, so they neither count against the limit nor reach Jev.
+
+- `--range <base>..<head>` takes exactly one `..` between two revisions. A revision
+  starting with `-` or `^`, a triple dot (`base...head` would judge commits that are
+  not in the head branch), whitespace and anything else outside branch names, tags,
+  hexadecimal revisions and suffixes such as `HEAD~2` or `@{upstream}` is refused
+  before Git runs. The work tree is the project root of the current directory.
+- `--last <n>` reviews only the newest `n` commits, 1 to 50. Without it the whole
+  range is used, up to 50 commits; a bigger range is refused with its count and exit
+  `2` rather than silently truncated. Each rule over each reviewed commit is one Jev
+  call.
+- `--rule <id>` evaluates only that rule. A `--rule` that matches nothing is exit `2`.
+- `--strict` makes a commit that could not be judged completely fail the check
+  (exit `1`). Without it, `UNAVAILABLE` and an unparseable patch are reported as a
+  warning and never fail.
+- `--json` prints `{ "version": 1, "status": "CHECKED", "verdict", "summary", "commits" }`
+  with the same allowlist projection as the structured log.
+- `--annotations` prints GitHub Actions workflow commands (`::error` / `::warning`)
+  next to the plain report. An annotation carries the rule ID, the commit revision and
+  the probability only.
+
+Exit codes: `0` when no `error`-severity rule `FAIL`ed (warnings are fine, and so is a
+`FAIL` of a `warning`-severity rule — the gate, not the check, decides thresholds);
+`1` when an `error`-severity rule `FAIL`ed, or when a commit was not judged completely
+with `--strict`; `2` when it could not run (invalid arguments, invalid or unknown
+range, unknown rule, Git unavailable, or a range above the limit). Text, JSON and
+annotations never carry the diff, the task (including the commit subject) or a
+credential, and the command writes nothing: no review history, no file, no repository
+change. `--staged` is recognized and refused: pre-commit is out of v1 until the
+decision recorded in [ADR 0023](./adr/0023-check-mode-in-ci.md). See
+[check mode](./check-mode.md) for the GitHub Actions example and the `SCOPE-001`
+caveat.
+
 ### `jevguard setup [--host <id>] [--project] [--init] [--yes] [--agent-delivery]`
 
 Sets everything up in one command, in this order: the Jev API key, the plugin on each
