@@ -19,7 +19,12 @@ import { parseCheckArguments } from "../src/check/arguments";
 import { executeCheck } from "../src/check/execute";
 import { createGitRangeReader } from "../src/check/git";
 import { describeCheck, describeCheckAnnotations, serializeCheck } from "../src/check/messages";
-import type { CheckDependencies, CheckResult, CheckVerdict } from "../src/check/types";
+import type {
+  CheckDependencies,
+  CheckResult,
+  CheckVerdict,
+  RangeReadOptions,
+} from "../src/check/types";
 import { checkExitCode, evaluateCheck } from "../src/check/verdict";
 import type { ReplayedCommit, ReplayCommitResult } from "../src/replay/types";
 
@@ -205,14 +210,14 @@ function ruleResult(
 describe("executeCheck", () => {
   test("reads the range at the cap and reviews each commit's subject as the task", async () => {
     const jev = new FakeJevPort("PASS");
-    const calls: { range: string; limit: number }[] = [];
+    const calls: { range: string; options: RangeReadOptions }[] = [];
 
     const result = await executeCheck(
       { range: "main..HEAD", last: null, ruleId: null, strict: false },
       {
         ...dependencies([commit("a".repeat(40)), commit("b".repeat(40))], jev),
-        readRange: async (range, limit) => {
-          calls.push({ range, limit });
+        readRange: async (range, options) => {
+          calls.push({ range, options });
 
           return { status: "READ", commits: [commit("a".repeat(40)), commit("b".repeat(40))] };
         },
@@ -220,30 +225,30 @@ describe("executeCheck", () => {
     );
 
     expect(result.status).toBe("CHECKED");
-    expect(calls).toEqual([{ range: "main..HEAD", limit: 50 }]);
+    expect(calls).toEqual([{ range: "main..HEAD", options: { newest: null, cap: 50 } }]);
     expect(jev.requests.map((request) => request.task)).toEqual([
       SUBJECT_SENTINEL,
       SUBJECT_SENTINEL,
     ]);
   });
 
-  test("passes the explicit --last limit and the rule filter through", async () => {
-    const limits: number[] = [];
+  test("passes the explicit --last slice and the rule filter through", async () => {
+    const options: RangeReadOptions[] = [];
     const jev = new FakeJevPort("PASS");
 
     await executeCheck(
       { range: "main..HEAD", last: 2, ruleId: "ARCH-001", strict: false },
       {
         ...dependencies([commit("a".repeat(40))], jev),
-        readRange: async (_range, limit) => {
-          limits.push(limit);
+        readRange: async (_range, readOptions) => {
+          options.push(readOptions);
 
           return { status: "READ", commits: [commit("a".repeat(40))] };
         },
       },
     );
 
-    expect(limits).toEqual([2]);
+    expect(options).toEqual([{ newest: 2, cap: 50 }]);
     expect(jev.requests).toHaveLength(1);
   });
 
@@ -505,7 +510,7 @@ describe("createGitRangeReader", () => {
     const first = await commitFile("a.txt", "a");
     const second = await commitFile("b.txt", "b");
     const third = await commitFile("c.txt", "c");
-    const read = await createGitRangeReader(directory)(`${first}..HEAD`, 50);
+    const read = await createGitRangeReader(directory)(`${first}..HEAD`, { newest: null, cap: 50 });
 
     expect(read.status === "READ" && read.commits.map((entry) => entry.sha)).toEqual([
       third,
@@ -521,7 +526,7 @@ describe("createGitRangeReader", () => {
     const main = await commitFile("main.txt", "main");
     await git(["merge", "--quiet", "--no-ff", "side", "-m", "merge side"]);
     const merge = await git(["rev-parse", "HEAD"]);
-    const read = await createGitRangeReader(directory)(`${base}..HEAD`, 50);
+    const read = await createGitRangeReader(directory)(`${base}..HEAD`, { newest: null, cap: 50 });
 
     const shas = read.status === "READ" ? read.commits.map((entry) => entry.sha) : [];
 
@@ -532,10 +537,22 @@ describe("createGitRangeReader", () => {
   test("an empty range has nothing to read", async () => {
     await commitFile("a.txt", "a");
 
-    expect(await createGitRangeReader(directory)("HEAD..HEAD", 50)).toEqual({
+    expect(await createGitRangeReader(directory)("HEAD..HEAD", { newest: null, cap: 50 })).toEqual({
       status: "READ",
       commits: [],
     });
+  });
+
+  test("slices the range to the newest commits with an explicit --last", async () => {
+    const first = await commitFile("a.txt", "a");
+    await commitFile("b.txt", "b");
+    const third = await commitFile("c.txt", "c");
+    const read = await createGitRangeReader(directory)(`${first}..HEAD`, {
+      newest: 1,
+      cap: 50,
+    });
+
+    expect(read.status === "READ" && read.commits.map((entry) => entry.sha)).toEqual([third]);
   });
 
   test("refuses a range above the limit with its count", async () => {
@@ -543,7 +560,9 @@ describe("createGitRangeReader", () => {
     await commitFile("b.txt", "b");
     await commitFile("c.txt", "c");
 
-    expect(await createGitRangeReader(directory)(`${first}..HEAD`, 1)).toEqual({
+    expect(
+      await createGitRangeReader(directory)(`${first}..HEAD`, { newest: null, cap: 1 }),
+    ).toEqual({
       status: "RANGE_TOO_LARGE",
       totalCommits: 2,
       limit: 1,
@@ -553,7 +572,12 @@ describe("createGitRangeReader", () => {
   test("reports an unknown revision as an invalid range", async () => {
     await commitFile("a.txt", "a");
 
-    expect(await createGitRangeReader(directory)("definitely-not-a-revision..HEAD", 50)).toEqual({
+    expect(
+      await createGitRangeReader(directory)("definitely-not-a-revision..HEAD", {
+        newest: null,
+        cap: 50,
+      }),
+    ).toEqual({
       status: "FAILED",
       reason: "RANGE_INVALID",
     });
@@ -562,7 +586,7 @@ describe("createGitRangeReader", () => {
   test("carries each commit's own patch, not the whole range", async () => {
     const first = await commitFile("a.txt", "a");
     await commitFile("b.txt", "b");
-    const read = await createGitRangeReader(directory)(`${first}..HEAD`, 50);
+    const read = await createGitRangeReader(directory)(`${first}..HEAD`, { newest: null, cap: 50 });
 
     expect(read.status === "READ" && read.commits[0]?.diff).toContain("b.txt");
     expect(read.status === "READ" && read.commits[0]?.diff).not.toContain("a.txt");

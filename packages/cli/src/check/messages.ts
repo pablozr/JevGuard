@@ -25,7 +25,7 @@ const MAX_LISTED_RESULTS = 4;
 const MAX_LISTED_FAILURES = 4;
 
 export function describeRangeTooLarge(totalCommits: number, limit: number): string {
-  return `The range has ${totalCommits} commits, above the limit of ${limit}. Narrow the range, or pass --last ${limit} to check only the newest ${limit}.`;
+  return `The range has ${totalCommits} commits, above the limit of ${limit}. Narrow the range, or pass --last ${limit} to check only the newest ${limit} commits.`;
 }
 
 /**

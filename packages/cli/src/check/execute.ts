@@ -18,7 +18,10 @@ export async function executeCheck(
   request: CheckRequest,
   dependencies: CheckDependencies,
 ): Promise<CheckResult> {
-  const read = await dependencies.readRange(request.range, request.last ?? CHECK_MAX_COMMITS);
+  const read = await dependencies.readRange(request.range, {
+    newest: request.last,
+    cap: CHECK_MAX_COMMITS,
+  });
 
   if (read.status !== "READ") {
     return read;

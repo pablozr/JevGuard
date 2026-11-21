@@ -33,8 +33,14 @@ export type CheckResult =
   | { readonly status: "CHECKED"; readonly commits: readonly ReplayCommitResult[] }
   | CheckReadFailure;
 
+/** How much of the range to read: an explicit newest-`n` slice and the hard cap. */
+export interface RangeReadOptions {
+  readonly newest: number | null;
+  readonly cap: number;
+}
+
 export interface CheckDependencies {
-  readonly readRange: (range: string, limit: number) => Promise<RangeRead>;
+  readonly readRange: (range: string, options: RangeReadOptions) => Promise<RangeRead>;
   readonly policy: PolicyLoader;
   readonly parseConfig: PolicyConfigParser;
   readonly jev: JevEvaluationPort;
