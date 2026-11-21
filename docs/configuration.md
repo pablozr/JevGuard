@@ -455,16 +455,19 @@ Exit codes: `0` when no `error`-severity rule `FAIL`ed (warnings are fine, and s
 `FAIL` of a `warning`-severity rule — the gate, not the check, decides thresholds);
 `1` when an `error`-severity rule `FAIL`ed, or when a commit was not judged completely
 with `--strict`; `2` when it could not run (invalid arguments, invalid or unknown
-range, unknown rule, Git unavailable, or a range above the limit). Text and JSON carry
-the scoped paths of each rule, and the JSON also carries the slice metadata (slice
-index, path, kind and hunk ordinal) the review log projection allows; annotations carry
-only the rule ID, the shortened commit revision, the probability and the severity, plus
-the typed reason codes in the warning for commits not judged completely. None of them
-ever carries the diff, the task (including the commit subject) or a credential, and the
-command writes nothing: no review history, no file, no repository change. `--staged` is recognized and refused: pre-commit is out of v1 until the
-decision recorded in [ADR 0023](./adr/0023-check-mode-in-ci.md). See
-[check mode](./check-mode.md) for the GitHub Actions example and the `SCOPE-001`
-caveat.
+range, unknown rule, Git unavailable, or a range above the limit). Every mode
+carries rule IDs, outcomes, commit revisions and the typed reason codes of commits
+not judged completely; the text report gives each rule's ID and outcome only, the
+JSON adds each rule's severity, probability and scoped paths plus the slice metadata
+(slice index, path, kind and hunk ordinal) the review log projection allows, and an
+annotation carries only the rule ID, the shortened commit revision, the probability
+and the severity, plus the typed reason codes in the warning for commits not judged
+completely. None of them ever carries the diff, the task (including the commit
+subject) or a credential, and the command writes nothing: no review history, no
+file, no repository change. `--staged` is recognized and refused: pre-commit is out
+of v1 until the decision recorded in
+[ADR 0023](./adr/0023-check-mode-in-ci.md). See [check mode](./check-mode.md) for
+the GitHub Actions example and the `SCOPE-001` caveat.
 
 ### `jevguard setup [--host <id>] [--project] [--init] [--yes] [--agent-delivery]`
 

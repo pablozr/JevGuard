@@ -54,9 +54,12 @@ by the caller. Two properties bound it:
    truncated, so the check never reports a verdict over a subset the caller did not
    ask for.
 6. Output is text by default, `--json` for machines, and `--annotations` for GitHub
-   Actions workflow commands (`::error` / `::warning`) in every commit line, with no
-   file or line (a rule result has no reliable line to point at) and no diff content.
-   Every mode prints IDs, outcomes, probabilities, severities and typed reasons only.
+   Actions workflow commands (`::error` / `::warning`) in every commit line. No mode
+   prints a line to point at (a rule result has no reliable one) or any diff content.
+   Every mode prints IDs, outcomes, commit revisions and the typed reasons of
+   commits not judged; the JSON also prints each rule's severity, probability and
+   scoped paths and the slice metadata of a sliced rule; the text report and the
+   annotations carry no paths.
 7. The check writes nothing: no review history, no file, no state, and it never edits
    the user's code. The Jev key is read from the same credential store or
    `TYPESAFE_API_KEY` as every other command; in CI it is a repository secret.
