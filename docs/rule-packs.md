@@ -253,7 +253,8 @@ documentation and is ignored. A branch with the rules is the versioned policy: e
 Only `error` rules can reach `FAIL`. `SCOPE-001` and `DEPENDENCY-001` are `warning`
 rules: they can warn, never fail, so they cannot stop a turn in
 [enforce mode](adr/0022-enforce-fail-via-stop-hook.md). The two `error` rules are the
-candidates for it; of the two, only `SECRETS-001` has a published corpus rate today.
+pilot's pair there; of the two, only `SECRETS-001` has a published corpus rate today,
+because `DESTRUCTIVE-001` is not measured yet (#118).
 
 ## Adding a rule to the pack
 

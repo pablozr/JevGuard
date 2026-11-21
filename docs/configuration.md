@@ -937,6 +937,11 @@ remediation:
   model: sonnet      # optional; Claude alias or id; default: the session's model
 ```
 
+Enforce (`enforce.rules`, `enforce.budget_ms`) is a designed, not yet implemented mode:
+[ADR 0022](./adr/0022-enforce-fail-via-stop-hook.md) records the accepted
+decisions, and an `enforce` block in this file is invalid until the implementation
+lands.
+
 The file is read by the worker. `XDG_CONFIG_HOME` is used only when it is an absolute
 path; otherwise `USERPROFILE` and then `HOME` plus `.config`. It is refused when its
 real path is inside the project root or inside the Git working tree that contains it
