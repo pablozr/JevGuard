@@ -1,7 +1,12 @@
+import { readFileSync } from "node:fs";
+import { parsePolicyConfig } from "../policy";
+import { createNodeProjectProbe, orNullWhenMissing } from "../remediation/containment";
 import {
   hasOnlyUserConfigSections,
   isRecord,
   loadUserSettingsFile,
+  userConfigEnvironmentOf,
+  userConfigFileOf,
 } from "../remediation/user-settings";
 import type { UserConfigLoadInput } from "../remediation/types";
 import type {
@@ -149,4 +154,58 @@ export function enabledEnforceSettings(
   result: EnforceUserSettingsResult,
 ): EnforceUserSettings | null {
   return result.status === "ENABLED" ? result.settings : null;
+}
+
+export interface UserEnforceSettingsDependencies {
+  readonly environment: { get(name: string): string | undefined };
+  /** The host's file under `jevguard/`, such as `claude-code.yaml`. */
+  readonly fileName: string;
+}
+
+/**
+ * Resolves the user's enforce settings for one project from the real file system, with
+ * the same containment as remediation: a file inside the project or its Git tree is
+ * refused, so a cloned repository can never switch enforce on. The answer is remembered
+ * per project for the life of the process.
+ */
+export function createUserEnforceSettings(
+  dependencies: UserEnforceSettingsDependencies,
+): (projectRoot: string) => EnforceUserSettingsResult {
+  const file = userConfigFileOf(
+    userConfigEnvironmentOf(dependencies.environment),
+    dependencies.fileName,
+  );
+  const probe = createNodeProjectProbe();
+  const remembered = new Map<string, EnforceUserSettingsResult>();
+
+  function load(projectRoot: string): EnforceUserSettingsResult {
+    if (file === null) return DISABLED;
+
+    return loadEnforceUserSettings({
+      file,
+      projectRoot,
+      readText: (path) => orNullWhenMissing(() => readFileSync(path, "utf8")),
+      realPath: probe.realPath,
+      hasGitMarker: probe.hasGitMarker,
+      parse: (text) => {
+        const parsed = parsePolicyConfig(text);
+
+        return parsed.status === "PARSED"
+          ? { status: "PARSED", value: parsed.value }
+          : { status: "INVALID" };
+      },
+    });
+  }
+
+  return (projectRoot) => {
+    const known = remembered.get(projectRoot);
+
+    if (known !== undefined) return known;
+
+    const loaded = load(projectRoot);
+
+    remembered.set(projectRoot, loaded);
+
+    return loaded;
+  };
 }
