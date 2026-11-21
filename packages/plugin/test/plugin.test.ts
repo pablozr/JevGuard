@@ -1184,6 +1184,87 @@ describe("JevGuardPlugin event returns before background work", () => {
     expect(lastResults(presenter)[0]?.outcome).toBe("UNAVAILABLE");
   });
 
+  test("one abandon cuts two in-flight units: one line and one operational event per unit", async () => {
+    const values = harness();
+    values.jev.block = true;
+
+    send(values.runtime, turnEvents());
+    send(values.runtime, turnEvents(SECOND_SESSION_ID));
+    // One unit's review is truly in flight; the other is cut before its queue turn.
+    await values.jev.waitForActivations(2);
+
+    await values.runtime.abandon();
+
+    expect(values.presenter.reviews).toHaveLength(2);
+    const all = values.presenter.reviews.flatMap((review) => review.results);
+    const turnIds = all.map((result) => result.turnId).sort();
+
+    expect(turnIds).toEqual([SESSION_ID, SECOND_SESSION_ID]);
+    expect(
+      all.every(
+        (result) => result.outcome === "UNAVAILABLE" && result.reason === "REVIEW_INTERRUPTED",
+      ),
+    ).toBe(true);
+    // One line per cut unit, the typed code only, nothing else in the event.
+    expect(values.operational.events).toEqual([
+      { kind: "REVIEW_INTERRUPTED" },
+      { kind: "REVIEW_INTERRUPTED" },
+    ]);
+
+    values.jev.release();
+    await values.runtime.drain();
+
+    // The late verdicts of both units are dropped: still one line per unit.
+    expect(values.presenter.reviews).toHaveLength(2);
+    expect(values.operational.events).toHaveLength(2);
+  });
+
+  test("a second abandon does not duplicate lines or events", async () => {
+    const values = harness();
+    values.jev.block = true;
+
+    send(values.runtime, turnEvents());
+    await values.jev.waitForActivations(2);
+
+    await values.runtime.abandon();
+    await values.runtime.abandon();
+
+    expect(values.presenter.reviews).toHaveLength(1);
+    expect(values.operational.events).toEqual([{ kind: "REVIEW_INTERRUPTED" }]);
+
+    values.jev.release();
+    await values.runtime.drain();
+  });
+
+  test("an operational sink that fails during abandon breaks neither shutdown nor the line", async () => {
+    const values = harness();
+    values.jev.block = true;
+
+    send(values.runtime, turnEvents());
+    await values.jev.waitForActivations(2);
+
+    const sink = values.dependencies.operational as FakeOperationalSink;
+    const original = sink.write.bind(sink);
+
+    sink.write = async (event: OperationalEvent): Promise<DeliveryStatus> => {
+      if (event.kind === "REVIEW_INTERRUPTED") {
+        throw new Error("log writer failed");
+      }
+
+      return original(event);
+    };
+
+    await expect(values.runtime.abandon()).resolves.toBeUndefined();
+
+    expect(values.presenter.reviews).toHaveLength(1);
+    expect(lastResults(values.presenter)).toEqual([
+      reviewUnavailable(SESSION_ID, "REVIEW_INTERRUPTED"),
+    ]);
+
+    values.jev.release();
+    await values.runtime.drain();
+  });
+
   test("a verdict already being written when shutdown hits is not joined by an interrupted line", async () => {
     const values = harness();
     errorFailSetup(values);
