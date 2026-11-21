@@ -18,7 +18,8 @@ export type {
 } from "../capture/types";
 export { createProcessDependencies } from "./process-dependencies";
 export { MAX_STDIN_BYTES, readLimitedStdin } from "./read-stdin";
-export { runHook } from "./run-hook";
+export { HOOK_BUDGET_MS, runHook } from "./run-hook";
+export type { HookResult } from "./run-hook";
 export { spawnDetachedWorker } from "./spawn-worker";
 export type {
   HookDependencies,

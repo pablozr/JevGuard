@@ -22,7 +22,12 @@ import type {
   TakenSnapshot,
 } from "../src/capture/types";
 import { keyOf, sessionDirectoryOf } from "../src/capture/unit-state";
-import type { ClaudeReviewHandoff, HookDependencies, WorkerSpawnResult } from "../src/hook";
+import type {
+  ClaudeReviewHandoff,
+  HookDependencies,
+  HookResult,
+  WorkerSpawnResult,
+} from "../src/hook";
 import { createFileHandoffSink, runHook } from "../src/hook";
 
 export const SESSION = "session-1";
@@ -120,15 +125,15 @@ export class HookWorld {
     };
   }
 
-  hook(payload: Payload): void {
-    runHook(
+  hook(payload: Payload): HookResult {
+    return runHook(
       JSON.stringify({ session_id: SESSION, cwd: this.projectRoot, ...payload }),
       this.dependencies(),
     );
   }
 
-  raw(stdin: string): void {
-    runHook(stdin, this.dependencies());
+  raw(stdin: string): HookResult {
+    return runHook(stdin, this.dependencies());
   }
 
   path(...segments: string[]): string {

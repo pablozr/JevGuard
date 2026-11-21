@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { ClaudeReviewHandoff } from "../src/hook";
-import { createFileHandoffSink } from "../src/hook";
+import { createFileHandoffSink, runHook } from "../src/hook";
 import { backdate, causesOf, HookWorld, initRepository, SESSION } from "./hook-world";
 
 // Real Git processes are slow under a loaded parallel run; keep these from timing out spuriously.
@@ -547,5 +547,63 @@ describe("handoff sink", () => {
     expect(
       JSON.parse(readFileSync(join(world.handoffDirectory(), files[0] ?? ""), "utf8")),
     ).toEqual(base);
+  });
+});
+
+describe("the closing unit the Stop gate reads", () => {
+  test("a Stop answers with the unit it closed, its turn id and its handoff", () => {
+    world.write("src/a.ts", "old\n");
+    world.prompt("rewrite a.ts");
+    world.edit("src/a.ts", "new\n");
+
+    const result = world.hook({
+      hook_event_name: "Stop",
+      background_tasks: [],
+      stop_hook_active: false,
+    });
+
+    expect(result.event?.name).toBe("Stop");
+    expect(result.closed).not.toBeNull();
+    expect(result.closed?.sessionId).toBe(SESSION);
+    expect(result.closed?.ordinal).toBe(0);
+    expect(result.closed?.projectRoot).toBe(world.projectRoot);
+    expect(result.closed?.sessionDirectory).toBe(world.sessionDirectory());
+    expect(result.closed?.turnId).toMatch(/^claude-code:session-1:[0-9a-f]{16}:0$/);
+    expect(result.closed?.handoffCreated).toBe(true);
+  });
+
+  test("a Stop whose handoff could not be written says so", () => {
+    world.prompt("anything");
+
+    const result = runHook(
+      JSON.stringify({
+        session_id: SESSION,
+        cwd: world.projectRoot,
+        hook_event_name: "Stop",
+        background_tasks: [],
+        stop_hook_active: false,
+      }),
+      { ...world.dependencies(), createHandoffSink: () => ({ deliver: () => "FAILED" }) },
+    );
+
+    expect(result.closed?.handoffCreated).toBe(false);
+  });
+
+  test("an event that closes no unit answers with none", () => {
+    const result = world.hook({ hook_event_name: "UserPromptSubmit", prompt: "hello" });
+
+    expect(result.event?.name).toBe("UserPromptSubmit");
+    expect(result.closed).toBeNull();
+  });
+
+  test("a Stop with an active background task closes no unit", () => {
+    world.prompt("anything");
+    const result = world.hook({
+      hook_event_name: "Stop",
+      background_tasks: [{ id: "b1" }],
+      stop_hook_active: false,
+    });
+
+    expect(result.closed).toBeNull();
   });
 });

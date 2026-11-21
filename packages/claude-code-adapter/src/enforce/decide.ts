@@ -1,5 +1,4 @@
-import type { ReviewResult } from "@jevguard/core";
-import type { EnforceDecision, EnforceInput, EnforceStopOutput } from "./types";
+import type { EnforceDecision, EnforceInput, EnforceResultFacts, EnforceStopOutput } from "./types";
 
 /** The host caps the reason; ADR 0022 keeps it well under that (decision 5). */
 export const ENFORCE_REASON_MAX_LENGTH = 2000;
@@ -44,7 +43,7 @@ export function enforceReason(ruleIds: readonly string[]): string {
  * result are skipped whatever the allowlist says.
  */
 function blockingRuleIds(
-  results: readonly ReviewResult[],
+  results: readonly EnforceResultFacts[],
   allowlist: readonly string[],
 ): readonly string[] {
   const failing = new Set<string>();

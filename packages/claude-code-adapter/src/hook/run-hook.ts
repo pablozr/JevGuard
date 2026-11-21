@@ -18,13 +18,16 @@ import {
   taintSession,
   taintUnitWith,
 } from "../capture/unit-state";
+import type { EnforceClosedUnit } from "../enforce/types";
 import type { HookEvent } from "../hook-event";
 import { isHookEventParseFailure, parseHookEvent } from "../hook-event";
 import { isJsonObject } from "../hook-event/shell-diff";
+import { unitTurnId } from "../turn";
 import { appendHookLog } from "./log";
 import type { HookDependencies, HookLogCode, HookLogEntry } from "./types";
 
-const HOOK_BUDGET_MS = 20_000;
+/** The hook's own time allowance; the host allows the `Stop` hook 30 s of wall time. */
+export const HOOK_BUDGET_MS = 20_000;
 
 interface EventScope {
   readonly dependencies: HookDependencies;
@@ -56,14 +59,17 @@ function captureAfterOrReport(event: HookEvent, context: CaptureContext): void {
   }
 }
 
-function notifyingSink(scope: EventScope): HandoffSink {
+function notifyingSink(scope: EventScope, onCreated: () => void): HandoffSink {
   const sink = scope.dependencies.createHandoffSink(handoffDirectoryOf(scope.stateDirectory));
 
   return {
     deliver(handoff) {
       const delivery = sink.deliver(handoff);
 
-      if (delivery === "CREATED") scope.onHandoffCreated();
+      if (delivery === "CREATED") {
+        onCreated();
+        scope.onHandoffCreated();
+      }
 
       return delivery;
     },
@@ -164,7 +170,7 @@ function logUnknownTool(event: HookEvent, scope: EventScope): void {
   scope.log(`UNKNOWN_TOOL:${loggedToolName(event.tool.toolName)}`);
 }
 
-function recordEvent(event: HookEvent, scope: EventScope): void {
+function recordEvent(event: HookEvent, scope: EventScope): EnforceClosedUnit | null {
   logUnknownTool(event, scope);
 
   const unit = openCurrentUnit(scope.stateDirectory, event.sessionId, scope.dependencies.now());
@@ -179,9 +185,11 @@ function recordEvent(event: HookEvent, scope: EventScope): void {
 
   if (context !== null) captureAfterOrReport(event, context);
 
-  if (!isClosingEvent(event)) return;
+  if (!isClosingEvent(event)) return null;
 
   const { dependencies } = scope;
+  const projectRoot = readUnitRoot(unit) ?? event.cwd;
+  let handoffCreated = false;
 
   closeUnit({
     unit,
@@ -190,13 +198,25 @@ function recordEvent(event: HookEvent, scope: EventScope): void {
     now: dependencies.now(),
     budget: scope.budget,
     removePath: dependencies.removePath,
-    sink: notifyingSink(scope),
+    sink: notifyingSink(scope, () => {
+      handoffCreated = true;
+    }),
     environment: dependencies.environment,
     files: dependencies.files,
     git: dependencies.git,
     report: scope.log,
   });
   sweepContained(scope, event.sessionId);
+
+  return {
+    sessionId: event.sessionId,
+    sessionDirectory: unit.sessionDirectory,
+    turnId: unitTurnId(event.sessionId, unit.ordinal, unit.epoch),
+    projectRoot,
+    epoch: unit.epoch,
+    ordinal: unit.ordinal,
+    handoffCreated,
+  };
 }
 
 /** Cleanup failures are logged and contained: they say nothing about any unit's evidence. */
@@ -210,7 +230,7 @@ function sweepContained(scope: EventScope, keepSessionId: string): void {
   }
 }
 
-function handleEvent(event: HookEvent, scope: EventScope): void {
+function handleEvent(event: HookEvent, scope: EventScope): EnforceClosedUnit | null {
   if (event.name === "SessionEnd") {
     try {
       removeSession(scope.stateDirectory, event.sessionId, scope.dependencies.removePath);
@@ -218,12 +238,12 @@ function handleEvent(event: HookEvent, scope: EventScope): void {
       scope.log("STATE_WRITE_FAILED");
     }
 
-    return;
+    return null;
   }
 
   if (event.name === "SessionStart") sweepContained(scope, event.sessionId);
 
-  recordEvent(event, scope);
+  return recordEvent(event, scope);
 }
 
 function readableSessionId(payload: unknown): string | null {
@@ -246,15 +266,25 @@ function parsePayload(stdin: string): unknown {
   }
 }
 
+/** What one invocation processed: the parsed event and, when it closed one, the unit. */
+export interface HookResult {
+  readonly event: HookEvent | null;
+  readonly closed: EnforceClosedUnit | null;
+}
+
+const NOTHING_PROCESSED: HookResult = { event: null, closed: null };
+
 /**
  * Processes one hook invocation. Never throws and never writes to stdout or stderr: a
  * failure is logged as a closed code and, when the session is identifiable, marks the
- * open unit as untrustworthy so it can only end `UNAVAILABLE`.
+ * open unit as untrustworthy so it can only end `UNAVAILABLE`. It answers with the unit
+ * a closing event produced, which the `Stop` gate needs; the decision itself is printed
+ * by the process entry, never here.
  */
-export function runHook(stdin: string, dependencies: HookDependencies): void {
+export function runHook(stdin: string, dependencies: HookDependencies): HookResult {
   const pluginData = dependencies.environment.get("CLAUDE_PLUGIN_DATA");
 
-  if (pluginData === undefined || pluginData === "") return;
+  if (pluginData === undefined || pluginData === "") return NOTHING_PROCESSED;
 
   const stateDirectory = stateDirectoryOf(pluginData);
   const logFor = (event: HookLogEntry["event"]) => (code: HookLogCode) => {
@@ -270,16 +300,17 @@ export function runHook(stdin: string, dependencies: HookDependencies): void {
 
     if (sessionId !== null) taintSession(stateDirectory, sessionId, dependencies.now());
 
-    return;
+    return NOTHING_PROCESSED;
   }
 
   const log = logFor(parsed.name);
   let workerWanted = parsed.name === "SessionStart";
+  let closed: EnforceClosedUnit | null = null;
 
   try {
     const budget = createBudget(dependencies.monotonicNow, HOOK_BUDGET_MS);
 
-    handleEvent(parsed, {
+    closed = handleEvent(parsed, {
       dependencies,
       budget,
       stateDirectory,
@@ -294,6 +325,8 @@ export function runHook(stdin: string, dependencies: HookDependencies): void {
   }
 
   if (workerWanted) spawnContained(dependencies, log);
+
+  return { event: parsed, closed };
 }
 
 function spawnContained(dependencies: HookDependencies, log: (code: HookLogCode) => void): void {
