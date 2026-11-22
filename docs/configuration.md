@@ -999,9 +999,10 @@ could affect (newest first and numbered from the local review history) and
 acknowledgement ledger is
 `<XDG_DATA_HOME or ~/.local/share>/jevguard/enforce-acks.jsonl`: it keeps the unit code,
 the blocking rule IDs and the timestamp, nothing else, and it is bounded (it rewrites
-itself once it passes 256 KB, keeping the newest 1000 records). Once the gate reads this
-ledger, an acknowledged unit is not blocked again and the hook records `ENFORCE_ACKED`;
-at this point `jevguard ack` only records, and the ledger is not consulted yet. Only
+itself once it passes 256 KB, keeping the newest 1000 records, and at most 32 rule IDs
+per line). The gate does not consult the ledger yet: today `jevguard ack` only records,
+and once that wiring lands an acknowledged unit is not blocked again and the hook
+records `ENFORCE_ACKED` instead. Only
 `jevguard ack <number>` requires an interactive terminal: it has no non-interactive
 form and no flag skips the confirmation, so an agent shell cannot acknowledge a unit on
 your behalf (listing runs anywhere, including a non-interactive shell). An

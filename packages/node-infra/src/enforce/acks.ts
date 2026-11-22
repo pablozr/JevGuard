@@ -4,9 +4,16 @@ import { boundJsonLinesFile, isObject, parseJsonLines } from "../history/jsonl-f
 import type { ReviewHistoryFileSystem, ReviewHistoryPathContext } from "../history/types";
 
 const ACKS_FILENAME = "enforce-acks.jsonl";
-const MAX_FIELD_LENGTH = 128;
-const MAX_RULE_IDS = 32;
 const RECORD_KEY_COUNT = 3;
+
+/**
+ * The longest a stored field may be. A record that does not fit is refused by the writer
+ * as well as by the parser, so the ledger never holds a line its own reader skips.
+ */
+export const MAX_ACK_FIELD_LENGTH = 128;
+
+/** The most rule IDs one record may keep; a unit with more is written with the first 32. */
+export const MAX_ACK_RULE_IDS = 32;
 
 /** Rewrite the acknowledgement ledger once it grows past this many bytes. */
 export const DEFAULT_ACKS_MAX_BYTES = 256 * 1024;
@@ -71,6 +78,11 @@ export function createLocalEnforceAckStore(
       }
     },
     async append(record: EnforceAckRecord): Promise<EnforceAckWriteStatus> {
+      // The writer and the reader must accept the same records: a line the parser would
+      // skip is not written at all, so an acknowledgement never claims to be recorded
+      // while the next read silently drops it.
+      if (!isAckRecord(record)) return "FAILED";
+
       try {
         const line = serializeAckRecord(record);
 
@@ -110,7 +122,7 @@ export function parseAckRecord(line: string): EnforceAckRecord | null {
     return null;
   }
 
-  if (!Array.isArray(ruleIds) || ruleIds.length === 0 || ruleIds.length > MAX_RULE_IDS) {
+  if (!Array.isArray(ruleIds) || ruleIds.length === 0 || ruleIds.length > MAX_ACK_RULE_IDS) {
     return null;
   }
 
@@ -123,6 +135,21 @@ export function parseAckRecord(line: string): EnforceAckRecord | null {
   }
 
   return { turnId, ruleIds: ids, timestamp };
+}
+
+/**
+ * `true` when the record is one the parser would keep: the same bounds, applied before a
+ * write so a record the reader cannot read is refused instead of stored and skipped.
+ */
+export function isAckRecord(record: EnforceAckRecord): boolean {
+  return (
+    isBoundedString(record.turnId) &&
+    isBoundedString(record.timestamp) &&
+    !Number.isNaN(Date.parse(record.timestamp)) &&
+    record.ruleIds.length > 0 &&
+    record.ruleIds.length <= MAX_ACK_RULE_IDS &&
+    record.ruleIds.every((ruleId) => isBoundedString(ruleId))
+  );
 }
 
 /** Serializes only the three allowlisted fields, in order, without the trailing newline. */
@@ -143,5 +170,5 @@ function parseJson(text: string): unknown {
 }
 
 function isBoundedString(value: unknown): value is string {
-  return typeof value === "string" && value !== "" && value.length <= MAX_FIELD_LENGTH;
+  return typeof value === "string" && value !== "" && value.length <= MAX_ACK_FIELD_LENGTH;
 }

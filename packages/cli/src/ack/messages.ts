@@ -25,7 +25,9 @@ export function describeAckList(result: ListedResult, now: Date): string {
   const lines = result.items.map((item) => describeItem(item, now));
   const truncation =
     result.total > result.items.length
-      ? [`Showing ${result.items.length} of ${result.total}.`]
+      ? [
+          `Showing ${result.items.length} of ${result.total}; the rest keep their numbers and can still be acknowledged.`,
+        ]
       : [];
 
   return [
@@ -59,7 +61,7 @@ export function describeAckError(status: ErrorResult["status"]): string {
     case "READ_FAILED":
       return "Could not read the local review history or acknowledgement ledger.";
     case "WRITE_FAILED":
-      return "Could not save the acknowledgement. Check the permissions of the JevGuard data directory.";
+      return "Could not save the acknowledgement; nothing was recorded. Check the JevGuard data directory and try again.";
   }
 }
 

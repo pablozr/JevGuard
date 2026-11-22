@@ -613,12 +613,14 @@ jevguard ack 1
 ```
 
 The acknowledgement is local and content-free: it keeps the unit code, the blocking
-rule IDs and the timestamp in `enforce-acks.jsonl` next to the review history, and the
-gate never blocks that unit again. The numbers come from the current history read, and
-an acknowledged unit leaves the listing. It changes nothing in the review, the rule or
-the finding — `jevguard feedback` remains the way to say a `FAIL` was wrong. The
-command refuses to run off a TTY and has no flag that skips the confirmation, so an
-agent shell can never acknowledge a unit for you.
+rule IDs (at most 32) and the timestamp in `enforce-acks.jsonl` next to the review
+history. The gate does not consult the ledger yet; acknowledging is what will stop it
+blocking that unit once that wiring lands. The numbers come from the current history
+read, and an acknowledged unit leaves the listing. It changes nothing in the review,
+the rule or the finding — `jevguard feedback` remains the way to say a `FAIL` was
+wrong. Only `jevguard ack <number>` requires an interactive terminal (listing runs
+anywhere) and it has no flag that skips the confirmation, so an agent shell can never
+acknowledge a unit for you.
 
 ## Diagnose your setup
 

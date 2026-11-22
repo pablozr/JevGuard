@@ -7,6 +7,7 @@ import type {
   ReviewHistoryRecord,
   ReviewHistoryStrictReadResult,
 } from "@jevguard/node-infra";
+import { MAX_ACK_RULE_IDS } from "@jevguard/node-infra";
 import { describe, expect, test } from "vitest";
 import { parseAckArguments } from "../src/ack/arguments";
 import { ACK_LIST_LIMIT, listAckCandidates, recordAck } from "../src/ack/execute";
@@ -253,12 +254,55 @@ describe("recordAck", () => {
     ]);
   });
 
+  test("a unit with more blocked rules than a ledger line keeps is recorded with the first 32", async () => {
+    const ruleIds = Array.from({ length: MAX_ACK_RULE_IDS + 1 }, (_, i) => `RULE-${i}`);
+    const h = harness([
+      unit(
+        "t1",
+        "2026-02-01T00:00:00.000Z",
+        ruleIds.map((id) => errorFail(id)),
+      ),
+    ]);
+    h.answers.push({ status: "CONFIRMED" });
+
+    await expect(recordAck(1, h.deps)).resolves.toEqual({
+      status: "RECORDED",
+      turnId: "t1",
+      ruleIds: ruleIds.slice(0, MAX_ACK_RULE_IDS),
+    });
+    expect(h.acks.records).toEqual([
+      { turnId: "t1", ruleIds: ruleIds.slice(0, MAX_ACK_RULE_IDS), timestamp: NOW.toISOString() },
+    ]);
+    // The recorded line is one the ledger's own reader keeps: the unit leaves the listing.
+    const listed = await listAckCandidates(h.deps);
+
+    if (listed.status === "LISTED") expect(listed.items).toEqual([]);
+  });
+
   test("a decline writes nothing", async () => {
     const h = harness([fail("t1", "2026-02-01T00:00:00.000Z")]);
     h.answers.push({ status: "DECLINED" });
 
     await expect(recordAck(1, h.deps)).resolves.toEqual({ status: "DECLINED" });
     expect(h.acks.records).toEqual([]);
+  });
+
+  test("a number past the displayed list still acknowledges its unit", async () => {
+    const records = Array.from({ length: ACK_LIST_LIMIT + 2 }, (_, index) =>
+      fail(`t-${index}`, `2026-02-0${(index % 9) + 1}T00:00:00.000Z`),
+    );
+    const h = harness(records);
+    h.answers.push({ status: "CONFIRMED" });
+
+    // Numbers count every unit, newest first: the oldest of the list is the last record.
+    await expect(recordAck(ACK_LIST_LIMIT + 2, h.deps)).resolves.toEqual({
+      status: "RECORDED",
+      turnId: "t-0",
+      ruleIds: ["SECRETS-001"],
+    });
+    expect(h.acks.records).toEqual([
+      { turnId: "t-0", ruleIds: ["SECRETS-001"], timestamp: NOW.toISOString() },
+    ]);
   });
 
   test("an out-of-range number writes nothing", async () => {
@@ -307,7 +351,7 @@ describe("recordAck", () => {
 
     expect(text).toContain("Units a FAIL could block");
     expect(text).toContain("jevguard ack 1");
-    expect(text).toContain("Showing 1 of 2.");
+    expect(text).toContain("Showing 1 of 2; the rest keep their numbers");
     expect(text).toContain("t-new");
   });
 });

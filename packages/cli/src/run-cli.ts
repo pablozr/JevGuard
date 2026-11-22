@@ -87,8 +87,8 @@ import type { CliDependencies, CliIO } from "./types";
  * warnings), 1 (an error-severity rule failed, or a not-judged commit with `--strict`),
  * or 2 (it could not run). `feedback` exits 0
  * (listed or recorded), 1 (invalid input), or 2 (local storage failed). `ack` exits 0
- * (listed or acknowledged), 1 (declined, out-of-range number, or off a terminal), or 2
- * (the history or ledger could not be read or written).
+ * (listed or acknowledged), 1 (invalid arguments, declined, out-of-range number, or off
+ * a terminal), or 2 (the history or ledger could not be read or written).
  */
 export async function runCli(
   argv: readonly string[],
