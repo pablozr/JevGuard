@@ -5,6 +5,7 @@ import type {
   HostInstallScope,
   LoginOutcome,
 } from "@jevguard/node-infra";
+import type { AckListResult, AckResult } from "./ack/types";
 import type { CheckRequest, CheckResult } from "./check/types";
 import type { DoctorRun } from "./doctor/types";
 import type { FeedbackListResult, FeedbackMarkRequest, FeedbackMarkResult } from "./feedback/types";
@@ -30,6 +31,8 @@ export interface CliDependencies {
   readonly rulesCheck: (request: RulesCheckRequest) => Promise<RulesCheckResult>;
   readonly feedbackList: () => Promise<FeedbackListResult>;
   readonly feedbackMark: (request: FeedbackMarkRequest) => Promise<FeedbackMarkResult>;
+  readonly ackList: () => Promise<AckListResult>;
+  readonly ack: (number: number) => Promise<AckResult>;
 }
 
 /** Flags shared by `install` and `doctor`; `host` falls back to the default host. */
