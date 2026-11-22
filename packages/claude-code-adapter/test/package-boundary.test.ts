@@ -5,14 +5,28 @@ import { describe, expect, test } from "vitest";
 const SOURCE_ROOT = join(import.meta.dirname, "..", "src");
 const PURE_DIRECTORIES = ["hook-event", "acquisition", "turn", "presentation"];
 const IO_DIRECTORIES = ["capture", "hook"];
+const GATE_DIRECTORIES = ["enforce"];
 const WORKER_DIRECTORIES = ["worker"];
 const PURE_FORBIDDEN =
   /^(node:|@opencode(-ai)?\/|@jevguard\/(opencode-adapter|node-infra|plugin)($|\/)|bun($|:))/;
 const IO_FORBIDDEN =
   /^(@opencode(-ai)?\/|@jevguard\/(opencode-adapter|node-infra|plugin)($|\/)|bun($|:))/;
+const GATE_FORBIDDEN = /^(@opencode(-ai)?\/|@jevguard\/(opencode-adapter|plugin)($|\/)|bun($|:))/;
+/**
+ * The gate reads the user's file and the review history through two node-infra
+ * subpaths that are local only (file system, no keyring, no Jev, no network); every
+ * other node-infra entry stays out of it, exactly as it stays out of the hook.
+ */
+const GATE_NODE_INFRA = /^@jevguard\/node-infra(\/(?!enforce$|history$).*)?$/;
 const WORKER_FORBIDDEN = /^(@opencode(-ai)?\/|@jevguard\/(opencode-adapter|plugin)($|\/)|bun($|:))/;
 const IMPORT_SPECIFIER = /\bfrom\s+["']([^"']+)["']|\bimport\s*\(\s*["']([^"']+)["']\s*\)/g;
 const FORBIDDEN_OUTPUT = /\bconsole\.|process\.(stdout|stderr)/;
+/**
+ * The single module allowed to write to stdout: the `Stop` decision that holds a turn
+ * when the user enabled enforce (ADR 0022). It uses a synchronous write, never
+ * `process.stdout`, and every other hook module stays silent.
+ */
+const DECISION_WRITER = join(SOURCE_ROOT, "hook", "decision-output.ts");
 
 function sourceFiles(directory: string): readonly string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -61,10 +75,18 @@ describe("claude-code-adapter package boundary", () => {
     expect(files.flatMap((file) => forbiddenImports(file, WORKER_FORBIDDEN))).toEqual([]);
   });
 
-  test("capture, hook and worker never write to the console, stdout or stderr", () => {
-    const offenders = filesOf([...IO_DIRECTORIES, ...WORKER_DIRECTORIES]).filter((file) =>
-      FORBIDDEN_OUTPUT.test(readFileSync(file, "utf8")),
-    );
+  test("the enforce gate adds only Node builtins and the local node-infra subpaths", () => {
+    const files = filesOf(GATE_DIRECTORIES);
+
+    expect(files.length).toBeGreaterThan(0);
+    expect(files.flatMap((file) => forbiddenImports(file, GATE_FORBIDDEN))).toEqual([]);
+    expect(files.flatMap((file) => forbiddenImports(file, GATE_NODE_INFRA))).toEqual([]);
+  });
+
+  test("capture, hook, gate and worker never write to the console, stdout or stderr", () => {
+    const offenders = filesOf([...IO_DIRECTORIES, ...GATE_DIRECTORIES, ...WORKER_DIRECTORIES])
+      .filter((file) => file !== DECISION_WRITER)
+      .filter((file) => FORBIDDEN_OUTPUT.test(readFileSync(file, "utf8")));
 
     expect(offenders).toEqual([]);
   });

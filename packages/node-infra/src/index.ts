@@ -60,8 +60,10 @@ export type {
   EnforceUserSettings,
   EnforceUserSettingsInvalidReason,
   EnforceUserSettingsResult,
+  UserEnforceSettingsDependencies,
 } from "./enforce";
 export {
+  createUserEnforceSettings,
   enabledEnforceSettings,
   ENFORCE_BUILT_IN_CHECK_IDS,
   ENFORCE_DEFAULT_BUDGET_MS,

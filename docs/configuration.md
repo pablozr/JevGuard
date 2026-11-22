@@ -943,10 +943,12 @@ remediation:
   model: sonnet      # optional; Claude alias or id; default: the session's model
 ```
 
-The same file may carry an `enforce` section. Its settings are validated by this
-release, but the `Stop` hook that would act on them is not wired yet: enabling it now
-changes nothing, and the review stays observe-only until the enforcement step lands
-([ADR 0022](./adr/0022-enforce-fail-via-stop-hook.md)).
+The same file may carry an `enforce` section. It is off by default, and only this file
+can turn it on. When it is on, the `Stop` hook acts on the review the worker records for
+the closing unit: a turn whose allowlisted `error` rule reaches `FAIL` is held and the
+agent continues with a reason that names the failing rule IDs and nothing else
+([ADR 0022](./adr/0022-enforce-fail-via-stop-hook.md)). Every other turn ends exactly as
+before.
 
 ```yaml
 enforce:
@@ -967,7 +969,32 @@ invalid. A section that is off is still validated, so a typo never hides until i
 turned on. The file is refused when it lives in the project or its Git tree, so a
 repository can never switch enforce on for its users.
 
-The file is read by the worker. `XDG_CONFIG_HOME` is used only when it is an absolute
+The gate decides in a fixed order, and every guard fails open. A section that is off or
+absent is silent. An invalid file is logged as one closed code and blocks nothing. The
+session must be positively interactive. An active or unreadable background task, a
+`Stop` that is already continuing a turn (`stop_hook_active`) and a unit it blocked
+before all end the turn with no decision. Only then does the hook wait for the review,
+at most `budget_ms` and never past its own allowance. A review that does not settle in
+time, a worker that never writes one, and a handoff that could not be written are all a
+no decision: the turn ends and the review still lands in history. `UNAVAILABLE` and
+`SKIPPED` never block. When it does block, the unit is remembered in the session's state
+without content, so the same unit is blocked once (ADR 0022, decisions 4, 5, 7 and 8).
+The hook log keeps closed codes only.
+
+The session check reads two markers the host puts in the environment of every process it
+starts, hooks included: `CLAUDE_CODE_SESSION_ATTENDED` is `"1"` when a person is
+attending the session and `"0"` when not, and `CLAUDE_CODE_ENTRYPOINT` names the surface
+that started it (`cli`, `sdk-cli`, `sdk-ts`, `sdk-py`). Only `"1"` from a non-headless
+entrypoint counts as interactive; an absent, empty or unexpected value, or `"1"` next to
+an SDK entrypoint, is unknown and treated as non-interactive. `claude -p`, the SDK and CI
+therefore never block.
+
+A hook is silent in every case except that one: the JSON
+`{"decision":"block","reason":"…"}` is the only thing a hook ever writes to stdout, and
+it is written once, synchronously, before the process exits.
+
+The file is read by the worker and, for enforce, by the `Stop` hook itself.
+`XDG_CONFIG_HOME` is used only when it is an absolute
 path; otherwise `USERPROFILE` and then `HOME` plus `.config`. It is refused when its
 real path is inside the project root or inside the Git working tree that contains it
 (letter case never matters). It is validated strictly: an unknown key, a wrong

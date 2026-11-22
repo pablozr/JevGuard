@@ -321,13 +321,19 @@ can only pass or warn. One malformed answer fails only its own check.
 
 ## Claude Code plugin
 
-The Claude Code plugin keeps the same boundaries as the OpenCode plugin: review is
-background and observe-only, and hooks exit 0 with no stdout or stderr and never use
-`async`, `asyncRewake`, `additionalContext`, `systemMessage`, or `decision`.
-Remediation is off by default. Only the user can turn it on, in their own
-`claude-code.yaml` (never in the repository); it is strategy-only and works as described
-in "Proposal requests" and "Agent delivery" below.
+The Claude Code plugin keeps the same boundaries as the OpenCode plugin: the review runs
+in the background, observe is the default and hooks exit 0. A hook writes nothing —
+no stdout, no stderr — and never uses `async`, `asyncRewake`, `additionalContext` or
+`systemMessage`. There are two named opt-ins in the user's own `claude-code.yaml`, never
+in the repository: remediation and enforce.
 
+- **Named exception: the `Stop` decision.** Only when the user enabled `enforce`, and
+  only in a session the host positively calls interactive, a `Stop` hook may print one
+  JSON decision (`{"decision":"block","reason":"…"}`) and hold the turn
+  ([ADR 0022](adr/0022-enforce-fail-via-stop-hook.md)). The decision is written
+  synchronously by one module, the only one allowed to write to stdout; the reason holds
+  allowlisted rule IDs and one instruction, never rule text, diff, task, path, finding,
+  probability or credential. In every other case the hook writes nothing.
 - **Named exception: `delivery: agent`.** The "never injects into the agent" rule has one
   exception, and only when the user set `delivery: agent` in their own
   `claude-code.yaml`; the repository cannot enable it, only veto it with
@@ -345,11 +351,15 @@ in "Proposal requests" and "Agent delivery" below.
   `--ignore-scripts`, so no install script runs. The hook never uses the network, the
   keyring or Jev. No credential appears in the catalog, the plugin manifest or the
   package.
-- **Where Jev and credentials run.** Never inside a hook. A hook only records evidence
-  and leaves a handoff; a detached worker process reads the credential (`jevguard login`
+- **Where Jev and credentials run.** Never inside a hook. A hook records evidence and
+  leaves a handoff; a detached worker process reads the credential (`jevguard login`
   and the OS credential store; `TYPESAFE_API_KEY` only as a CI override), calls Jev, and
   exits. The hook bundle does not contain the keyring, the Jev client, or any network
-  code.
+  code. The `Stop` gate reads only two local, content-free things: the user's own
+  `claude-code.yaml` (never one inside the project) and the review record the worker
+  wrote, from which it keeps rule IDs, severities and outcomes. It never reads the
+  patch, the task, a credential or a path, and it never calls Jev; a review that does
+  not appear in time is a no-block.
 - **Sensitive handoffs.** A handoff holds the unit's prompt and patch, so it is local
   only, created at mode `0600` in a `0700` directory under `${CLAUDE_PLUGIN_DATA}`,
   deleted after its review is recorded, and removed after 24 hours if never consumed.

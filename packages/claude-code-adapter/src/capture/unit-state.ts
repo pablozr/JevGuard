@@ -274,6 +274,36 @@ export function readUnitRoot(unit: UnitState): string | null {
   }
 }
 
+const BLOCKED_UNIT_PATTERN = /^[0-9a-f]{16}:(?:0|[1-9][0-9]*)$/;
+
+/**
+ * The unit this session blocked last, as `epoch:ordinal`, or `null` when none is
+ * recorded. The marker lives in the session directory, not the unit's: the unit is
+ * deleted as soon as it closes, and a repeated close of the same unit must still see
+ * that it was already blocked (ADR 0022, decision 7). It carries no content.
+ */
+export function readBlockedUnit(sessionDirectory: string): string | null {
+  try {
+    const text = readFileSync(join(sessionDirectory, "blocked"), "utf8").trim();
+
+    return BLOCKED_UNIT_PATTERN.test(text) ? text : null;
+  } catch (error) {
+    if (isMissingPathError(error)) return null;
+
+    throw error;
+  }
+}
+
+/** Remembers the unit the gate blocked, so a second close of it is never blocked again. */
+export function recordBlockedUnit(unit: {
+  readonly sessionDirectory: string;
+  readonly epoch: string;
+  readonly ordinal: number;
+}): void {
+  mkdirSync(unit.sessionDirectory, { recursive: true, mode: DIR_MODE });
+  writeAtomic(join(unit.sessionDirectory, "blocked"), `${unit.epoch}:${unit.ordinal}`);
+}
+
 function isExistsError(error: unknown): boolean {
   return typeof error === "object" && error !== null && "code" in error && error.code === "EEXIST";
 }

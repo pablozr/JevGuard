@@ -1,5 +1,4 @@
-import type { TurnReview } from "@jevguard/core";
-import type { EnforceUserSettings } from "@jevguard/node-infra";
+import type { EnforceUserSettings } from "@jevguard/node-infra/enforce";
 import type { BackgroundTasksState } from "../hook-event/types";
 
 /**
@@ -18,10 +17,48 @@ export type EnforceNoBlockCode =
   | "ENFORCE_ACKED"
   | "ENFORCE_NO_FAIL";
 
+/**
+ * Every closed code the `Stop` gate can leave in the hook log: the no-block decisions
+ * plus its own outcomes. None of them carries a rule ID, a path, a task or a credential.
+ */
+export type EnforceGateLogCode =
+  | EnforceNoBlockCode
+  | "ENFORCE_BLOCKED"
+  | "ENFORCE_TIMEOUT"
+  | "ENFORCE_NO_REVIEW"
+  | "ENFORCE_CONFIG_INVALID"
+  | "ENFORCE_GATE_FAILED"
+  | "ENFORCE_OUTPUT_FAILED"
+  | "STATE_WRITE_FAILED";
+
+/**
+ * The result fields the gate reads, and nothing else. A full review result and the
+ * projected local-history record both satisfy it, so the gate never needs the patch,
+ * the task or a path to decide.
+ */
+export interface EnforceResultFacts {
+  readonly kind: "RULE" | "BUILT_IN" | "REVIEW";
+  readonly ruleId: string | null;
+  readonly severity: "error" | "warning" | null;
+  readonly outcome: "PASS" | "WARN" | "FAIL" | "UNAVAILABLE" | "SKIPPED";
+}
+
+/** The unit a closing `Stop` produced; the only thing the gate needs from the hook. */
+export interface EnforceClosedUnit {
+  readonly sessionId: string;
+  readonly sessionDirectory: string;
+  readonly turnId: string;
+  readonly projectRoot: string;
+  readonly epoch: string;
+  readonly ordinal: number;
+  /** `true` when the handoff was written, so a review can actually be recorded. */
+  readonly handoffCreated: boolean;
+}
+
 export interface EnforceInput {
   readonly settings: EnforceUserSettings;
   /** The review of the closing unit; only its results are read. */
-  readonly review: Pick<TurnReview, "results">;
+  readonly review: { readonly results: readonly EnforceResultFacts[] };
   readonly session: EnforceSession;
   /** Read from the `Stop` input, never inferred (ADR 0022, decision 3). */
   readonly backgroundTasks: BackgroundTasksState;

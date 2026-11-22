@@ -5,6 +5,7 @@ import type {
   ShellDiffLimit,
   ShellDiffLimits,
 } from "../capture/types";
+import type { EnforceGateLogCode } from "../enforce/types";
 import type { HookEventName, HookEventParseReason } from "../hook-event";
 
 export type WorkerSpawnResult = "STARTED" | "ENTRY_MISSING";
@@ -41,6 +42,7 @@ export type HookLogCode =
   | "WORKER_SPAWN_FAILED"
   | "WORKER_ENTRY_MISSING"
   | "STATE_ROOT_MISSING"
+  | EnforceGateLogCode
   | "INTERNAL";
 
 export interface HookLogEntry {

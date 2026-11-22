@@ -4,7 +4,9 @@ export type {
   EnforceUserSettingsInvalidReason,
   EnforceUserSettingsResult,
 } from "./types";
+export type { UserEnforceSettingsDependencies } from "./settings";
 export {
+  createUserEnforceSettings,
   enabledEnforceSettings,
   ENFORCE_BUILT_IN_CHECK_IDS,
   ENFORCE_DEFAULT_BUDGET_MS,
