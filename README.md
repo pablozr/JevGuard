@@ -599,6 +599,27 @@ Numbers stay fixed to the last listing. Built-in checks are not covered. See
 [configuration](./docs/configuration.md)
 for details.
 
+### Acknowledging a block
+
+When the opt-in enforce mode blocks a turn, you can accept that `FAIL` for the unit and
+let the gate stop blocking it. Only you can do it, from an interactive terminal.
+
+```sh
+# units a FAIL could block, newest first, numbered
+jevguard ack
+
+# acknowledge one, after an explicit confirmation
+jevguard ack 1
+```
+
+The acknowledgement is local and content-free: it keeps the unit code, the blocking
+rule IDs and the timestamp in `enforce-acks.jsonl` next to the review history, and the
+gate never blocks that unit again. The numbers come from the current history read, and
+an acknowledged unit leaves the listing. It changes nothing in the review, the rule or
+the finding — `jevguard feedback` remains the way to say a `FAIL` was wrong. The
+command refuses to run off a TTY and has no flag that skips the confirmation, so an
+agent shell can never acknowledge a unit for you.
+
 ## Diagnose your setup
 
 `jevguard doctor` checks your local setup without touching the network or changing
