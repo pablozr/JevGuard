@@ -1,4 +1,19 @@
 export type {
+  EnforceAckReadResult,
+  EnforceAckRecord,
+  EnforceAckWriteStatus,
+  LocalEnforceAckStore,
+  LocalEnforceAckStoreDependencies,
+} from "./acks";
+export {
+  createLocalEnforceAckStore,
+  DEFAULT_ACKS_MAX_BYTES,
+  DEFAULT_ACKS_MAX_RECORDS,
+  parseAckRecord,
+  resolveEnforceAcksFilePath,
+  serializeAckRecord,
+} from "./acks";
+export type {
   EnforceSettingsWarning,
   EnforceUserSettings,
   EnforceUserSettingsInvalidReason,
