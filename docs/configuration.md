@@ -981,6 +981,13 @@ no decision: the turn ends and the review still lands in history. `UNAVAILABLE` 
 without content, so the same unit is blocked once (ADR 0022, decisions 4, 5, 7 and 8).
 The hook log keeps closed codes only.
 
+Enforce and remediation coexist and are configured independently, `delivery: agent`
+included (ADR 0022, decision 9). For a unit that fails, the block reason goes to the
+agent in the continued turn, and the remediation proposal — when it is enabled and
+settles in its own budget — is delivered as it is today. Neither suppresses the other,
+and each keeps its own closed codes in its own log. A remediation proposal never lifts
+a block, and a block never changes a proposal.
+
 The session check reads two markers the host puts in the environment of every process it
 starts, hooks included: `CLAUDE_CODE_SESSION_ATTENDED` is `"1"` when a person is
 attending the session and `"0"` when not, and `CLAUDE_CODE_ENTRYPOINT` names the surface
