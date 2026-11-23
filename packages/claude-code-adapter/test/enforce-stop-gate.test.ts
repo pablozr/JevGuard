@@ -80,6 +80,7 @@ function harness(overrides: Partial<EnforceStopDependencies> = {}): Harness {
       isBlocked: () => false,
       record: (unit) => void recorded.push(unit),
     },
+    ackStateFor: async () => "NOT_ACKED",
     remainingBudgetMs: () => 15_000,
     report: (code) => void reports.push(code),
     ...overrides,
@@ -202,6 +203,29 @@ describe("enforceStop", () => {
     expect(decision).toBeNull();
     expect(waited).toEqual([]);
     expect(reports).toEqual(["ENFORCE_BACKGROUND_TASK"]);
+  });
+
+  test("an acknowledged unit is never blocked and is not waited for", async () => {
+    const { dependencies, reports, recorded, waited } = harness({
+      ackStateFor: async () => "ACKED",
+    });
+    const decision = await enforceStop({ event: stop(), closed: CLOSED }, dependencies);
+
+    expect(decision).toBeNull();
+    expect(waited).toEqual([]);
+    expect(recorded).toEqual([]);
+    expect(reports).toEqual(["ENFORCE_ACKED"]);
+  });
+
+  test("an unreadable ledger is a closed code and enforce still stands", async () => {
+    const { dependencies, reports, recorded } = harness({
+      ackStateFor: async () => "UNREADABLE",
+    });
+    const decision = await enforceStop({ event: stop(), closed: CLOSED }, dependencies);
+
+    expect(decision?.decision).toBe("block");
+    expect(recorded).toEqual([CLOSED]);
+    expect(reports).toEqual(["ENFORCE_ACK_UNREADABLE", "ENFORCE_BLOCKED"]);
   });
 
   test("a unit whose handoff was never written has no review to wait for", async () => {

@@ -78,6 +78,7 @@ export {
   ENFORCE_MAX_BUDGET_MS,
   ENFORCE_MIN_BUDGET_MS,
   ENFORCE_SECTION_KEY,
+  isAcknowledged,
   isAckRecord,
   isEnforceRuleId,
   loadEnforceUserSettings,

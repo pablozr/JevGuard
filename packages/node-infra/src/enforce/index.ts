@@ -9,6 +9,7 @@ export {
   createLocalEnforceAckStore,
   DEFAULT_ACKS_MAX_BYTES,
   DEFAULT_ACKS_MAX_RECORDS,
+  isAcknowledged,
   isAckRecord,
   MAX_ACK_FIELD_LENGTH,
   MAX_ACK_RULE_IDS,
