@@ -46,12 +46,14 @@ export interface EnforceStopDependencies {
 
 /**
  * The `Stop` gate (ADR 0022): returns the one decision to print, or `null` for no
- * decision at all. It reads the user's configuration first — off is silent — then the
- * host's own session flag, then the guards that fail open (an active background task, a
- * continued stop, a unit already blocked) and the local acknowledgement ledger — a unit
- * the user acknowledged ends here with `ENFORCE_ACKED`, without waiting. Only then does
- * it wait, at most `budget_ms` and never past the hook's own allowance, for the review
- * the worker records for this unit. A review that does not settle, a dead worker and an
+ * decision at all. It reads the user's configuration first — off is silent, and a valid
+ * section whose effective allowlist is empty (only built-in checks listed) ends here
+ * without waiting, since nothing in it could ever block — then the host's own session
+ * flag, then the guards that fail open (an active background task, a continued stop, a
+ * unit already blocked) and the local acknowledgement ledger — a unit the user
+ * acknowledged ends here with `ENFORCE_ACKED`, without waiting. Only then does it wait,
+ * at most `budget_ms` and never past the hook's own allowance, for the review the
+ * worker records for this unit. A review that does not settle, a dead worker and an
  * absent handoff all end the turn with no decision. The unit is remembered as blocked
  * only after a block is built.
  */
@@ -68,6 +70,15 @@ export async function enforceStop(
   }
 
   if (settings.status !== "ENABLED") return null;
+
+  // An allowlist of built-in checks only is a valid `ENABLED` section whose effective
+  // allowlist is empty: nothing in it can ever block, so the wait would only cost the
+  // whole budget for a review that cannot change the outcome.
+  if (settings.settings.rules.length === 0) {
+    dependencies.report("ENFORCE_NO_ELIGIBLE_RULES");
+
+    return null;
+  }
 
   const session = detectSession(dependencies.environment);
 

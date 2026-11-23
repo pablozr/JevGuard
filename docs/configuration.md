@@ -962,7 +962,9 @@ block reason can never carry prose. Two entries are dropped from the effective
 allowlist with a warning each: a repeated rule (`DUPLICATE_RULE`) and a built-in check
 ID such as `SCOPE-CREEP`, `COMPLEXITY` or `TEST-ADEQUACY` (`BUILT_IN_CANNOT_BLOCK`) —
 a built-in never blocks. Enforce can only block on a local rule with severity `error`,
-and a `warning` rule cannot reach `FAIL`, so listing one never blocks. An absent section
+and a `warning` rule cannot reach `FAIL`, so listing one never blocks. An allowlist left
+empty by those drops blocks nothing and the hook does not wait for the review at all.
+An absent section
 or `enabled: false` is off; an unknown section key, an unknown top-level key, a wrong
 type, an out-of-range budget or `enabled: true` without an allowlist makes the file
 invalid. A section that is off is still validated, so a typo never hides until it is
