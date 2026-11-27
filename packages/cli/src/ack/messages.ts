@@ -42,12 +42,12 @@ export function describeAckList(result: ListedResult, now: Date): string {
 
 /** Confirmation naming the unit code and the blocking rules; never rule text or a path. */
 export function ackConfirmationMessage(candidate: AckCandidate): string {
-  return `Acknowledge unit ${candidate.turnId} (${candidate.ruleIds.join(RULES_SEPARATOR)})? The gate will not block it again.`;
+  return `Acknowledge unit ${candidate.turnId} (${candidate.ruleIds.join(RULES_SEPARATOR)})? It is recorded in the local acknowledgement ledger.`;
 }
 
 /** Result line after the ledger write. */
 export function describeAckRecorded(result: Extract<AckResult, { status: "RECORDED" }>): string {
-  return `Acknowledged unit ${result.turnId} (${result.ruleIds.join(RULES_SEPARATOR)}). The gate will not block it again.`;
+  return `Acknowledged unit ${result.turnId} (${result.ruleIds.join(RULES_SEPARATOR)}). It is recorded in the local acknowledgement ledger.`;
 }
 
 export function describeAckError(status: ErrorResult["status"]): string {

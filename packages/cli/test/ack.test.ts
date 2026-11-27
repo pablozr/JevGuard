@@ -11,7 +11,7 @@ import { MAX_ACK_RULE_IDS } from "@jevguard/node-infra";
 import { describe, expect, test } from "vitest";
 import { parseAckArguments } from "../src/ack/arguments";
 import { ACK_LIST_LIMIT, listAckCandidates, recordAck } from "../src/ack/execute";
-import { ackConfirmationMessage, describeAckList } from "../src/ack/messages";
+import { ackConfirmationMessage, describeAckList, describeAckRecorded } from "../src/ack/messages";
 import type { AckDependencies } from "../src/ack/types";
 
 const NOW = new Date("2026-03-01T12:00:00.000Z");
@@ -330,6 +330,23 @@ describe("recordAck", () => {
 
     expect(message).toContain("claude-code:session-1:0123456789abcdef:0");
     expect(message).toContain("SECRETS-001 + DESTRUCTIVE-001");
+    // The gate does not consult the ledger at this head: the text may promise the
+    // record, never a gate behaviour that does not exist yet.
+    expect(message).toContain("acknowledgement ledger");
+    expect(message).not.toMatch(/gate/i);
+  });
+
+  test("the recorded line names the unit and the rules only", () => {
+    const message = describeAckRecorded({
+      status: "RECORDED",
+      turnId: "claude-code:session-1:0123456789abcdef:0",
+      ruleIds: ["SECRETS-001"],
+    });
+
+    expect(message).toContain("claude-code:session-1:0123456789abcdef:0");
+    expect(message).toContain("SECRETS-001");
+    expect(message).toContain("acknowledgement ledger");
+    expect(message).not.toMatch(/gate/i);
   });
 
   test("the listing text numbers the units and shows how to acknowledge", () => {
