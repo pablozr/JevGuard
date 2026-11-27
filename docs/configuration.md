@@ -972,8 +972,9 @@ repository can never switch enforce on for its users.
 The gate decides in a fixed order, and every guard fails open. A section that is off or
 absent is silent. An invalid file is logged as one closed code and blocks nothing. The
 session must be positively interactive. An active or unreadable background task, a
-`Stop` that is already continuing a turn (`stop_hook_active`) and a unit it blocked
-before all end the turn with no decision. Only then does the hook wait for the review,
+`Stop` that is already continuing a turn (`stop_hook_active`), a unit it blocked before
+and a unit the user acknowledged all end the turn with no decision. Only then does the
+hook wait for the review,
 at most `budget_ms` and never past its own allowance. A review that does not settle in
 time, a worker that never writes one, and a handoff that could not be written are all a
 no decision: the turn ends and the review still lands in history. `UNAVAILABLE` and
@@ -1007,9 +1008,11 @@ acknowledgement ledger is
 `<XDG_DATA_HOME or ~/.local/share>/jevguard/enforce-acks.jsonl`: it keeps the unit code,
 the blocking rule IDs and the timestamp, nothing else, and it is bounded (it rewrites
 itself once it passes 256 KB, keeping the newest 1000 records, and at most 32 rule IDs
-per line). The gate does not consult the ledger yet: today `jevguard ack` only records,
-and once that wiring lands an acknowledged unit is not blocked again and the hook
-records `ENFORCE_ACKED` instead. Only
+per line). Before waiting for a review, the gate reads the ledger for the closing unit:
+an acknowledged unit is not blocked again, the hook records `ENFORCE_ACKED` and it does
+not wait at all, since nothing the review says could change the outcome. A ledger that
+cannot be read is a closed code (`ENFORCE_ACK_UNREADABLE`) and counts as no
+acknowledgement, so a broken file never turns enforce off on its own. Only
 `jevguard ack <number>` requires an interactive terminal: it has no non-interactive
 form and no flag skips the confirmation, so an agent shell cannot acknowledge a unit on
 your behalf (listing runs anywhere, including a non-interactive shell). An

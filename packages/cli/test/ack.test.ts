@@ -330,10 +330,8 @@ describe("recordAck", () => {
 
     expect(message).toContain("claude-code:session-1:0123456789abcdef:0");
     expect(message).toContain("SECRETS-001 + DESTRUCTIVE-001");
-    // The gate does not consult the ledger at this head: the text may promise the
-    // record, never a gate behaviour that does not exist yet.
-    expect(message).toContain("acknowledgement ledger");
-    expect(message).not.toMatch(/gate/i);
+    // The gate reads the ledger on this branch, so the text can promise the silence.
+    expect(message).toContain("The gate will not block it again.");
   });
 
   test("the recorded line names the unit and the rules only", () => {
@@ -345,8 +343,7 @@ describe("recordAck", () => {
 
     expect(message).toContain("claude-code:session-1:0123456789abcdef:0");
     expect(message).toContain("SECRETS-001");
-    expect(message).toContain("acknowledgement ledger");
-    expect(message).not.toMatch(/gate/i);
+    expect(message).toContain("The gate will not block it again.");
   });
 
   test("the listing text numbers the units and shows how to acknowledge", () => {
