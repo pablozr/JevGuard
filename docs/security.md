@@ -194,10 +194,12 @@ call; it only feeds the calibration printed by `jevguard report`.
 
 ## Local enforce acknowledgements
 
-`jevguard ack` records the units the user accepted a `FAIL` for, so the opt-in enforce
-gate will stop blocking them once it consults the ledger (that wiring lands on its
-own; the command already records). The ledger lives under the same data directory and
-permissions as the review history:
+`jevguard ack` records the units the user accepted a `FAIL` for, and the opt-in enforce
+gate reads that ledger for the closing unit before waiting: an acknowledged unit is
+never blocked again and ends the turn with the closed code `ENFORCE_ACKED`. A ledger it
+cannot read is `ENFORCE_ACK_UNREADABLE` and counts as no acknowledgement, so the file
+can only silence units the user chose, never disable enforce. The ledger lives under
+the same data directory and permissions as the review history:
 
 ```text
 <XDG_DATA_HOME or ~/.local/share>/jevguard/enforce-acks.jsonl

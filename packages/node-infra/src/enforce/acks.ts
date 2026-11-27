@@ -138,6 +138,15 @@ export function parseAckRecord(line: string): EnforceAckRecord | null {
 }
 
 /**
+ * `true` when the ledger holds an acknowledgement for this unit. The unit code is the
+ * only key: a record for another unit, or for the same unit with other rule IDs, never
+ * silences this one.
+ */
+export function isAcknowledged(records: readonly EnforceAckRecord[], turnId: string): boolean {
+  return records.some((record) => record.turnId === turnId);
+}
+
+/**
  * `true` when the record is one the parser would keep: the same bounds, applied before a
  * write so a record the reader cannot read is refused instead of stored and skipped.
  */

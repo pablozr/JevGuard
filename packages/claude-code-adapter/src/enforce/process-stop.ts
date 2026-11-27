@@ -1,6 +1,8 @@
 import {
+  createLocalEnforceAckStore,
   createUserEnforceSettings,
   type EnforceUserSettingsResult,
+  isAcknowledged,
 } from "@jevguard/node-infra/enforce";
 import {
   createLocalReviewHistory,
@@ -37,10 +39,10 @@ function blockedMarkerOf(unit: { readonly epoch: string; readonly ordinal: numbe
 
 /**
  * Real-process wiring of the `Stop` gate: the user's `claude-code.yaml`, the local
- * review history the worker writes, and the session's per-unit marker. Everything it
- * touches is local and content-free — no credential, no Jev, no network — so the hook
- * keeps its boundary; the review itself stays in the worker, and this only waits for
- * its record.
+ * review history the worker writes, the local acknowledgement ledger `jevguard ack`
+ * records into, and the session's per-unit marker. Everything it touches is local and
+ * content-free — no credential, no Jev, no network — so the hook keeps its boundary;
+ * the review itself stays in the worker, and this only waits for its record.
  */
 export function createProcessEnforceStop(
   dependencies: ProcessEnforceStopDependencies,
@@ -53,17 +55,28 @@ export function createProcessEnforceStop(
       fileName: CLAUDE_CONFIG_FILE_NAME,
     },
   );
+  const fileSystem = createNodeReviewHistoryFileSystem();
   const history = createLocalReviewHistory({
     context,
-    fileSystem: createNodeReviewHistoryFileSystem(),
+    fileSystem,
     now: dependencies.now,
   });
+  const acks = createLocalEnforceAckStore({ context, fileSystem });
 
   return {
     run: (request, remainingBudgetMs, report) =>
       enforceStop(request, {
         environment: dependencies.environment,
         settingsFor,
+        // The ledger is read for this unit only; its reader never throws, so a broken
+        // file is a closed code and no acknowledgement rather than a failed gate.
+        ackStateFor: async (turnId) => {
+          const read = await acks.read();
+
+          if (read.status === "FAILED") return "UNREADABLE";
+
+          return isAcknowledged(read.records, turnId) ? "ACKED" : "NOT_ACKED";
+        },
         waitForReview: (turnId, budgetMs) =>
           waitForReview(
             {

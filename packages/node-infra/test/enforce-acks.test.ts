@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
   createLocalEnforceAckStore,
+  isAcknowledged,
   isAckRecord,
   MAX_ACK_FIELD_LENGTH,
   MAX_ACK_RULE_IDS,
@@ -125,6 +126,15 @@ describe("local enforce acknowledgement ledger", () => {
       records: [full],
       skippedLineCount: 0,
     });
+  });
+
+  test("isAcknowledged keys on the unit code alone", () => {
+    const records = [record("t1"), { ...record("t2"), ruleIds: ["OTHER-001"] }];
+
+    expect(isAcknowledged(records, "t1")).toBe(true);
+    expect(isAcknowledged(records, "t2")).toBe(true);
+    expect(isAcknowledged(records, "t3")).toBe(false);
+    expect(isAcknowledged([], "t1")).toBe(false);
   });
 
   test("isAckRecord matches the parser's bounds", () => {

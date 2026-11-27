@@ -9,6 +9,13 @@ import type {
   EnforceStopOutput,
 } from "./types";
 
+/**
+ * What the local acknowledgement ledger says about the closing unit. `UNREADABLE` is a
+ * ledger that could not be read: the gate then goes on as if the unit were not
+ * acknowledged and records the closed code, so a broken ledger never disables enforce.
+ */
+export type EnforceAckState = "ACKED" | "NOT_ACKED" | "UNREADABLE";
+
 /** One block per unit: the session remembers the unit it blocked. */
 export interface EnforceBlockedUnits {
   isBlocked(unit: EnforceClosedUnit): boolean;
@@ -30,6 +37,8 @@ export interface EnforceStopDependencies {
     budgetMs: number,
   ) => Promise<readonly EnforceResultFacts[] | null>;
   readonly blockedUnits: EnforceBlockedUnits;
+  /** The local ledger's answer for the unit; it never throws. */
+  readonly ackStateFor: (turnId: string) => Promise<EnforceAckState>;
   /** What is left of the hook's own allowance, in milliseconds. */
   readonly remainingBudgetMs: () => number;
   readonly report: (code: EnforceGateLogCode) => void;
@@ -39,10 +48,12 @@ export interface EnforceStopDependencies {
  * The `Stop` gate (ADR 0022): returns the one decision to print, or `null` for no
  * decision at all. It reads the user's configuration first — off is silent — then the
  * host's own session flag, then the guards that fail open (an active background task, a
- * continued stop, a unit already blocked). Only then does it wait, at most `budget_ms`
- * and never past the hook's own allowance, for the review the worker records for this
- * unit. A review that does not settle, a dead worker and an absent handoff all end the
- * turn with no decision. The unit is remembered as blocked only after a block is built.
+ * continued stop, a unit already blocked) and the local acknowledgement ledger — a unit
+ * the user acknowledged ends here with `ENFORCE_ACKED`, without waiting. Only then does
+ * it wait, at most `budget_ms` and never past the hook's own allowance, for the review
+ * the worker records for this unit. A review that does not settle, a dead worker and an
+ * absent handoff all end the turn with no decision. The unit is remembered as blocked
+ * only after a block is built.
  */
 export async function enforceStop(
   request: EnforceStopRequest,
@@ -77,6 +88,19 @@ export async function enforceStop(
 
     return null;
   }
+
+  // The user's acknowledgement silences one unit for good: there is nothing to wait for
+  // and nothing that could block. An unreadable ledger is reported and treated as no
+  // acknowledgement, so a broken local file never turns enforce off by itself.
+  const ackState = await dependencies.ackStateFor(request.closed.turnId);
+
+  if (ackState === "ACKED") {
+    dependencies.report("ENFORCE_ACKED");
+
+    return null;
+  }
+
+  if (ackState === "UNREADABLE") dependencies.report("ENFORCE_ACK_UNREADABLE");
 
   if (!request.closed.handoffCreated) {
     dependencies.report("ENFORCE_NO_REVIEW");
