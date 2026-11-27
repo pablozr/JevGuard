@@ -56,23 +56,37 @@ export {
   versionDoctorCheck,
 } from "./host-cli";
 export type {
+  EnforceAckReadResult,
+  EnforceAckRecord,
+  EnforceAckWriteStatus,
   EnforceSettingsWarning,
   EnforceUserSettings,
   EnforceUserSettingsInvalidReason,
   EnforceUserSettingsResult,
+  LocalEnforceAckStore,
+  LocalEnforceAckStoreDependencies,
   UserEnforceSettingsDependencies,
 } from "./enforce";
 export {
+  createLocalEnforceAckStore,
   createUserEnforceSettings,
+  DEFAULT_ACKS_MAX_BYTES,
+  DEFAULT_ACKS_MAX_RECORDS,
   enabledEnforceSettings,
   ENFORCE_BUILT_IN_CHECK_IDS,
   ENFORCE_DEFAULT_BUDGET_MS,
   ENFORCE_MAX_BUDGET_MS,
   ENFORCE_MIN_BUDGET_MS,
   ENFORCE_SECTION_KEY,
+  isAckRecord,
   isEnforceRuleId,
   loadEnforceUserSettings,
+  MAX_ACK_FIELD_LENGTH,
+  MAX_ACK_RULE_IDS,
+  parseAckRecord,
+  resolveEnforceAcksFilePath,
   resolveEnforceUserSettings,
+  serializeAckRecord,
 } from "./enforce";
 export type {
   FeedbackReadResult,

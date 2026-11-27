@@ -23,6 +23,8 @@ export const USAGE = [
   "       jevguard rules check --diff <file|-> [--task <text>] [--rule <id>] [--json]",
   "       jevguard feedback [--json]",
   "       jevguard feedback <number> <right|wrong>",
+  "       jevguard ack",
+  "       jevguard ack <number>",
   "",
   "`jev-init` and `jevguard-rules` are OpenCode skills, not CLI commands. Register",
   "the plugin in opencode.json (or run `jevguard init`) and invoke them from",

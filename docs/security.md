@@ -192,6 +192,26 @@ atomically to one line per answered FAIL with its latest decision, keeping at mo
 safe to delete at any time. It does not change policy, thresholds, outcomes, or any Jev
 call; it only feeds the calibration printed by `jevguard report`.
 
+## Local enforce acknowledgements
+
+`jevguard ack` records the units the user accepted a `FAIL` for, so the opt-in enforce
+gate will stop blocking them once it consults the ledger (that wiring lands on its
+own; the command already records). The ledger lives under the same data directory and
+permissions as the review history:
+
+```text
+<XDG_DATA_HOME or ~/.local/share>/jevguard/enforce-acks.jsonl
+```
+
+Each line has exactly three fields: `turnId` (the unit code), `ruleIds` (the blocking
+rule IDs, at most 32 per line) and `timestamp`. It never stores a rule text, task,
+diff, finding, file path, file content, or credential. The file is local-only, bounded
+to 256 KB (past that it is rewritten atomically, keeping the newest 1000 lines), and
+safe to delete at any time. `jevguard ack <number>` refuses to run off an interactive
+terminal (listing runs anywhere) and has no flag that skips the confirmation, so an
+agent shell cannot acknowledge a unit on the user's behalf. An acknowledgement changes
+nothing in the review, the rule or the finding; it only silences the gate for that unit.
+
 ## Rule authoring skill
 
 The package ships two OpenCode skills with private validators: `jevguard-rules` to

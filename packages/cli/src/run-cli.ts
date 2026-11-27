@@ -1,4 +1,12 @@
 import type { HostInstallOutcome } from "@jevguard/node-infra";
+import { parseAckArguments } from "./ack/arguments";
+import {
+  ACK_FAILURE_MESSAGE,
+  ACK_USAGE,
+  describeAckError,
+  describeAckList,
+  describeAckRecorded,
+} from "./ack/messages";
 import { parseHostCommandArguments } from "./arguments";
 import { parseCheckArguments } from "./check/arguments";
 import {
@@ -71,13 +79,16 @@ import type { CliDependencies, CliIO } from "./types";
  * Dispatches the `jevguard` CLI: `login`, `install [--project] [--host <id>]`,
  * `setup [--host <id>] [--project] [--init] [--yes] [--agent-delivery]`, `report [--json]`,
  * `doctor [--json] [--host <id>]`, `feedback [--json]`, `feedback <number> <right|wrong>`,
- * `rules check --diff <file|-> ...`, and `check --range <base>..<head> ...`. Any other
+ * `ack`, `ack <number>`, `rules check --diff <file|-> ...`, and
+ * `check --range <base>..<head> ...`. Any other
  * command, argument, or secret-looking argument yields usage and a nonzero exit, and no
  * argument value is ever echoed. `rules check` exits 0 (clean), 1 (a rule failed),
  * or 2 (it could not complete, including invalid arguments). `check` exits 0 (pass or
  * warnings), 1 (an error-severity rule failed, or a not-judged commit with `--strict`),
  * or 2 (it could not run). `feedback` exits 0
- * (listed or recorded), 1 (invalid input), or 2 (local storage failed).
+ * (listed or recorded), 1 (invalid input), or 2 (local storage failed). `ack` exits 0
+ * (listed or acknowledged), 1 (invalid arguments, declined, out-of-range number, or off
+ * a terminal), or 2 (the history or ledger could not be read or written).
  */
 export async function runCli(
   argv: readonly string[],
@@ -128,8 +139,58 @@ export async function runCli(
     return runFeedback(argv.slice(1), io, dependencies);
   }
 
+  if (argv[0] === "ack") {
+    return runAck(argv.slice(1), io, dependencies);
+  }
+
   io.writeErr(USAGE);
   return 1;
+}
+
+async function runAck(
+  args: readonly string[],
+  io: CliIO,
+  dependencies: CliDependencies,
+): Promise<number> {
+  const parsed = parseAckArguments(args);
+
+  if (parsed.kind === "USAGE") {
+    io.writeErr(ACK_USAGE);
+
+    return 1;
+  }
+
+  try {
+    if (parsed.kind === "LIST") {
+      const result = await dependencies.ackList();
+
+      if (result.status !== "LISTED") {
+        io.writeErr(ACK_FAILURE_MESSAGE);
+
+        return 2;
+      }
+
+      io.writeOut(describeAckList(result, new Date()));
+
+      return 0;
+    }
+
+    const result = await dependencies.ack(parsed.number);
+
+    if (result.status === "RECORDED") {
+      io.writeOut(describeAckRecorded(result));
+
+      return 0;
+    }
+
+    io.writeErr(describeAckError(result.status));
+
+    return result.status === "READ_FAILED" || result.status === "WRITE_FAILED" ? 2 : 1;
+  } catch {
+    io.writeErr(ACK_FAILURE_MESSAGE);
+
+    return 2;
+  }
 }
 
 async function runFeedback(

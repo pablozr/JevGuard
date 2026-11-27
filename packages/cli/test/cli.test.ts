@@ -13,6 +13,7 @@ import type {
   ReviewHistoryRecord,
 } from "@jevguard/node-infra";
 import { describe, expect, test } from "vitest";
+import type { AckListResult, AckResult } from "../src/ack/types";
 import type { CheckRequest, CheckResult } from "../src/check/types";
 import type { DoctorReport, DoctorRun } from "../src/doctor/types";
 import type {
@@ -166,6 +167,24 @@ class StubDependencies implements CliDependencies {
     timestamp: new Date(Date.now() - 3 * 3_600_000).toISOString(),
     violationProbability: 0.91,
   };
+  ackListResult: AckListResult = {
+    status: "LISTED",
+    total: 1,
+    items: [
+      {
+        number: 1,
+        turnId: "claude-code:session-1:0123456789abcdef:0",
+        ruleIds: ["SECRETS-001"],
+        timestamp: new Date(Date.now() - 5 * 60_000).toISOString(),
+      },
+    ],
+  };
+  ackResult: AckResult = {
+    status: "RECORDED",
+    turnId: "claude-code:session-1:0123456789abcdef:0",
+    ruleIds: ["SECRETS-001"],
+  };
+  readonly ackRequests: number[] = [];
   readonly setupRequests: SetupRequest[] = [];
   setupResult: SetupResult = { status: "APPLIED", lines: ["setup done"] };
   readonly initRequests: InitRequest[] = [];
@@ -251,6 +270,16 @@ class StubDependencies implements CliDependencies {
     return this.feedbackError === null
       ? Promise.resolve(this.feedbackMarkResult)
       : Promise.reject(this.feedbackError);
+  }
+
+  ackList(): Promise<AckListResult> {
+    return Promise.resolve(this.ackListResult);
+  }
+
+  ack(number: number): Promise<AckResult> {
+    this.ackRequests.push(number);
+
+    return Promise.resolve(this.ackResult);
   }
 
   setup(request: SetupRequest): Promise<SetupResult> {
@@ -1135,6 +1164,80 @@ describe("runCli feedback", () => {
 
     expect(io.err.join("\n")).toContain("jevguard feedback [--json]");
     expect(io.err.join("\n")).toContain("jevguard feedback <number> <right|wrong>");
+  });
+});
+
+describe("runCli ack", () => {
+  test("lists the units a FAIL could block", async () => {
+    const { io, dependencies } = harness();
+
+    const exitCode = await runCli(["ack"], io, dependencies);
+    const output = io.out.join("\n");
+
+    expect(exitCode).toBe(0);
+    expect(io.err).toEqual([]);
+    expect(output).toContain("SECRETS-001");
+    expect(output).toContain("claude-code:session-1:0123456789abcdef:0");
+    expect(output).toContain("jevguard ack 1");
+  });
+
+  test("acknowledges one number", async () => {
+    const { io, dependencies } = harness();
+
+    const exitCode = await runCli(["ack", "1"], io, dependencies);
+
+    expect(exitCode).toBe(0);
+    expect(dependencies.ackRequests).toEqual([1]);
+    expect(io.out.join("\n")).toContain("Acknowledged unit");
+  });
+
+  test("uses a nonzero exit for a decline and for storage failures", async () => {
+    const { io, dependencies } = harness();
+
+    dependencies.ackResult = { status: "DECLINED" };
+    expect(await runCli(["ack", "1"], io, dependencies)).toBe(1);
+
+    dependencies.ackResult = { status: "NOT_INTERACTIVE" };
+    expect(await runCli(["ack", "1"], io, dependencies)).toBe(1);
+    expect(io.err.join("\n")).toContain("interactive terminal");
+
+    dependencies.ackResult = { status: "READ_FAILED" };
+    expect(await runCli(["ack", "1"], io, dependencies)).toBe(2);
+
+    dependencies.ackResult = { status: "WRITE_FAILED" };
+    expect(await runCli(["ack", "1"], io, dependencies)).toBe(2);
+  });
+
+  test("refuses flags, unknown arguments and zero without calling anything", async () => {
+    const { io, dependencies } = harness();
+
+    for (const args of [
+      ["ack", "--yes"],
+      ["ack", "0"],
+      ["ack", "1", "2"],
+    ]) {
+      expect(await runCli(args, io, dependencies)).toBe(1);
+    }
+
+    expect(dependencies.ackRequests).toEqual([]);
+    expect(io.err.join("\n")).toContain("jevguard ack <number>");
+  });
+
+  test("exits 2 when a dependency throws, without echoing it", async () => {
+    const { io, dependencies } = harness();
+    dependencies.ackList = () => Promise.reject(new Error("SECRET_VALUE"));
+
+    expect(await runCli(["ack"], io, dependencies)).toBe(2);
+    expect(io.err.join("\n")).toContain("Could not complete the ack command.");
+    expect(io.err.join("\n")).not.toContain("SECRET_VALUE");
+  });
+
+  test("lists ack in the top-level usage", async () => {
+    const { io, dependencies } = harness();
+
+    await runCli(["bogus"], io, dependencies);
+
+    expect(io.err.join("\n")).toContain("jevguard ack");
   });
 });
 

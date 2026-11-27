@@ -993,6 +993,22 @@ A hook is silent in every case except that one: the JSON
 `{"decision":"block","reason":"…"}` is the only thing a hook ever writes to stdout, and
 it is written once, synchronously, before the process exits.
 
+Only the user can accept a `FAIL` for one unit. `jevguard ack` lists the units a block
+could affect (newest first and numbered from the local review history) and
+`jevguard ack <number>` records the chosen one after an explicit confirmation. The
+acknowledgement ledger is
+`<XDG_DATA_HOME or ~/.local/share>/jevguard/enforce-acks.jsonl`: it keeps the unit code,
+the blocking rule IDs and the timestamp, nothing else, and it is bounded (it rewrites
+itself once it passes 256 KB, keeping the newest 1000 records, and at most 32 rule IDs
+per line). The gate does not consult the ledger yet: today `jevguard ack` only records,
+and once that wiring lands an acknowledged unit is not blocked again and the hook
+records `ENFORCE_ACKED` instead. Only
+`jevguard ack <number>` requires an interactive terminal: it has no non-interactive
+form and no flag skips the confirmation, so an agent shell cannot acknowledge a unit on
+your behalf (listing runs anywhere, including a non-interactive shell). An
+acknowledgement changes nothing in the review, the rule or the finding — it only
+silences the gate for that unit.
+
 The file is read by the worker and, for enforce, by the `Stop` hook itself.
 `XDG_CONFIG_HOME` is used only when it is an absolute
 path; otherwise `USERPROFILE` and then `HOME` plus `.config`. It is refused when its

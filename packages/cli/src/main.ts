@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { performAck, performAckList } from "./ack/perform";
 import { performCheck } from "./check/perform";
 import { performDoctor } from "./doctor/perform";
 import { performFeedbackList, performFeedbackMark } from "./feedback/perform";
@@ -29,6 +30,8 @@ const exitCode = await runCli(process.argv.slice(2), io, {
   rulesCheck: performRulesCheck,
   feedbackList: performFeedbackList,
   feedbackMark: performFeedbackMark,
+  ackList: performAckList,
+  ack: performAck,
 });
 
 process.exitCode = exitCode;
