@@ -131,6 +131,21 @@ describe("enforceStop", () => {
     expect(reports).toEqual(["ENFORCE_TIMEOUT"]);
   });
 
+  test("an allowlist of built-ins only never burns the wait budget", async () => {
+    const { dependencies, reports, waited } = harness({
+      settingsFor: () => ({
+        status: "ENABLED",
+        settings: { rules: [], budgetMs: 8000 },
+        warnings: ["BUILT_IN_CANNOT_BLOCK"],
+      }),
+    });
+    const decision = await enforceStop({ event: stop(), closed: CLOSED }, dependencies);
+
+    expect(decision).toBeNull();
+    expect(waited).toEqual([]);
+    expect(reports).toEqual(["ENFORCE_NO_ELIGIBLE_RULES"]);
+  });
+
   test("a session the host did not positively call interactive never blocks", async () => {
     for (const values of [
       { CLAUDE_CODE_SESSION_ATTENDED: "0" },
