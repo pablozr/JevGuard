@@ -788,7 +788,8 @@ Enforce is accepted ([ADR 0022](./docs/adr/0022-enforce-fail-via-stop-hook.md)) 
 implemented behind the user's own opt-in: Claude Code only, opt-in in the user's
 `claude-code.yaml`, interactive sessions only, `error` rules from the user's allowlist
 (the pilot uses `SECRETS-001` and `DESTRUCTIVE-001`), one block per unit, an 8 s budget,
-never a built-in, coexisting with remediation delivery, and `jevguard ack` as the
+never a built-in, coexisting with remediation delivery (`delivery: agent` included,
+neither suppressing the other), and `jevguard ack` as the
 user's per-unit override (that command is the remaining piece). The `Stop` hook now
 applies the decision: it waits, at most the budget and never past its own allowance, for
 the review the worker records for the closing unit, and a review that does not settle,
